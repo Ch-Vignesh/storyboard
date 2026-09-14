@@ -3,15 +3,15 @@
  *
  *   pnpm db:seed
  *
- * Phase 0 seeds reference data only (genres). Later phases add example
- * storyboards under prisma/seed/storyboards/, each flagged `isSeed` and owned
- * by the platform account so they are never mistaken for the work of a real
- * writer (FR-15.3).
+ * Seeds reference data (genres, FR-15.6) and the example storyboards under
+ * prisma/seed/storyboards/, each flagged `isSeed` and owned by the platform
+ * account so they are never mistaken for the work of a real writer (FR-15.3).
  */
 import { loadRootEnv } from '@storyboard/config/env'
 
 import { createPrismaClient } from '../../src/client'
 import { GENRES } from './genres'
+import { seedExampleStoryboard } from './storyboards'
 
 loadRootEnv()
 
@@ -29,6 +29,9 @@ async function main(): Promise<void> {
       if (!before) created += 1
     }
     console.warn(`genres: ${String(GENRES.length)} ensured, ${String(created)} new`)
+
+    const example = await seedExampleStoryboard(prisma)
+    console.warn(`example storyboard: ${example}`)
   } finally {
     await prisma.$disconnect()
   }

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { SessionProvider } from 'next-auth/react'
 import { Archivo, Courier_Prime, Newsreader } from 'next/font/google'
 
 import { TRPCReactProvider } from '@/trpc/client'
@@ -40,7 +41,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       className={`${archivo.variable} ${newsreader.variable} ${courierPrime.variable}`}
     >
       <body>
-        <TRPCReactProvider>{children}</TRPCReactProvider>
+        {/* SessionProvider so onboarding can refresh the token after steps 3
+            and 4 (FR-1.3); server components still read the session directly. */}
+        <SessionProvider>
+          <TRPCReactProvider>{children}</TRPCReactProvider>
+        </SessionProvider>
       </body>
     </html>
   )

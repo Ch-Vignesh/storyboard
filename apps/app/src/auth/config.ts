@@ -13,12 +13,20 @@ export const authConfig = {
     authorized({ auth }) {
       return Boolean(auth?.user)
     },
-    jwt({ token, user }) {
+    jwt({ token, user, trigger, session }) {
       // `user` is only present on sign-in; copy what the session needs into the token.
       if (user) {
         token.id = user.id
         token.username = user.username ?? null
         token.onboarded = user.onboarded ?? false
+      }
+      // Onboarding steps 3 and 4 change facts the token carries. Without this
+      // the proxy would keep redirecting a user who has just finished, until
+      // their token expired. The client calls `update()` after each step.
+      if (trigger === 'update' && session && typeof session === 'object') {
+        const patch = session as { username?: unknown; onboarded?: unknown }
+        if (typeof patch.username === 'string') token.username = patch.username
+        if (typeof patch.onboarded === 'boolean') token.onboarded = patch.onboarded
       }
       return token
     },

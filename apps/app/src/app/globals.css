@@ -1,1 +1,138 @@
 @import '@storyboard/ui/globals.css';
+
+/*
+ * The manuscript surface (NFR-5, architecture section 9).
+ *
+ * Measure is fixed at 62–68 characters, because that is typography rather than
+ * preference. Type size and line height are the two things a reader may adjust;
+ * `ReadingControls` writes these two custom properties onto :root and the
+ * browser reflows. Defaults match the design tokens, so a signed-out guest gets
+ * the intended setting with no JavaScript at all.
+ */
+:root {
+  --reading-type-scale: 1;
+  --reading-line-height: 1.68;
+}
+
+.manuscript {
+  font-family: var(--font-manuscript);
+  font-size: calc(var(--text-manuscript) * var(--reading-type-scale));
+  line-height: var(--reading-line-height);
+  color: var(--color-ink);
+}
+
+.manuscript p {
+  margin-block: 0 1em;
+}
+
+/* A new scene starts flush; continuing prose is indented, as in a printed book. */
+.manuscript p + p {
+  margin-block-start: 0;
+  text-indent: 1.4em;
+}
+
+.manuscript h1,
+.manuscript h2,
+.manuscript h3 {
+  font-weight: 500;
+  margin-block: 1.6em 0.6em;
+}
+
+.manuscript h1 {
+  font-size: 1.35em;
+}
+.manuscript h2 {
+  font-size: 1.2em;
+}
+.manuscript h3 {
+  font-size: 1.08em;
+}
+
+.manuscript blockquote {
+  margin-block: 1em;
+  padding-inline-start: 1.2em;
+  border-inline-start: 2px solid var(--color-rule);
+  color: var(--color-ink-soft);
+}
+
+.manuscript blockquote p + p {
+  text-indent: 0;
+}
+
+/*
+ * A scene break is white space with a mark in it, not a rule across the page.
+ */
+.manuscript .scene-break {
+  border: 0;
+  margin-block: 1.8em;
+  text-align: center;
+}
+
+.manuscript .scene-break::before {
+  content: '* * *';
+  color: var(--color-ink-faint);
+  letter-spacing: 0.4em;
+  font-size: 0.8em;
+}
+
+.manuscript .scene-break + p {
+  text-indent: 0;
+}
+
+/* FR-4.2 — screenplay elements at industry margins, in Courier Prime. */
+.manuscript:has(.sp-scene_heading),
+.manuscript:has(.sp-dialogue) {
+  font-family: var(--font-screenplay);
+}
+
+.manuscript .sp-scene_heading {
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-block: 1.5em 0.5em;
+  text-indent: 0;
+}
+
+.manuscript .sp-action {
+  margin-block: 0 1em;
+  text-indent: 0;
+}
+
+.manuscript .sp-character {
+  margin-inline-start: 38%;
+  margin-block: 1em 0;
+  text-transform: uppercase;
+  text-indent: 0;
+}
+
+.manuscript .sp-parenthetical {
+  margin-inline-start: 30%;
+  margin-block: 0;
+  text-indent: 0;
+}
+
+.manuscript .sp-dialogue {
+  margin-inline: 22% 22%;
+  margin-block: 0 1em;
+  text-indent: 0;
+}
+
+.manuscript .sp-transition {
+  text-align: right;
+  text-transform: uppercase;
+  margin-block: 1em;
+  text-indent: 0;
+}
+
+/* The editor writes into the same surface, so what you type is what you read. */
+.manuscript .ProseMirror {
+  outline: none;
+  min-height: 60vh;
+}
+
+.manuscript .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-ink-faint);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

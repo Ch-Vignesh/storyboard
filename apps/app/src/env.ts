@@ -16,6 +16,8 @@ export const env = createEnv({
     EMAIL_FROM: z.string().min(3),
     RESEND_API_KEY: z.string().min(1).optional(),
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).optional(),
+    /** Dev and test only: the console mailer also appends each message here. */
+    MAIL_LOG_FILE: z.string().min(1).optional(),
   },
   client: {
     NEXT_PUBLIC_APP_URL: z.url(),
@@ -31,6 +33,7 @@ export const env = createEnv({
     EMAIL_FROM: process.env.EMAIL_FROM,
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     LOG_LEVEL: process.env.LOG_LEVEL,
+    MAIL_LOG_FILE: process.env.MAIL_LOG_FILE,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     NEXT_PUBLIC_MARKETING_URL: process.env.NEXT_PUBLIC_MARKETING_URL,
   },

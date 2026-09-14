@@ -18,7 +18,8 @@
     "db:validate": "prisma validate",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:seed:demo": "tsx prisma/seed/demo-entry.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "catalog:",
@@ -26,6 +27,7 @@
     "pg": "catalog:"
   },
   "devDependencies": {
+    "@node-rs/argon2": "2.2.1",
     "@storyboard/config": "workspace:*",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",

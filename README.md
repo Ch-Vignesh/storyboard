@@ -46,7 +46,7 @@ cp .env.example .env               # then set AUTH_SECRET (openssl rand -base64 
 docker compose up -d               # local Postgres on :5432
 pnpm db:migrate                    # apply migrations (creates the schema)
 pnpm db:seed                       # reference data (genres)
-pnpm dev                           # app on :3000, marketing site on :3001
+pnpm dev                           # app on :3200, marketing site on :3201
 ```
 
 Without `RESEND_API_KEY`, emails (including the sign-up confirmation link) are

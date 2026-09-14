@@ -62,5 +62,12 @@ export const SOFT_DELETE_GRACE_DAYS = 30
 /** FR-3.1 */
 export const IMPORT_LIMITS = { maxBytes: 5 * 1024 * 1024, maxWords: 300_000 } as const
 
+/**
+ * NFR-5 — reading comfort, as percentages of the manuscript tokens in
+ * packages/ui (19px, line height 1.68). Decision 0009.
+ */
+export const READING_TYPE_SCALE = { min: 85, max: 150, default: 100, step: 5 } as const
+export const READING_LINE_HEIGHT = { min: 140, max: 210, default: 168, step: 7 } as const
+
 /** FR-12.4 */
 export const QUIET_REQUEST_NUDGE_DAYS = 7

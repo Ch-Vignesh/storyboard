@@ -14,25 +14,25 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Phase**        | 0 — Foundations                                                                                                                                                                                                                                                    |
-| **State**        | Complete and verified locally against a real Postgres 16. One criterion (green CI) waits on the first push.                                                                                                                                                        |
-| **Last updated** | 2026-09-12                                                                                                                                                                                                                                                         |
-| **Next actions** | 1. Create the GitHub repository, push `main`, confirm the CI workflow is green. 2. Set up hosting accounts (see the checklist at the end); at minimum Neon, so `DATABASE_URL` exists outside this machine. 3. Decide OD-4. 4. Begin Phase 1, task 1 (`lib/authz`). |
+|                  |                                                                                                                                                                                                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 2 — The loop                                                                                                                                                                                                                                                                     |
+| **State**        | Phases 1 and 2 are both code complete and verified locally against a real Postgres 16.14: every check passes and all eleven flow tests pass against a production build. Neither is committed — the user reviews first.                                                           |
+| **Last updated** | 2026-09-14                                                                                                                                                                                                                                                                       |
+| **Next actions** | 1. Review and commit phases 1 and 2; confirm CI stays green with the flow tests in it. 2. Set up hosting accounts (see the checklist at the end); at minimum Neon, so `DATABASE_URL` exists outside this machine. 3. Begin Phase 3, which needs no open decision resolved first. |
 
 ## Overview
 
-| Phase | Name                   | Requirements                                                                          | Estimate  | Status                                        |
-| ----- | ---------------------- | ------------------------------------------------------------------------------------- | --------- | --------------------------------------------- |
-| 0     | Foundations            | FR-1.3 (steps 1–2), FR-1.4, FR-1.6, NFR-3, NFR-8, NFR-9                               | 1 week    | `[x]` code and local verification; CI pending |
-| 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[ ]`                                         |
-| 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[ ]`                                         |
-| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[ ]`                                         |
-| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[ ]`                                         |
-| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[ ]`                                         |
-| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[ ]`                                         |
-| 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[ ]`                                         |
+| Phase | Name                   | Requirements                                                                          | Estimate  | Status                               |
+| ----- | ---------------------- | ------------------------------------------------------------------------------------- | --------- | ------------------------------------ |
+| 0     | Foundations            | FR-1.3 (steps 1–2), FR-1.4, FR-1.6, NFR-3, NFR-8, NFR-9                               | 1 week    | `[x]` complete, CI green 2026-09-14  |
+| 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[x]` code complete, awaiting review |
+| 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` code complete, awaiting review |
+| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[ ]`                                |
+| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[ ]`                                |
+| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[ ]`                                |
+| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[ ]`                                |
+| 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[ ]`                                |
 
 Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 
@@ -63,7 +63,7 @@ Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 ### Exit criteria (from `03-build-plan.md`)
 
 - [x] A signed-in user exists in the database. _Verified 2026-09-12 against the production build: sign-up → link from the console mailer → set password → credentials sign-in → session with the user id; the row has `emailVerifiedAt` set and an `$argon2id$` hash; the link was single-use; a resend inside 60 s returned `cooldown`; a wrong password was refused._
-- [ ] `pnpm test` and `pnpm build` pass in CI. _Both pass locally (35 tests across four suites; both apps build). Tick after the first green run on GitHub._
+- [x] `pnpm test` and `pnpm build` pass in CI. _Green on the first push, 2026-09-14 (workflow run 1 on `main`)._
 - [x] A revision `UPDATE` raises. _`packages/db/src/__tests__/invariants.test.ts` passes against Postgres 16.14: UPDATE and DELETE refused with the NFR-3 message; DELETE permitted only inside a transaction that set the hard-delete flag._
 - [x] The vocabulary linter catches the word "merge" in a test fixture. _`scripts/check-vocabulary.test.ts`, nine tests._
 
@@ -82,32 +82,45 @@ Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 
 **Goal.** A writer can create a storyboard, write a three-chapter story, reorder it, see every revision and restore one. Nothing about contribution exists yet and that is correct.
 
-**Resolve first:** OD-4 (does history written while private become visible on going public?). The schema already carries `Storyboard.publicFrom` for the "hide pre-switch history" answer; if the decision is "expose everything", drop the column in the Phase 1 migration.
+**Resolved:** OD-4 — pre-switch history stays private. `Storyboard.publicFrom` is kept and no column was dropped. See decision 0007.
 
 ### Tasks, in order
 
-1. [ ] `lib/authz`: `can(actor, action, resource)` backed by the matrix in `01-srs.md` §3.2 as a table, one unit test per cell; `assertCan()`; `authorProcedure` (owner or co-author) in tRPC (architecture §7). Private storyboards return 404, not 403, to strangers.
-2. [ ] Onboarding steps 3–4: choose an immutable username with the permanence warning, pin at least three genres (FR-1.3); `user.chooseUsername`, `user.pinGenres`; `onboardedAt` set; proxy sends half-onboarded users back to the step they left.
-3. [ ] Guest reading of public storyboards with a persistent "sign in to help" affordance (FR-1.2).
-4. [ ] `storyboard.create` with title, type, 1–3 genres, visibility; publicId and slug; the honest copying copy on the visibility selector (FR-2.1, FR-13.6 wording). New storyboard gets one main version, one chapter, one empty section (FR-2.2).
-5. [ ] Chapters and sections: create, rename, delete, drag reorder rewriting `order` in one transaction (FR-2.3); split at cursor and join with the section above using `mergedIntoId` (FR-2.4).
-6. [ ] Document model: restricted ProseMirror/TipTap schema (`doc`, `paragraph`, `heading` 1–3, `blockquote`, `scene_break`, `hard_break`; marks `em`, `strong`, `strike`) with paste filtering (FR-4.1); screenplay node set for screenplay-type storyboards (FR-4.2); `contentText` and word count derived on write, never edited (FR-4.3); `contentHash` (sha256) on every revision write (FR-13.6, first half).
-7. [ ] Editor: autosave to `SectionDraft` after 3 s of inactivity; durable revision on blur, navigation, or 5 minutes (FR-4.4); opening someone else's section creates a private draft, never touches their content (FR-4.5); toolbar limited to italic, bold, blockquote, scene break with shortcuts (FR-4.6); live word count with the 2000-word soft warning (FR-2.5).
-8. [ ] History panel: revision list with author, date, source; one-tap comparison against the head (FR-8.3) — the comparison view itself arrives in Phase 2, so this ships with a placeholder that lists both revisions. Restore creates a new revision with `restoredFromId` (FR-8.4). Immutability holds (FR-8.2).
-9. [ ] Reader view: contents rail, manuscript at 62–68 ch measure in Newsreader, adjustable type size and line height persisted per user (NFR-5); chapter-by-chapter payloads so a 120k-word manuscript never ships whole (NFR-1). No margin yet.
-10. [ ] Storyboard settings: visibility switch with `publicFrom` (FR-2.7, per OD-4); soft delete with the 30-day grace and the confirmation naming affected contributors (FR-2.6); rights note free text (FR-14.5).
-11. [ ] Dashboard region one: storyboards you are writing (FR-11.1 partial).
-12. [ ] Playwright flows 1 and 2 (architecture §8): sign up → verify → onboard → dashboard; create storyboard → write a section → (request creation is Phase 2; stop at the section).
-13. [ ] Seed: one example storyboard from a public-domain text under the platform account, flagged `isSeed` (FR-15.2, FR-15.3), so the reader view has something real to render.
+1. [x] `lib/authz`: `can(actor, action, resource)` backed by the matrix in `01-srs.md` §3.2 as a table, one unit test per cell; `assertCan()`; `authorProcedure` (owner or co-author) in tRPC (architecture §7). Private storyboards return 404, not 403, to strangers. _(2026-09-14)_
+2. [x] Onboarding steps 3–4: choose an immutable username with the permanence warning, pin at least three genres (FR-1.3); `user.chooseUsername`, `user.pinGenres`; `onboardedAt` set; proxy sends half-onboarded users back to the step they left. _(2026-09-14)_
+3. [x] Guest reading of public storyboards with a persistent "sign in to help" affordance (FR-1.2). _(2026-09-14)_
+4. [x] `storyboard.create` with title, type, 1–3 genres, visibility; publicId and slug; the honest copying copy on the visibility selector (FR-2.1, FR-13.6 wording). New storyboard gets one main version, one chapter, one empty section (FR-2.2). _(2026-09-14)_
+5. [x] Chapters and sections: create, rename, delete, drag reorder rewriting `order` in one transaction (FR-2.3); split at cursor and join with the section above using `mergedIntoId` (FR-2.4). _(2026-09-14)_
+6. [x] Document model: restricted ProseMirror/TipTap schema (`doc`, `paragraph`, `heading` 1–3, `blockquote`, `scene_break`, `hard_break`; marks `em`, `strong`, `strike`) with paste filtering (FR-4.1); screenplay node set for screenplay-type storyboards (FR-4.2); `contentText` and word count derived on write, never edited (FR-4.3); `contentHash` (sha256) on every revision write (FR-13.6, first half). _(2026-09-14)_
+7. [x] Editor: autosave to `SectionDraft` after 3 s of inactivity; durable revision on blur, navigation, or 5 minutes (FR-4.4); opening someone else's section creates a private draft, never touches their content (FR-4.5); toolbar limited to italic, bold, blockquote, scene break with shortcuts (FR-4.6); live word count with the 2000-word soft warning (FR-2.5). _(2026-09-14)_
+8. [x] History panel: revision list with author, date, source; one-tap comparison against the head (FR-8.3) — the comparison view itself arrives in Phase 2, so this ships with a placeholder that lists both revisions. Restore creates a new revision with `restoredFromId` (FR-8.4). Immutability holds (FR-8.2). _(2026-09-14)_
+9. [x] Reader view: contents rail, manuscript at 62–68 ch measure in Newsreader, adjustable type size and line height persisted per user (NFR-5); chapter-by-chapter payloads so a 120k-word manuscript never ships whole (NFR-1). No margin yet. _(2026-09-14)_
+10. [x] Storyboard settings: visibility switch with `publicFrom` (FR-2.7, per OD-4); soft delete with the 30-day grace and the confirmation naming affected contributors (FR-2.6); rights note free text (FR-14.5). _(2026-09-14)_
+11. [x] Dashboard region one: storyboards you are writing (FR-11.1 partial). _(2026-09-14)_
+12. [x] Playwright flows 1 and 2 (architecture §8): sign up → verify → onboard → dashboard; create storyboard → write a section → (request creation is Phase 2; stop at the section). Plus guest reading, the 404-on-private rule, and the NFR-1 reader measurement: eight tests in all. _(2026-09-14)_
+13. [x] Seed: one example storyboard from a public-domain text under the platform account, flagged `isSeed` (FR-15.2, FR-15.3), so the reader view has something real to render. _(2026-09-14)_
 
 ### Exit criteria
 
-- [ ] Write a three-chapter story, reorder it, see every revision, restore one.
-- [ ] Reader view renders 120,000 words without a frame drop.
-- [ ] Every cell of the permission matrix has a passing test; a signed-in stranger gets 404 on a private storyboard at every route including the API.
-- [ ] Nothing about contribution exists yet.
+- [x] Write a three-chapter story, reorder it, see every revision, restore one. _Verified against Postgres 16.14: the seeded example is three chapters and eleven sections; `chapter.reorder` and `section.reorder` rewrite every sibling in one transaction; the history panel lists each version with its author, date and source, and restore appends a new revision carrying `restoredFromId`._
+- [x] Reader view renders 120,000 words without a frame drop. _Measured, not assumed: `e2e/reader-performance.spec.ts` builds a real 24-chapter, 120,000-word storyboard and asserts the first response carries roughly one chapter rather than the book, that first contentful paint is inside NFR-1's 1.2 s budget, and that changing chapter produces no main-thread task long enough to drop a frame (Long Tasks API). Loopback with no throttling is a floor rather than NFR-1's 3G-fast condition, so the throttled measurement stays on the phase 7 performance pass._
+- [x] Every cell of the permission matrix has a passing test; a signed-in stranger gets 404 on a private storyboard at every route including the API. _60 cells, one test each, in `lib/authz/matrix.test.ts` (96 tests in the file). The 404 rule is also a flow test: a signed-in stranger and a guest both get 404 on the storyboard and on `/settings`, `/contents`, `/c/1/1/edit` and `/c/1/1/history`._
+- [x] Nothing about contribution exists yet. _No request, suggestion, idea or credit router. The two places phase 2 will hook into are marked with `TODO(phase 2, …)` and named in the notes below._
 
 ### Notes
+
+- **Task order.** The document model (task 6) was built before `storyboard.create` (task 4), because creating a storyboard has to write an empty section, and an empty section needs a canonical document, a word count and a content hash. Everything else ran in the order the plan gives.
+- **Two schema changes, both with a migration and a decision record.**
+  - `20260914151718_chapter_and_section_tombstones` adds `deletedAt` to `Chapter` and `Section`. FR-8.2 allows exactly two hard deletes in this product and a structural delete is neither of them, so deleting a chapter or section is a tombstone, like FR-2.4's merge. Decision 0008.
+  - `20260914152253_reading_preferences` adds `readingTypeScale` and `readingLineHeight` to `User`. NFR-5 says "persisted per user", which `localStorage` is not. Decision 0009.
+- **OD-4 is decision 0007.** The rule lives in `lib/authz` in two forms that have to agree — `canReadRevisionAt` for one revision and `revisionVisibilityWhere` as a Prisma fragment — and a test asserts they do. `publicFrom` means "the first instant this was public" and is never cleared.
+- **The editor names nodes as the SRS does.** TipTap defaults to `bold`, `italic` and `hardBreak`; FR-4.1 specifies `strong`, `em` and `hard_break`. The three extensions are renamed rather than translated on the way in and out, so `contentJson` is one format everywhere. `tiptap.test.ts` holds the editor schema and the Zod schema to the same set, and fails if either grows a node.
+- **A concurrency bug the flow tests caught.** Clicking "Save now" blurs the editor, so the blur handler and the click handler both opened a transaction on the same section row and deadlocked. Saves are now single-flight.
+- **Hooks left for phase 2**, both marked in the code: `storyboard.setVisibility` does not yet close open requests when going private (FR-2.7), and `section.restoreRevision` does not yet flip `Credit.isLive` or notify (FR-8.5). Neither has anything to act on until requests and credits exist.
+- **The comparison placeholder.** FR-8.3's one-tap comparison names both versions and their word counts and hashes; the side-by-side view is phase 2 task 2 and the panel says so rather than implying a diff it cannot compute.
+- **Flow tests need a database and a build**, so `pnpm e2e` builds the application and starts it. The console mailer appends to `MAIL_LOG_FILE` when set, which is how the sign-up flow reads its own verification link — it can only run when `RESEND_API_KEY` is unset, which is what selects that mailer in the first place.
+- **Guest reading (task 3)** has no screen of its own: it is the reader with a "sign in to help" affordance and no authoring controls, which is what FR-1.2 asks for. A flow test covers it.
+- **This machine still has no Docker or `psql`.** Phase 1 was verified against a throwaway embedded Postgres 16.14 on port 55432, outside the repository; migrations were applied from scratch into a clean database and reported no drift. Nothing about it is committed.
 
 ---
 
@@ -115,28 +128,39 @@ Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 
 **Goal.** The heart of the product: a request, a suggestion, a comparison, an acceptance, a credit — and a second suggestion that goes stale, is rebased and accepted too.
 
-**Resolve first:** OD-5 (is one "helped" idea per request enough?).
+**Resolved:** OD-5 — one credited idea per request, as FR-6.9 is written, enforced by a partial unique index. See decision 0010.
 
 ### Tasks, in order
 
-1. [ ] **`packages/compare` first, in isolation.** Pure `compare(base, target)` per architecture §4: paragraph LCS on normalised hashes, Dice-on-bigrams pairing at 0.45, rewrite mode below 0.30 alignment, `diffWordsWithSpace` marks, never below the word (FR-7.2, FR-7.3). Constants in one file with the rationale comment. Fixture corpus: light copy-edit, heavy edit, full rewrite, reordered paragraphs, added scene; snapshot the stats (architecture §8). Under 400 ms for 2000 words (NFR-2).
-2. [ ] Comparison view: side by side, scroll-locked, toggle to read-through; rewrite banner; four-count summary bar; `<del>` struck and `<ins>` underlined in blue pencil, never colour-only (FR-7.1, FR-7.4, NFR-4). One component, two revision ids in, no variant code paths (FR-7.5). Server-side cache in `DiffCache` keyed on the two ids (NFR-2).
-3. [ ] Contribution requests: kind picker then a per-kind form; title, 20–500-word ask, 100–500-word pre-context for rewrite/continue, suggested reading rendered inline, tone and character notes, constraints as a checklist; word bounds 150/1000 adjustable within 100–2000; the 150-word target rule per kind; states and reopen (FR-5.1–5.10).
-4. [ ] Suggestions: private draft pre-filled for rewrite, empty for continue; composer with constraints pinned and a live counter; send with an optional 200-word note; `baseRevisionId` recorded; withdraw; states (FR-6.1–6.5).
-5. [ ] `suggestion.accept` exactly as architecture §6.1: serialisable transaction, row lock, conflict on a moved head, new revision with contributor as author and decider as acceptor, others marked stale, credit row, request resolved (FR-6.6, FR-6.7, FR-8.1). Notifications and activity updates after the transaction, never inside.
-6. [ ] Stale handling and rebase: notify, allow revise-and-resend without quota cost; second acceptance keeps both credits (FR-6.7, FR-6.8).
-7. [ ] Pass: no reason required, optional fixed chips, informational notification wording; passed suggestions stay readable and appear on the profile as "written but not used" (FR-6.10, FR-6.11, FR-8.6).
-8. [ ] Ideas for unblock requests: 20–400 words, one level of threading, "helped" marks a credit of type idea per OD-5 (FR-6.9).
-9. [ ] Restore flips `Credit.isLive` for removed text and notifies the contributor (FR-8.5).
-10. [ ] Credits and the contributors strip on every storyboard page (FR-9.1, FR-9.2).
-11. [ ] Structured logs on accept, pass, restore (NFR-7). In-app notification rows for the events above (email arrives in Phase 3).
-12. [ ] Playwright flows 3, 4 and 5.
+1. [x] **`packages/compare` first, in isolation.** Pure `compare(base, target)` per architecture §4: paragraph LCS on normalised hashes, Dice-on-bigrams pairing at 0.45, rewrite mode below 0.30 alignment, `diffWordsWithSpace` marks, never below the word (FR-7.2, FR-7.3). Constants in one file with the rationale comment. Fixture corpus: light copy-edit, heavy edit, full rewrite, reordered paragraphs, added scene; snapshot the stats (architecture §8). Under 400 ms for 2000 words (NFR-2). _(2026-09-14)_
+2. [x] Comparison view: side by side, scroll-locked, toggle to read-through; rewrite banner; four-count summary bar; `<del>` struck and `<ins>` underlined in blue pencil, never colour-only (FR-7.1, FR-7.4, NFR-4). One component, two revision ids in, no variant code paths (FR-7.5). Server-side cache in `DiffCache` keyed on the two ids (NFR-2). _(2026-09-14)_
+3. [x] Contribution requests: kind picker then a per-kind form; title, 20–500-word ask, 100–500-word pre-context for rewrite/continue, suggested reading rendered inline, tone and character notes, constraints as a checklist; word bounds 150/1000 adjustable within 100–2000; the 150-word target rule per kind; states and reopen (FR-5.1–5.10). _(2026-09-14)_
+4. [x] Suggestions: private draft pre-filled for rewrite, empty for continue; composer with constraints pinned and a live counter; send with an optional 200-word note; `baseRevisionId` recorded; withdraw; states (FR-6.1–6.5). _(2026-09-14)_
+5. [x] `suggestion.accept` exactly as architecture §6.1: serialisable transaction, row lock, conflict on a moved head, new revision with contributor as author and decider as acceptor, others marked stale, credit row, request resolved (FR-6.6, FR-6.7, FR-8.1). Notifications and activity updates after the transaction, never inside. _(2026-09-14)_
+6. [x] Stale handling and rebase: notify, allow revise-and-resend without quota cost; second acceptance keeps both credits (FR-6.7, FR-6.8). _(2026-09-14)_
+7. [x] Pass: no reason required, optional fixed chips, informational notification wording; passed suggestions stay readable and appear on the profile as "written but not used" (FR-6.10, FR-6.11, FR-8.6). _(2026-09-14)_
+8. [x] Ideas for unblock requests: 20–400 words, one level of threading, "helped" marks a credit of type idea per OD-5 (FR-6.9). _(2026-09-14)_
+9. [x] Restore flips `Credit.isLive` for removed text and notifies the contributor (FR-8.5). _(2026-09-14)_
+10. [x] Credits and the contributors strip on every storyboard page (FR-9.1, FR-9.2). _(2026-09-14)_
+11. [x] Structured logs on accept, pass, restore (NFR-7). In-app notification rows for the events above (email arrives in Phase 3). _(2026-09-14)_
+12. [x] Playwright flows 3, 4 and 5. _(2026-09-14)_
 
 ### Exit criteria
 
-- [ ] Flows 3, 4 and 5 pass end to end: two accounts, one storyboard, a suggestion accepted, a second gone stale, rebased and accepted, both credits present, the comparison readable on a full rewrite.
+- [x] Flows 3, 4 and 5 pass end to end: two accounts, one storyboard, a suggestion accepted, a second gone stale, rebased and accepted, both credits present, the comparison readable on a full rewrite. _`e2e/flow-3-4-5-the-loop.spec.ts`, run against a production build and a real Postgres 16.14. Eleven flow tests pass in total._
 
 ### Notes
+
+- **The comparison engine is its own package**, `@storyboard/compare`, with no database and no rendering, per architecture section 4. 33 tests over the fixture corpus the architecture asks for — light copy-edit, heavy edit, full rewrite, reordered paragraphs, added scene, plus the empty cases — and an NFR-2 timing test on a 2000-word section.
+- **Two bugs the tests found in the engine itself.**
+  - `normalise` stripped combining marks, because `\p{L}` excludes them. "মেঘ জমেছে" became "ম ঘ জম ছ", which would have made comparison meaningless in Bengali, Devanagari, Arabic, Hebrew and Thai. `\p{M}` is now in the keep set, with a test.
+  - A paragraph whose only change was punctuation aligned as `same` — normalisation is what made them match — so a copy-edit that moved a comma showed as unchanged. A matched pair whose _raw_ text differs is now promoted to `changed` and gets word marks.
+- **OD-5 is decision 0010**, enforced by `one_helpful_idea_per_request`, a partial unique index in the migration of the same name. It sits beside the other two partial indexes, for the same reason: two co-authors deciding at the same instant both pass an application check.
+- **FR-8.5 is now real.** `section.restoreRevision` walks the parent chain of the revision being restored to, marks every credit outside that ancestry `isLive: false`, and notifies the contributor after the transaction. Nothing is deleted — principle 1.3.3.
+- **Three screens were pulled forward from phase 3** because phase 2 creates things that must be reachable: a minimal `/browse` (FR-11.3's filters stay in phase 3), the dashboard's third region (FR-11.1), and a profile at `/@{username}` showing credits (FR-9.3's calendar and the collapsed "written but not used" section stay in phase 3). Each says in its own file what it is missing. The alternative was shipping links that 404.
+- **`/@{username}` is a rewrite.** A folder whose name starts with an at sign is a parallel route slot in the App Router, so the page lives at `/u/{username}` and `next.config.ts` maps the public URL onto it.
+- **Demo data is a separate entry point**, `pnpm db:seed:demo`, never part of `pnpm db:seed`. It creates three accounts that share one published password, so it refuses to run against a non-local database, and the production seed path cannot reach it. It fills every phase 2 screen: three request kinds, a suggestion accepted with its credit, one stale, one passed, a copy-edit whose comparison shows marks, a replacement whose comparison shows read-through, and an idea thread with one idea credited.
+- **Deliberately not built:** email (FR-12.3's batching is phase 3), the seven-day quiet nudge (FR-12.4), and the activity calendar (FR-9.3). Notification _rows_ are written for every event phase 2 produces, so phase 3 has something to send.
 
 ---
 

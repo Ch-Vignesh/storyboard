@@ -36,11 +36,11 @@ jobs:
       CI: 'true'
       DATABASE_URL: postgresql://storyboard:storyboard@localhost:5432/storyboard
       AUTH_SECRET: ci-only-secret-value-never-used-in-production-0123456789
-      AUTH_URL: http://localhost:3000
+      AUTH_URL: http://localhost:3200
       AUTH_TRUST_HOST: 'true'
       EMAIL_FROM: Storyboard <ci@example.com>
-      NEXT_PUBLIC_APP_URL: http://localhost:3000
-      NEXT_PUBLIC_MARKETING_URL: http://localhost:3001
+      NEXT_PUBLIC_APP_URL: http://localhost:3200
+      NEXT_PUBLIC_MARKETING_URL: http://localhost:3201
       NEXT_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
 
@@ -72,8 +72,36 @@ jobs:
       - name: Apply migrations
         run: pnpm db:deploy
 
+      - name: Seed
+        run: pnpm db:seed
+
       - name: Test
         run: pnpm test
 
       - name: Build
         run: pnpm build
+
+      # The critical flows (architecture section 8). They run against the built
+      # application and the Postgres service above, so they are the only check
+      # here that exercises sign-up, the editor and the 404-on-private rule end
+      # to end. `pnpm e2e` builds and starts the server itself.
+      - name: Install Playwright browser
+        run: pnpm --filter @storyboard/app exec playwright install --with-deps chromium
+
+      - name: End-to-end flows
+        run: pnpm e2e
+        env:
+          E2E_PORT: '3100'
+          AUTH_URL: http://localhost:3100
+          NEXT_PUBLIC_APP_URL: http://localhost:3100
+          # The console mailer appends here so the sign-up flow can read its
+          # own verification link (decision 0002).
+          MAIL_LOG_FILE: ${{ runner.temp }}/mail.log
+
+      - name: Upload the flow report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/app/playwright-report
+          retention-days: 7
