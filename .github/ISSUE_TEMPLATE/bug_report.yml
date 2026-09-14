@@ -1,0 +1,31 @@
+name: Bug report
+description: Something does not work the way the spec says it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: requirement
+    attributes:
+      label: Requirement
+      description: The FR or NFR number this violates, if you know it (docs/01-srs.md).
+      placeholder: FR-6.6
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in as ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser and OS

@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storyboard — design prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Courier+Prime&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FBFBF9; --paper-sunk:#F2F2EE; --ink:#11202B; --ink-soft:#55636D;
+  --ink-faint:#8A949C; --rule:#DFE0DA; --pencil:#2B5CA8; --pencil-wash:#E8EEF7;
+  --ochre:#A8571B; --ochre-wash:#F7EEE4; --moss:#2E6B4F; --moss-wash:#E6F0EA;
+  --crimson:#8C2B2B;
+  --ui:"Archivo",system-ui,sans-serif; --ms:"Newsreader",Georgia,serif; --scr:"Courier Prime",monospace;
+  --lift:0 1px 2px rgba(17,32,43,.06),0 6px 18px rgba(17,32,43,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--paper-sunk);color:var(--ink);font-family:var(--ui);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:var(--pencil);text-decoration:none}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--pencil);outline-offset:2px}
+
+/* prototype chrome — deliberately unlike the app */
+.proto{position:sticky;top:0;z-index:50;background:var(--ink);color:#D9DFE3;padding:0 18px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;min-height:46px}
+.proto b{font-weight:600;font-size:13px;letter-spacing:.01em;color:#fff}
+.proto span{font-size:12px;color:#8FA0AC}
+.proto nav{display:flex;gap:2px;margin-left:auto;flex-wrap:wrap}
+.proto nav button{background:none;border:0;padding:6px 11px;border-radius:3px;font-size:13px;color:#A9B7C1}
+.proto nav button:hover{color:#fff;background:rgba(255,255,255,.08)}
+.proto nav button[aria-current="true"]{background:var(--paper);color:var(--ink);font-weight:500}
+
+/* app chrome */
+.app{background:var(--paper);min-height:calc(100vh - 46px)}
+.topbar{display:flex;align-items:center;gap:24px;padding:0 24px;height:56px;border-bottom:1px solid var(--rule);background:var(--paper)}
+.wordmark{font-family:var(--ms);font-size:21px;font-weight:500;letter-spacing:-.01em}
+.topbar .links{display:flex;gap:18px;font-size:14px;color:var(--ink-soft)}
+.topbar .links a:hover{color:var(--ink)}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--pencil-wash);color:var(--pencil);display:grid;place-items:center;font-size:12px;font-weight:600;margin-left:auto}
+
+.screen{display:none}
+.screen.on{display:block}
+
+/* shared bits */
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:2px 8px;border-radius:3px;border:1px solid var(--rule);color:var(--ink-soft);background:var(--paper)}
+.chip.ochre{border-color:#E3C4A4;background:var(--ochre-wash);color:var(--ochre)}
+.chip.moss{border-color:#BCD6C6;background:var(--moss-wash);color:var(--moss)}
+.chip.pencil{border-color:#BED0E8;background:var(--pencil-wash);color:var(--pencil)}
+.btn{border:1px solid var(--rule);background:var(--paper);padding:7px 13px;border-radius:3px;font-size:13.5px}
+.btn:hover{border-color:var(--ink-faint)}
+.btn.primary{background:var(--pencil);border-color:var(--pencil);color:#fff}
+.btn.primary:hover{background:#244E90}
+.btn.accept{background:var(--moss);border-color:var(--moss);color:#fff}
+.btn.accept:hover{background:#255A41}
+.meta{font-size:12.5px;color:var(--ink-faint)}
+h2.sec{font-size:15px;font-weight:600;margin:0 0 12px}
+
+/* ── reader: contents | page | margin ── */
+.reader{display:grid;grid-template-columns:216px minmax(0,1fr) 320px;align-items:start}
+.contents{border-right:1px solid var(--rule);padding:26px 18px 60px;position:sticky;top:102px;max-height:calc(100vh - 102px);overflow:auto}
+.contents h3{font-family:var(--ms);font-size:17px;font-weight:500;margin:0 0 2px}
+.contents .by{font-size:12.5px;color:var(--ink-faint);margin-bottom:18px}
+.toc{list-style:none;margin:0;padding:0;font-size:13.5px}
+.toc li{padding:5px 0;color:var(--ink-soft);display:flex;justify-content:space-between;gap:8px}
+.toc li.ch{margin-top:14px;color:var(--ink);font-weight:500}
+.toc li.ch:first-child{margin-top:0}
+.toc li.open{color:var(--ochre)}
+.toc .dot{width:6px;height:6px;border-radius:50%;background:var(--ochre);flex:none;align-self:center}
+
+.page{padding:40px 56px 120px;max-width:none}
+.page-head{margin-bottom:34px}
+.page-head h1{font-family:var(--ms);font-size:30px;font-weight:500;margin:0 0 6px;letter-spacing:-.01em}
+.page-head .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.chapnum{font-family:var(--ui);font-size:12px;color:var(--ink-faint);margin:44px 0 4px}
+.chaptitle{font-family:var(--ms);font-size:22px;font-weight:500;margin:0 0 20px}
+.ms{font-family:var(--ms);font-size:19px;line-height:1.68;max-width:66ch;color:var(--ink)}
+.ms p{margin:0 0 1.05em;text-indent:1.4em}
+.ms p:first-of-type{text-indent:0}
+.sect{scroll-margin-top:120px;border-radius:2px;transition:background .18s}
+.sect.lit{background:var(--ochre-wash)}
+.sect.stub{border-left:2px solid var(--ochre);padding-left:18px;margin-left:-20px}
+.sect.stub .ms{color:var(--ink-faint);font-style:italic}
+.brk{text-align:center;color:var(--ink-faint);margin:1.6em 0;letter-spacing:.5em}
+
+.margin{padding:40px 24px 120px;position:sticky;top:102px;max-height:calc(100vh - 102px);overflow:auto}
+.margin h2{font-size:12.5px;font-weight:600;color:var(--ink-faint);margin:0 0 14px}
+.mcard{position:relative;background:var(--paper);border:1px solid var(--rule);border-radius:3px;padding:13px 14px;margin-bottom:12px;cursor:pointer;text-align:left;width:100%;display:block;box-shadow:var(--lift)}
+.mcard::before{content:"";position:absolute;left:-24px;top:20px;width:24px;height:1px;background:var(--rule);transition:background .18s,height .18s}
+.mcard:hover,.mcard.lit{border-color:var(--pencil)}
+.mcard:hover::before,.mcard.lit::before{background:var(--pencil);height:2px}
+.mcard .k{font-size:11.5px;color:var(--ochre);font-weight:500;margin-bottom:5px}
+.mcard .t{font-size:14px;font-weight:500;margin-bottom:5px;line-height:1.35}
+.mcard .a{font-size:12.5px;color:var(--ink-soft);line-height:1.45;margin-bottom:9px}
+.mcard .f{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--ink-faint)}
+
+/* ── request + composer ── */
+.two{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:0;align-items:start}
+.pane{padding:34px 40px 90px}
+.pane+.pane{border-left:1px solid var(--rule);background:var(--paper-sunk);min-height:calc(100vh - 102px)}
+.crumb{font-size:12.5px;color:var(--ink-faint);margin-bottom:14px}
+.reqtitle{font-family:var(--ms);font-size:26px;font-weight:500;margin:0 0 10px;line-height:1.25}
+.ask{font-family:var(--ms);font-size:18px;line-height:1.6;color:var(--ink);max-width:62ch}
+.block{margin-top:26px;padding-top:22px;border-top:1px solid var(--rule)}
+.block h3{font-size:12.5px;font-weight:600;color:var(--ink-faint);margin:0 0 10px}
+.ctx{font-family:var(--ms);font-size:16.5px;line-height:1.6;color:var(--ink-soft);max-width:62ch}
+.cons{list-style:none;margin:0;padding:0;font-size:14px}
+.cons li{padding:7px 0 7px 24px;position:relative;border-bottom:1px solid var(--rule)}
+.cons li::before{content:"";position:absolute;left:0;top:12px;width:11px;height:11px;border:1px solid var(--ink-faint);border-radius:2px}
+.resp{display:flex;gap:12px;padding:14px 0;border-bottom:1px solid var(--rule);align-items:flex-start}
+.resp .av{width:30px;height:30px;border-radius:50%;background:var(--paper-sunk);color:var(--ink-soft);display:grid;place-items:center;font-size:11.5px;font-weight:600;flex:none}
+.resp .n{font-size:14px;font-weight:500}
+.resp .e{font-family:var(--ms);font-size:15.5px;color:var(--ink-soft);line-height:1.5;margin-top:3px}
+
+.composer{background:var(--paper);border:1px solid var(--rule);border-radius:3px;box-shadow:var(--lift)}
+.comp-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--rule)}
+.comp-head .ttl{font-size:13.5px;font-weight:500}
+.tools{display:flex;gap:2px;padding:8px 12px;border-bottom:1px solid var(--rule);align-items:center}
+.tools button{border:0;background:none;padding:4px 9px;border-radius:3px;font-size:14px;color:var(--ink-soft)}
+.tools button:hover{background:var(--paper-sunk);color:var(--ink)}
+.tools .i{font-style:italic;font-family:var(--ms)}
+.tools .b{font-weight:600}
+.comp-body{padding:20px 22px;min-height:300px;font-family:var(--ms);font-size:18px;line-height:1.65;color:var(--ink);outline:none}
+.comp-body p{margin:0 0 1em}
+.comp-foot{display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--rule);background:var(--paper-sunk)}
+.counter{font-size:12.5px;color:var(--ink-soft)}
+.counter b{color:var(--moss);font-weight:600}
+.quota{margin-left:auto;font-size:12.5px;color:var(--ink-faint)}
+
+/* ── comparison ── */
+.cmp-bar{display:flex;align-items:center;gap:14px;padding:14px 40px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.stats{display:flex;gap:14px;font-size:12.5px;color:var(--ink-soft);margin-left:auto}
+.stats b{font-weight:600;color:var(--ink)}
+.toggle{display:flex;border:1px solid var(--rule);border-radius:3px;overflow:hidden}
+.toggle button{border:0;background:var(--paper);padding:5px 12px;font-size:13px;color:var(--ink-soft)}
+.toggle button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.cols{display:grid;grid-template-columns:1fr 1fr}
+.col{padding:28px 36px 100px}
+.col+.col{border-left:1px solid var(--rule)}
+.col h4{font-size:12.5px;font-weight:600;color:var(--ink-faint);margin:0 0 16px}
+.col .ms{font-size:17.5px}
+del{color:var(--crimson);text-decoration:line-through;text-decoration-thickness:1px}
+ins{color:var(--pencil);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}
+.para-add{border-left:2px solid var(--pencil);padding-left:14px;margin-left:-16px}
+.para-del{border-left:2px solid var(--crimson);padding-left:14px;margin-left:-16px;opacity:.7}
+.decide{position:sticky;bottom:0;display:flex;align-items:center;gap:10px;padding:14px 40px;border-top:1px solid var(--rule);background:var(--paper)}
+.decide .note{font-size:12.5px;color:var(--ink-faint);margin-left:auto;max-width:34ch;text-align:right;line-height:1.4}
+.banner{display:flex;gap:10px;align-items:flex-start;margin:0 40px 0;padding:12px 14px;background:var(--pencil-wash);border-left:2px solid var(--pencil);font-size:13.5px;color:var(--ink);border-radius:0}
+
+/* ── dashboard ── */
+.dash{max-width:1060px;margin:0 auto;padding:40px 32px 100px}
+.dash h1{font-family:var(--ms);font-size:27px;font-weight:500;margin:0 0 4px}
+.dash .sub{color:var(--ink-faint);font-size:14px;margin-bottom:34px}
+.region{margin-bottom:40px}
+.region-head{display:flex;align-items:baseline;gap:10px;margin-bottom:14px;border-bottom:1px solid var(--rule);padding-bottom:8px}
+.region-head h2{font-size:15px;font-weight:600;margin:0}
+.region-head span{font-size:12.5px;color:var(--ink-faint);margin-left:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:12px}
+.card{border:1px solid var(--rule);border-radius:3px;padding:15px 16px;background:var(--paper);display:block;text-align:left}
+.card:hover{border-color:var(--ink-faint)}
+.card .t{font-family:var(--ms);font-size:18px;font-weight:500;margin-bottom:3px;line-height:1.25}
+.card .b{font-size:12.5px;color:var(--ink-faint);margin-bottom:11px}
+.card .r{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.row{display:flex;gap:12px;align-items:center;padding:13px 2px;border-bottom:1px solid var(--rule);font-size:14px}
+.row .g{flex:1;min-width:0}
+.row .g b{font-weight:500}
+.row .g div{font-size:12.5px;color:var(--ink-faint);margin-top:2px}
+
+/* ── profile ── */
+.prof{max-width:900px;margin:0 auto;padding:44px 32px 100px}
+.prof-head{display:flex;gap:20px;align-items:flex-start;margin-bottom:34px}
+.prof-head .big{width:62px;height:62px;border-radius:50%;background:var(--pencil-wash);color:var(--pencil);display:grid;place-items:center;font-size:22px;font-weight:600;flex:none}
+.prof-head h1{font-family:var(--ms);font-size:26px;font-weight:500;margin:0 0 2px}
+.prof-head .u{font-size:13.5px;color:var(--ink-faint);margin-bottom:8px}
+.prof-head p{font-size:14.5px;color:var(--ink-soft);margin:0;max-width:56ch;line-height:1.5}
+.nums{display:flex;gap:34px;padding:18px 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);margin-bottom:30px}
+.nums div b{display:block;font-family:var(--ms);font-size:25px;font-weight:500;line-height:1.1}
+.nums div span{font-size:12.5px;color:var(--ink-faint)}
+.cal{display:grid;grid-template-rows:repeat(7,10px);grid-auto-flow:column;grid-auto-columns:10px;gap:3px;margin-bottom:8px;overflow-x:auto;padding-bottom:4px}
+.cal i{background:var(--paper-sunk);border-radius:2px;display:block}
+.cal i.l1{background:#CFE0D7}.cal i.l2{background:#9CC4AE}.cal i.l3{background:#5F9B7C}.cal i.l4{background:var(--moss)}
+.credit{display:flex;gap:14px;padding:16px 0;border-bottom:1px solid var(--rule)}
+.credit .mark{width:3px;background:var(--moss);flex:none;border-radius:2px}
+.credit .mark.idea{background:var(--pencil)}
+.credit .h{font-size:14px}
+.credit .h b{font-weight:500}
+.credit .x{font-family:var(--ms);font-size:15.5px;color:var(--ink-soft);line-height:1.5;margin-top:5px;max-width:62ch}
+
+/* ── import ── */
+.imp{max-width:1000px;margin:0 auto;padding:40px 32px 100px}
+.imp h1{font-family:var(--ms);font-size:26px;font-weight:500;margin:0 0 6px}
+.imp .sub{color:var(--ink-soft);font-size:14.5px;margin-bottom:8px;max-width:64ch;line-height:1.5}
+.strategy{display:inline-flex;align-items:center;gap:8px;font-size:13px;background:var(--pencil-wash);color:var(--pencil);padding:7px 12px;border-radius:3px;margin:14px 0 26px}
+.bound{display:flex;gap:14px;align-items:flex-start;padding:12px 14px;border:1px solid var(--rule);border-radius:3px;margin-bottom:8px;background:var(--paper)}
+.bound.guess{border-style:dashed;background:var(--ochre-wash);border-color:#E3C4A4}
+.bound .lvl{font-size:11.5px;color:var(--ink-faint);width:66px;flex:none;padding-top:3px}
+.bound .nm{font-size:14.5px;font-weight:500}
+.bound .pv{font-family:var(--ms);font-size:15px;color:var(--ink-soft);margin-top:4px;line-height:1.45}
+.bound .act{margin-left:auto;display:flex;gap:6px;flex:none}
+.bound .act button{border:1px solid var(--rule);background:var(--paper);border-radius:3px;padding:3px 9px;font-size:12px;color:var(--ink-soft)}
+.bound .act button:hover{border-color:var(--ink-faint);color:var(--ink)}
+
+.note{margin:0 auto;max-width:1060px;padding:18px 32px 60px;font-size:13px;color:var(--ink-faint);line-height:1.6}
+.note b{color:var(--ink-soft);font-weight:500}
+
+@media (max-width:1100px){
+  .reader{grid-template-columns:1fr}
+  .contents,.margin{position:static;max-height:none;border-right:0}
+  .mcard::before{display:none}
+  .two,.cols{grid-template-columns:1fr}
+  .pane+.pane,.col+.col{border-left:0;border-top:1px solid var(--rule)}
+  .page{padding:28px 22px 60px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="proto">
+  <b>Storyboard</b><span>design prototype · not functional</span>
+  <nav>
+    <button data-go="reader" aria-current="true">Reader</button>
+    <button data-go="request">Stuck point</button>
+    <button data-go="compare">Comparison</button>
+    <button data-go="dash">Dashboard</button>
+    <button data-go="profile">Profile</button>
+    <button data-go="import">Import</button>
+  </nav>
+</div>
+
+<div class="app">
+  <div class="topbar">
+    <span class="wordmark">Storyboard</span>
+    <span class="links"><a href="#">Browse</a><a href="#">Writing</a><a href="#">Helping</a></span>
+    <span class="avatar">MF</span>
+  </div>
+
+<!-- ══════════════ 1. READER ══════════════ -->
+<section class="screen on" id="reader">
+  <div class="reader">
+    <aside class="contents">
+      <h3>The Salt Line</h3>
+      <div class="by">Maya Ferreira · novella</div>
+      <ul class="toc">
+        <li class="ch">One · Low water</li>
+        <li>The tide came in wrong</li>
+        <li>Vessel</li>
+        <li class="ch">Two · The registry</li>
+        <li>Paper in a dry room</li>
+        <li class="open">Ellery's answer <span class="dot"></span></li>
+        <li class="ch">Three · Ballast</li>
+        <li>What the manifest said</li>
+        <li class="ch">Four · Landfall</li>
+        <li class="open">— not written yet — <span class="dot"></span></li>
+      </ul>
+    </aside>
+
+    <main class="page">
+      <div class="page-head">
+        <h1>The Salt Line</h1>
+        <div class="meta">Maya Ferreira · 31,400 words · last written on 9 September</div>
+        <div class="tags">
+          <span class="chip">Science fiction</span>
+          <span class="chip">Literary</span>
+          <span class="chip ochre">2 sections open for help</span>
+        </div>
+      </div>
+
+      <div class="chapnum">Chapter two</div>
+      <h2 class="chaptitle">The registry</h2>
+
+      <div class="sect" id="s-registry">
+        <div class="ms">
+          <p>The registry office kept its windows shut against the salt, which meant the air inside had been the same air for eleven years. Ellery had learned to breathe shallowly in it. She set the folder on the counter and waited while the clerk finished a column of figures that could not possibly have needed finishing.</p>
+          <p>"Vessel name," he said, without looking up.</p>
+          <p>"It hasn't got one. That's the difficulty."</p>
+        </div>
+      </div>
+
+      <div class="brk">· · ·</div>
+
+      <div class="sect" id="s-ellery">
+        <div class="ms">
+          <p>He looked up then. The clerk had a face like a document that had been folded and unfolded too many times, and he used it now to convey that unnamed vessels were not a difficulty but a category error, and that she should go away and come back with a name.</p>
+          <p>Ellery did not go away. She had come three hundred miles inland to this dry room with its shut windows, and she had the manifest in her coat, and she was not going to be sorted into a category by a man with a ruler.</p>
+        </div>
+      </div>
+
+      <div class="chapnum">Chapter four</div>
+      <h2 class="chaptitle">Landfall</h2>
+
+      <div class="sect stub" id="s-landfall">
+        <div class="ms"><p>This section hasn't been written yet. Maya has opened it for help.</p></div>
+      </div>
+    </main>
+
+    <aside class="margin">
+      <h2>In the margin</h2>
+
+      <button class="mcard" data-sect="s-landfall" data-go="request">
+        <div class="k">Wants someone to write it</div>
+        <div class="t">Chapter four won't start</div>
+        <div class="a">I know where they end up and I can't get them off the boat. Every opening I write is the ship landing, and the ship isn't supposed to land.</div>
+        <div class="f"><span class="chip ochre">400–900 words</span><span>2 suggestions</span></div>
+      </button>
+
+      <button class="mcard" data-sect="s-ellery" data-go="request">
+        <div class="k">Wants it rewritten</div>
+        <div class="t">Ellery's answer falls flat</div>
+        <div class="a">She's meant to sound stubborn here, not petulant. I've rewritten it four times and made it worse each time.</div>
+        <div class="f"><span class="chip ochre">150–400 words</span><span>1 suggestion</span></div>
+      </button>
+
+      <div style="margin-top:26px">
+        <h2>Contributors</h2>
+        <div class="row" style="border-bottom:0;padding:8px 0">
+          <span class="avatar" style="margin:0;background:var(--moss-wash);color:var(--moss)">LK</span>
+          <div class="g"><b>Leah Karim</b><div>chapter three, accepted 4 Sep</div></div>
+        </div>
+        <div class="row" style="border-bottom:0;padding:8px 0">
+          <span class="avatar" style="margin:0;background:var(--pencil-wash);color:var(--pencil)">AR</span>
+          <div class="g"><b>Arjun Rao</b><div>chapter one, accepted 28 Aug</div></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+  <p class="note"><b>The idea on this screen:</b> the manuscript sits at a real reading measure and help lives in the margin beside it, tied to its passage by a leader rule that thickens on hover. Hover a margin card to see the passage light up. Nothing about the interface says branch, merge, or pull request.</p>
+</section>
+
+<!-- ══════════════ 2. REQUEST + COMPOSER ══════════════ -->
+<section class="screen" id="request">
+  <div class="two">
+    <div class="pane">
+      <div class="crumb">The Salt Line · chapter four · Landfall</div>
+      <h1 class="reqtitle">Chapter four won't start</h1>
+      <div class="meta" style="margin-bottom:18px">Maya Ferreira opened this 3 days ago · 400–900 words · 2 suggestions</div>
+      <p class="ask">I know where they end up and I can't get them off the boat. Every opening I write is the ship landing, and the ship isn't supposed to land — that's the whole point of the next three chapters. I need the first eight hundred words of a chapter where they decide not to.</p>
+
+      <div class="block">
+        <h3>The story so far, in Maya's words</h3>
+        <p class="ctx">Ellery Sabin crosses three hundred miles of dry country to register a ship that has no name, because naming it would admit it exists. She's carrying a manifest she stole from her brother, who is on the ship, who does not know she's coming. The crew have been at sea for nine months on a two-month crossing and have stopped counting. By the end of chapter three the ship is close enough to shore that the crew can smell woodsmoke, and the captain has just told them she has no intention of putting in.</p>
+      </div>
+
+      <div class="block">
+        <h3>Things that can't change</h3>
+        <ul class="cons">
+          <li>Stay in third person, close on Ellery — she's not on the ship, so we're watching from shore</li>
+          <li>Nobody dies in chapter four</li>
+          <li>The captain's reason stays unspoken until chapter six</li>
+        </ul>
+      </div>
+
+      <div class="block">
+        <h3>Also sent</h3>
+        <div class="resp">
+          <span class="av">LK</span>
+          <div><div class="n">Leah Karim <span class="chip moss" style="margin-left:6px">Accepted before</span></div>
+          <div class="e">"Opened on the smell of woodsmoke from the shore side — Ellery notices the ship isn't getting closer before anyone on it does. 812 words."</div></div>
+        </div>
+        <div class="resp">
+          <span class="av">SB</span>
+          <div><div class="n">Sam Boateng</div>
+          <div class="e">"Went at it from the harbourmaster's log. Might be too far from your voice but the structure might be useful. 640 words."</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane">
+      <h2 class="sec">Your suggestion</h2>
+      <div class="composer">
+        <div class="comp-head">
+          <span class="ttl">Landfall — your version</span>
+          <span class="chip">Saved a moment ago</span>
+        </div>
+        <div class="tools">
+          <button class="i">I</button><button class="b">B</button><button>"</button><button>· · ·</button>
+          <span class="quota" style="margin-left:auto">Maya's constraints are pinned above</span>
+        </div>
+        <div class="comp-body" contenteditable="true" spellcheck="false">
+          <p>The woodsmoke reached the shore before the ship did, and then it kept reaching, and the ship did not.</p>
+          <p>Ellery had been standing on the sea wall for two hours by then, long enough that the fishermen had stopped asking, and she had worked out the arithmetic of it without wanting to. A ship that intends to land gets larger. This one had been the same size since noon.</p>
+          <p>She thought about the manifest in her coat and how little it would mean to anyone who never came ashore to read it…</p>
+        </div>
+        <div class="comp-foot">
+          <span class="counter"><b>417</b> of 400–900 words</span>
+          <span class="quota">2 of your 3 open suggestions</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn primary">Send suggestion to Maya</button>
+        <button class="btn">Keep as a private draft</button>
+      </div>
+      <p class="note" style="padding:16px 0 0;max-width:52ch">Nothing here is visible to Maya until you send it. Drafts on other people's work live in your account, not theirs.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 3. COMPARISON ══════════════ -->
+<section class="screen" id="compare">
+  <div class="cmp-bar">
+    <div>
+      <div style="font-size:15px;font-weight:500">Ellery's answer · Leah Karim's suggestion</div>
+      <div class="meta">Sent 2 days ago · 287 words · written against the version from 6 September</div>
+    </div>
+    <div class="toggle">
+      <button aria-pressed="true">Side by side</button>
+      <button aria-pressed="false">Read it straight</button>
+    </div>
+    <div class="stats"><span><b>2</b> kept</span><span><b>3</b> changed</span><span><b>1</b> added</span><span><b>1</b> removed</span></div>
+  </div>
+
+  <div class="banner">
+    <span>Leah's note — "I kept your second paragraph almost whole. The change is mostly that she stops explaining herself, because I think the explaining is what reads as petulant."</span>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <h4>Your text</h4>
+      <div class="ms">
+        <p>He looked up then. The clerk had a face like a document that had been folded and unfolded too many times, and he used it now to convey that unnamed vessels were <del>not a difficulty but a category error, and that she should go away and come back with a name</del>.</p>
+        <p class="para-del">"I don't think you understand what I'm asking," Ellery said. "I'm not asking you to name it. I'm asking you to write down that it's there."</p>
+        <p>Ellery did not go away. She had come three hundred miles inland to this dry room with its shut windows, and she had the manifest in her coat, and she <del>was not going to be sorted into a category by a man with a ruler</del>.</p>
+      </div>
+    </div>
+    <div class="col">
+      <h4>Leah's version</h4>
+      <div class="ms">
+        <p>He looked up then. The clerk had a face like a document that had been folded and unfolded too many times, and he used it now to convey that unnamed vessels were <ins>a category error, and that she was welcome to leave</ins>.</p>
+        <p>Ellery did not go away. She had come three hundred miles inland to this dry room with its shut windows, and she had the manifest in her coat, and she <ins>put it on the counter and did not take her hand off it</ins>.</p>
+        <p class="para-add">The clerk looked at her hand. Then he looked at the clock, which was the first honest thing he had done since she walked in.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="decide">
+    <button class="btn accept">Accept into the main draft</button>
+    <button class="btn">Pass on it</button>
+    <button class="btn">Keep reading</button>
+    <span class="note">Accepting credits Leah on this section permanently. Your current text stays in the history and you can restore it any time.</span>
+  </div>
+</section>
+
+<!-- ══════════════ 4. DASHBOARD ══════════════ -->
+<section class="screen" id="dash">
+  <div class="dash">
+    <h1>Good evening, Maya</h1>
+    <div class="sub">Two people wrote something for you while you were away.</div>
+
+    <div class="region">
+      <div class="region-head"><h2>Needs you</h2><span>3 things</span></div>
+      <div class="row"><span class="chip ochre">Suggestion</span><div class="g"><b>Leah Karim sent a version of Ellery's answer</b><div>The Salt Line · chapter two · 287 words · 2 days ago</div></div><button class="btn" data-go="compare">Compare</button></div>
+      <div class="row"><span class="chip ochre">Suggestion</span><div class="g"><b>Sam Boateng sent a version of Landfall</b><div>The Salt Line · chapter four · 640 words · yesterday</div></div><button class="btn" data-go="compare">Compare</button></div>
+      <div class="row"><span class="chip pencil">Invitation</span><div class="g"><b>Nadia Oyelaran invited you as a co-author</b><div>Harrowgate · serial · 3 days ago</div></div><button class="btn">Open</button></div>
+    </div>
+
+    <div class="region">
+      <div class="region-head"><h2>You're writing</h2><span>2 storyboards</span></div>
+      <div class="grid">
+        <button class="card" data-go="reader">
+          <div class="t">The Salt Line</div><div class="b">Novella · 31,400 words · written 3 days ago</div>
+          <div class="r"><span class="chip ochre">2 open for help</span><span class="chip">2 contributors</span></div>
+        </button>
+        <button class="card">
+          <div class="t">Nine Crows</div><div class="b">Short story · 4,100 words · written 3 weeks ago</div>
+          <div class="r"><span class="chip">Private</span></div>
+        </button>
+      </div>
+    </div>
+
+    <div class="region">
+      <div class="region-head"><h2>Open in science fiction and literary</h2><span>your pinned genres</span></div>
+      <div class="grid">
+        <button class="card" data-go="request">
+          <div class="t">The ending arrives too fast</div>
+          <div class="b">Sundowning by Priya Menon · chapter eleven</div>
+          <div class="r"><span class="chip ochre">Rewrite · 300–800 words</span><span class="chip">No answers yet</span></div>
+        </button>
+        <button class="card" data-go="request">
+          <div class="t">I can't hear this character</div>
+          <div class="b">The Quiet Register by T. Alcorn · chapter two</div>
+          <div class="r"><span class="chip pencil">Ideas wanted</span><span class="chip">4 ideas</span></div>
+        </button>
+        <button class="card" data-go="request">
+          <div class="t">Needs a scene between these two</div>
+          <div class="b">Harrowgate by Nadia Oyelaran · episode six</div>
+          <div class="r"><span class="chip ochre">Continue · 500–1200 words</span><span class="chip">1 suggestion</span></div>
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 5. PROFILE ══════════════ -->
+<section class="screen" id="profile">
+  <div class="prof">
+    <div class="prof-head">
+      <span class="big">LK</span>
+      <div>
+        <h1>Leah Karim</h1>
+        <div class="u">@leahk · writing since March</div>
+        <p>Mostly reads science fiction, mostly writes endings. Happy to take a run at anything where somebody is stuck on a scene between two people who won't say the thing.</p>
+      </div>
+    </div>
+
+    <div class="nums">
+      <div><b>14</b><span>contributions accepted</span></div>
+      <div><b>6</b><span>ideas that helped</span></div>
+      <div><b>3</b><span>storyboards of her own</span></div>
+      <div><b>1</b><span>spin-off</span></div>
+    </div>
+
+    <h2 class="sec">Days she wrote something for someone</h2>
+    <div class="cal" id="cal"></div>
+    <div class="meta" style="margin-bottom:32px">Last 365 days</div>
+
+    <h2 class="sec">Accepted work</h2>
+    <div class="credit">
+      <span class="mark"></span>
+      <div><div class="h"><b>The Salt Line</b> by Maya Ferreira · chapter three, "What the manifest said" · 4 September</div>
+      <div class="x">"The manifest was a list of things that had been aboard when the ship left, which was not the same as a list of things aboard now, and Ellery had known that for a week without letting herself write it down."</div></div>
+    </div>
+    <div class="credit">
+      <span class="mark idea"></span>
+      <div><div class="h"><b>Sundowning</b> by Priya Menon · an idea that helped · 29 August</div>
+      <div class="x">"What if the daughter already knows and the whole chapter is her deciding not to say so — you'd keep the reveal but lose the theatrics."</div></div>
+    </div>
+    <div class="credit">
+      <span class="mark"></span>
+      <div><div class="h"><b>Harrowgate</b> by Nadia Oyelaran · episode four · 21 August</div>
+      <div class="x">"He waited in the car with the engine off for the length of two songs he did not like, which was how he had measured time since the accident."</div></div>
+    </div>
+
+    <p class="note" style="padding:24px 0 0">Work she wrote that wasn't used is on this profile too, collapsed and private by default. Passing on a suggestion shouldn't leave a public mark on the person who wrote it.</p>
+  </div>
+</section>
+
+<!-- ══════════════ 6. IMPORT ══════════════ -->
+<section class="screen" id="import">
+  <div class="imp">
+    <h1>Check where the chapters go</h1>
+    <p class="sub">We've had a guess at how <b>salt-line-draft-7.docx</b> divides up. Move, add, or remove any of these before we save anything. Nothing has been created yet.</p>
+    <div class="strategy">Chapters found from your heading styles · sections guessed from scene breaks</div>
+
+    <div class="bound">
+      <span class="lvl">Chapter 1</span>
+      <div><div class="nm">Low water</div><div class="pv">"The tide came in wrong on the Tuesday, which was how Ellery knew before anyone told her…"</div></div>
+      <div class="act"><button>Not a chapter</button><button>Rename</button></div>
+    </div>
+    <div class="bound" style="margin-left:28px">
+      <span class="lvl">Section</span>
+      <div><div class="nm">Vessel</div><div class="pv">"The boat had been in the yard since her father died and nobody had moved it…"</div></div>
+      <div class="act"><button>Merge up</button><button>Rename</button></div>
+    </div>
+    <div class="bound">
+      <span class="lvl">Chapter 2</span>
+      <div><div class="nm">The registry</div><div class="pv">"The registry office kept its windows shut against the salt, which meant the air inside…"</div></div>
+      <div class="act"><button>Not a chapter</button><button>Rename</button></div>
+    </div>
+    <div class="bound guess" style="margin-left:28px">
+      <span class="lvl">Section?</span>
+      <div><div class="nm">Guessed from a blank line</div><div class="pv">"He looked up then. The clerk had a face like a document that had been folded and unfolded…"</div></div>
+      <div class="act"><button>Yes, split here</button><button>Merge up</button></div>
+    </div>
+    <div class="bound">
+      <span class="lvl">Chapter 3</span>
+      <div><div class="nm">Ballast</div><div class="pv">"Nine months is a long time to be wrong about the date…"</div></div>
+      <div class="act"><button>Not a chapter</button><button>Rename</button></div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:22px;align-items:center">
+      <button class="btn primary">Create 3 chapters and 7 sections</button>
+      <button class="btn">Start over with a different file</button>
+      <span class="meta" style="margin-left:auto">31,400 words · italics and scene breaks kept · page numbers and fonts dropped</span>
+    </div>
+    <p class="note" style="padding:24px 0 0">No AI ran on this file. The boundaries came from your heading styles, page breaks, and scene-break marks, in that order — which is why the screen tells you which one it used, and why you get to correct it before anything is saved.</p>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var screens = document.querySelectorAll('.screen');
+  var tabs = document.querySelectorAll('.proto nav button');
+  function go(id){
+    screens.forEach(function(s){ s.classList.toggle('on', s.id === id); });
+    tabs.forEach(function(t){ t.setAttribute('aria-current', String(t.dataset.go === id)); });
+    window.scrollTo(0,0);
+  }
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('[data-go]');
+    if(t){ go(t.dataset.go); }
+  });
+
+  // margin card ↔ passage highlight
+  document.querySelectorAll('.mcard[data-sect]').forEach(function(card){
+    var sect = document.getElementById(card.dataset.sect);
+    if(!sect) return;
+    function on(){ sect.classList.add('lit'); card.classList.add('lit'); }
+    function off(){ sect.classList.remove('lit'); card.classList.remove('lit'); }
+    card.addEventListener('mouseenter', on);
+    card.addEventListener('mouseleave', off);
+    card.addEventListener('focus', on);
+    card.addEventListener('blur', off);
+  });
+
+  // comparison toggle
+  document.querySelectorAll('.toggle button').forEach(function(b){
+    b.addEventListener('click', function(){
+      b.parentNode.querySelectorAll('button').forEach(function(x){ x.setAttribute('aria-pressed','false'); });
+      b.setAttribute('aria-pressed','true');
+      var straight = b.textContent.indexOf('straight') > -1;
+      var cols = document.querySelector('#compare .cols');
+      cols.style.gridTemplateColumns = straight ? '1fr' : '1fr 1fr';
+      cols.children[0].style.display = straight ? 'none' : '';
+      cols.querySelectorAll('del').forEach(function(d){ d.style.display = straight ? 'none' : ''; });
+      cols.querySelectorAll('ins').forEach(function(i){ i.style.textDecoration = straight ? 'none' : 'underline'; i.style.color = straight ? 'var(--ink)' : 'var(--pencil)'; });
+      cols.querySelectorAll('.para-add').forEach(function(p){ p.style.borderLeftColor = straight ? 'transparent' : 'var(--pencil)'; });
+    });
+  });
+
+  // contribution calendar
+  var cal = document.getElementById('cal');
+  if(cal){
+    var seed = 7;
+    function rnd(){ seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }
+    for(var i=0;i<364;i++){
+      var cell = document.createElement('i');
+      var r = rnd();
+      var lvl = r > 0.93 ? 4 : r > 0.85 ? 3 : r > 0.72 ? 2 : r > 0.58 ? 1 : 0;
+      if(lvl) cell.className = 'l' + lvl;
+      cal.appendChild(cell);
+    }
+  }
+})();
+</script>
+</body>
+</html>

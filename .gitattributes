@@ -1,0 +1,18 @@
+# Normalise line endings so Windows and Unix contributors produce identical diffs.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.docx binary
+*.fdx binary
+
+pnpm-lock.yaml -diff linguist-generated
+packages/db/prisma/migrations/**/migration.sql linguist-generated=false
+docs/prototype.html linguist-documentation

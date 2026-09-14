@@ -1,0 +1,129 @@
+/*
+ * Storyboard design tokens (docs/02-architecture.md section 9) as a Tailwind v4 theme.
+ *
+ * Paper, ink and blue pencil. There is no dark mode in v1: the paper surface is
+ * the identity of the product. Radius is 3px on controls and 0 on the page
+ * surface. One shadow token, used only by margin cards that overlap the page edge.
+ *
+ * Apps import this file once from their own globals.css. The @source line lets
+ * Tailwind see class names used inside the components of this package.
+ */
+@import 'tailwindcss';
+@source '../';
+
+@theme {
+  /* palette */
+  --color-paper: #fbfbf9; /* cool laser paper, not cream */
+  --color-paper-sunk: #f2f2ee; /* rails, wells */
+  --color-ink: #11202b; /* blue-black, manuscript text */
+  --color-ink-soft: #55636d; /* secondary */
+  --color-ink-faint: #8a949c; /* metadata */
+  --color-rule: #dfe0da; /* hairlines */
+  --color-pencil: #2b5ca8; /* blue pencil: links, insertions, primary action */
+  --color-pencil-deep: #244e90; /* pencil, pressed */
+  --color-pencil-wash: #e8eef7;
+  --color-ochre: #a8571b; /* stuck points, open requests */
+  --color-ochre-wash: #f7eee4;
+  --color-moss: #2e6b4f; /* accepted */
+  --color-moss-deep: #255a41;
+  --color-moss-wash: #e6f0ea;
+  --color-crimson: #8c2b2b; /* deletions in comparison only */
+  --color-white: #ffffff;
+
+  /* semantic aliases (shadcn/ui vocabulary, mapped onto the palette) */
+  --color-background: var(--color-paper);
+  --color-foreground: var(--color-ink);
+  --color-card: var(--color-paper);
+  --color-card-foreground: var(--color-ink);
+  --color-popover: var(--color-paper);
+  --color-popover-foreground: var(--color-ink);
+  --color-primary: var(--color-pencil);
+  --color-primary-foreground: var(--color-white);
+  --color-secondary: var(--color-paper-sunk);
+  --color-secondary-foreground: var(--color-ink);
+  --color-muted: var(--color-paper-sunk);
+  --color-muted-foreground: var(--color-ink-soft);
+  --color-accent: var(--color-pencil-wash);
+  --color-accent-foreground: var(--color-pencil);
+  --color-destructive: var(--color-crimson);
+  --color-destructive-foreground: var(--color-white);
+  --color-border: var(--color-rule);
+  --color-input: var(--color-rule);
+  --color-ring: var(--color-pencil);
+
+  /* type: apps load the faces with next/font and expose them on these variables */
+  --font-ui: var(--font-archivo), 'Archivo', system-ui, sans-serif;
+  --font-manuscript: var(--font-newsreader), 'Newsreader', Georgia, serif;
+  --font-screenplay: var(--font-courier-prime), 'Courier Prime', ui-monospace, monospace;
+
+  --text-manuscript: 19px;
+  --text-manuscript--line-height: 1.68;
+
+  /* shape */
+  --radius-control: 3px;
+  --radius-none: 0;
+
+  /* elevation */
+  --shadow-lift: 0 1px 2px rgb(17 32 43 / 0.06), 0 6px 18px rgb(17 32 43 / 0.06);
+
+  /* measure (NFR-5): Tailwind v4 keys max-w-* from --container-* */
+  --container-measure: 66ch;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-paper font-ui text-[15px] leading-normal text-ink;
+  }
+
+  a {
+    @apply text-pencil no-underline;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-pencil;
+  }
+
+  ::selection {
+    @apply bg-pencil-wash;
+  }
+}
+
+@layer components {
+  /* The manuscript column: serif, 19px, 66ch measure (NFR-5). */
+  .manuscript {
+    @apply max-w-measure font-manuscript text-manuscript text-ink;
+  }
+
+  .manuscript p {
+    margin: 0 0 1.05em;
+    text-indent: 1.4em;
+  }
+
+  .manuscript p:first-of-type {
+    text-indent: 0;
+  }
+
+  /* Comparison marks never rely on colour alone (NFR-4). */
+  .manuscript del {
+    @apply text-crimson line-through decoration-crimson;
+  }
+
+  .manuscript ins {
+    @apply text-pencil underline decoration-pencil;
+  }
+}

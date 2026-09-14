@@ -1,0 +1,45 @@
+{
+  "name": "storyboard",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An open-source platform where writers help each other past the passage they are stuck on.",
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@12.4.1",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint && eslint scripts vitest.config.ts",
+    "typecheck": "turbo run typecheck && tsc -p tsconfig.json",
+    "test": "turbo run test && vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check-vocabulary": "tsx scripts/check-vocabulary.ts",
+    "db:generate": "pnpm --filter @storyboard/db db:generate",
+    "db:migrate": "pnpm --filter @storyboard/db db:migrate",
+    "db:deploy": "pnpm --filter @storyboard/db db:deploy",
+    "db:seed": "pnpm --filter @storyboard/db db:seed",
+    "db:studio": "pnpm --filter @storyboard/db db:studio",
+    "db:reset": "pnpm --filter @storyboard/db db:reset",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@storyboard/config": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "husky": "9.1.7",
+    "lint-staged": "17.5.1",
+    "prettier": "catalog:",
+    "prettier-plugin-tailwindcss": "0.8.1",
+    "tsx": "catalog:",
+    "turbo": "2.10.12",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,mjs,cjs,json,md,css,yml,yaml}": "prettier --write"
+  }
+}

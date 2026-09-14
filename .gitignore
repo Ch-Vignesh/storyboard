@@ -1,0 +1,65 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# builds
+.next/
+out/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# generated
+packages/db/src/generated/
+
+# tests
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.vitest/
+
+# environment: commit .env.example only
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+lerna-debug.log*
+
+# tooling caches
+.eslintcache
+.prettiercache
+.cache/
+
+# deployment
+.vercel/
+
+# editors and OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# local scratch: anything you never want committed
+scratch/
+
+# AI assistant tooling: local to a contributor's machine, never committed
+CLAUDE.md
+.claude/
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-instructions.md

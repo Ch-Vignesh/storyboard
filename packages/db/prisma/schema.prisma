@@ -1,0 +1,645 @@
+// Storyboard data model. Read docs/02-architecture.md section 2 before changing
+// anything about Version, Chapter, Section or Revision: the copy-on-create
+// strategy and the append-only revision chain are load-bearing.
+//
+// Conventions
+//   - Every model has an opaque `id` (cuid). Models that appear in URLs also
+//     carry a short `publicId` (nanoid) so database ids never leak.
+//   - Times are timestamptz. Text that users write is @db.Text.
+//   - Invariants Prisma cannot express live in prisma/migrations/*_invariants:
+//     revision immutability trigger, one main version per storyboard, one open
+//     request per section.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  runtime             = "nodejs"
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------- enums
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+/// FR-2.1
+enum StoryType {
+  NOVEL
+  NOVELLA
+  SHORT_STORY
+  SCREENPLAY
+  STAGE_PLAY
+  SERIAL
+  POETRY
+  NONFICTION
+  OTHER
+}
+
+/// FR-2.7
+enum Visibility {
+  PUBLIC
+  PRIVATE
+}
+
+/// FR-2.6, FR-14.1
+enum StoryState {
+  ACTIVE
+  FINISHED
+  DELETED
+}
+
+/// The owner is Storyboard.ownerId, never a Collaborator row.
+enum CollabRole {
+  COAUTHOR
+}
+
+/// FR-8.3 history labels
+enum RevisionSource {
+  AUTHORED
+  ACCEPTED
+  RESTORED
+  IMPORTED
+}
+
+/// FR-5.2
+enum RequestKind {
+  REWRITE
+  CONTINUE
+  UNBLOCK
+}
+
+/// FR-5.9
+enum RequestState {
+  OPEN
+  ANSWERED
+  RESOLVED
+  CLOSED
+}
+
+/// FR-6.4
+enum SuggestionState {
+  DRAFT
+  SUBMITTED
+  ACCEPTED
+  PASSED
+  STALE
+  WITHDRAWN
+}
+
+/// FR-6.10 — the only reasons an author can attach to a pass. No free text.
+enum PassChip {
+  NOT_THE_DIRECTION
+  DOES_NOT_FIT_VOICE
+  TOO_FAR_FROM_OUTLINE
+  SOLVED_ANOTHER_WAY
+}
+
+/// FR-9.1
+enum CreditType {
+  PROSE
+  IDEA
+  COAUTHOR
+}
+
+/// FR-12.2
+enum NotificationType {
+  SUGGESTION_RECEIVED
+  SUGGESTION_ACCEPTED
+  SUGGESTION_PASSED
+  SUGGESTION_STALE
+  IDEA_RECEIVED
+  IDEA_MARKED_HELPFUL
+  COAUTHOR_INVITED
+  COAUTHOR_ACCEPTED
+  SPIN_OFF_CREATED
+  CONTRIBUTION_REMOVED
+  REQUEST_QUIET_SEVEN_DAYS
+  WEEKLY_DIGEST
+}
+
+/// FR-13.5
+enum ReportTarget {
+  USER
+  STORYBOARD
+  SUGGESTION
+  IDEA
+}
+
+/// FR-13.5
+enum ReportCategory {
+  SPAM
+  ABUSE
+  PLAGIARISM
+  OFF_TOPIC
+  LIFTED_WORK
+}
+
+enum ReportState {
+  OPEN
+  UPHELD
+  DISMISSED
+}
+
+/// FR-3.2 — nothing is written to the tree until REVIEWED becomes COMMITTED.
+enum ImportState {
+  UPLOADED
+  ANALYSED
+  REVIEWED
+  COMMITTED
+  FAILED
+}
+
+// ---------------------------------------------------------------- people
+
+model User {
+  id              String     @id @default(cuid())
+  email           String     @unique
+  emailVerifiedAt DateTime?
+  /// Null until the "set password" onboarding step (FR-1.3).
+  passwordHash    String?
+  /// Null until chosen during onboarding; immutable afterwards and printed in
+  /// every credit line forever (FR-1.3).
+  username        String?    @unique
+  displayName     String?
+  bio             String?    @db.VarChar(280)
+  avatarUrl       String?
+  status          UserStatus @default(ACTIVE)
+  isAdmin         Boolean    @default(false)
+  /// Set when the four onboarding steps are complete (FR-1.3, FR-1.5).
+  onboardedAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  pinnedGenres       UserGenre[]
+  storyboards        Storyboard[]             @relation("StoryboardOwner")
+  collaborations     Collaborator[]           @relation("CollaboratorUser")
+  invitationsSent    Collaborator[]           @relation("CollaboratorInviter")
+  versionsCreated    Version[]
+  revisionsAuthored  Revision[]               @relation("RevisionAuthor")
+  revisionsAccepted  Revision[]               @relation("RevisionAcceptor")
+  drafts             SectionDraft[]
+  requestsOpened     ContributionRequest[]
+  suggestions        Suggestion[]             @relation("SuggestionContributor")
+  suggestionsDecided Suggestion[]             @relation("SuggestionDecider")
+  ideas              Idea[]
+  credits            Credit[]
+  notifications      Notification[]
+  notificationPrefs  NotificationPreference[]
+  reportsMade        Report[]                 @relation("Reporter")
+  reportsResolved    Report[]                 @relation("ReportResolver")
+  activity           ActivityDay[]
+  importJobs         ImportJob[]
+  verificationTokens EmailVerificationToken[]
+}
+
+/// FR-1.4 — single-use, hashed at rest, 24 h expiry, 60 s resend cooldown
+/// (the cooldown is computed from the newest row's createdAt).
+model EmailVerificationToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// sha256 of the token that was emailed. The plaintext is never stored.
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model Genre {
+  id   String @id @default(cuid())
+  slug String @unique
+  name String
+
+  users       UserGenre[]
+  storyboards StoryboardGenre[]
+}
+
+/// FR-1.3, FR-11.2 — pinned genres, ordered as the user ranked them.
+model UserGenre {
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  genreId String
+  genre   Genre  @relation(fields: [genreId], references: [id], onDelete: Cascade)
+  order   Int
+
+  @@id([userId, genreId])
+}
+
+// ---------------------------------------------------------------- the work
+
+model Storyboard {
+  id         String     @id @default(cuid())
+  /// nanoid; appears in URLs and as the slug suffix.
+  publicId   String     @unique
+  /// title slug + publicId suffix, e.g. `the-ship-never-lands-k3x9q2`.
+  slug       String     @unique
+  title      String     @db.VarChar(200)
+  logline    String?    @db.VarChar(300)
+  type       StoryType
+  visibility Visibility @default(PUBLIC)
+  state      StoryState @default(ACTIVE)
+  /// FR-14.5 — free text, displayed verbatim, never verified.
+  rightsNote String?    @db.VarChar(500)
+  /// FR-15.3 — seeded example content, labelled as such in the UI.
+  isSeed     Boolean    @default(false)
+  /// FR-2.7 — revisions created before this instant stay private to authors.
+  publicFrom DateTime?
+  /// FR-14.1
+  finishedAt DateTime?
+  /// FR-2.6 — soft delete; a job hard-deletes 30 days later.
+  deletedAt  DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  ownerId String
+  owner   User   @relation("StoryboardOwner", fields: [ownerId], references: [id])
+
+  /// FR-10.3 — spin-off lineage. `forkedRevisionMap` is { lineageId: revisionId }
+  /// captured at the moment of the spin-off, so "what did it look like then" is
+  /// answerable forever without keeping the original's later state.
+  forkedFromId        String?
+  forkedFrom          Storyboard?  @relation("SpinOffs", fields: [forkedFromId], references: [id])
+  forks               Storyboard[] @relation("SpinOffs")
+  forkedFromVersionId String?
+  forkedFromVersion   Version?     @relation("SpinOffSourceVersion", fields: [forkedFromVersionId], references: [id])
+  forkedAt            DateTime?
+  forkedRevisionMap   Json?
+
+  versions      Version[]
+  collaborators Collaborator[]
+  genres        StoryboardGenre[]
+  credits       Credit[]
+  requests      ContributionRequest[]
+  importJobs    ImportJob[]
+
+  @@index([visibility, state, createdAt])
+  @@index([ownerId])
+  @@index([forkedFromId])
+}
+
+model StoryboardGenre {
+  storyboardId String
+  storyboard   Storyboard @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  genreId      String
+  genre        Genre      @relation(fields: [genreId], references: [id], onDelete: Cascade)
+
+  @@id([storyboardId, genreId])
+  @@index([genreId])
+}
+
+/// SRS §3.1 — at most three accepted co-authors per storyboard (enforced in code).
+model Collaborator {
+  id           String     @id @default(cuid())
+  storyboardId String
+  storyboard   Storyboard @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation("CollaboratorUser", fields: [userId], references: [id], onDelete: Cascade)
+  role         CollabRole @default(COAUTHOR)
+  invitedById  String
+  invitedBy    User       @relation("CollaboratorInviter", fields: [invitedById], references: [id])
+  invitedAt    DateTime   @default(now())
+  acceptedAt   DateTime?
+
+  @@unique([storyboardId, userId])
+  @@index([userId])
+}
+
+/// "The main draft" (isMain) or an alternate version. Creating one copies the
+/// chapter/section tree; revisions are shared, never copied (architecture §2).
+/// Exactly one main per storyboard: partial unique index in the invariants migration.
+model Version {
+  id            String     @id @default(cuid())
+  storyboardId  String
+  storyboard    Storyboard @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  name          String     @db.VarChar(120)
+  isMain        Boolean    @default(false)
+  baseVersionId String?
+  baseVersion   Version?   @relation("VersionBase", fields: [baseVersionId], references: [id])
+  derived       Version[]  @relation("VersionBase")
+  createdById   String
+  createdBy     User       @relation(fields: [createdById], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  chapters Chapter[]
+  spinOffs Storyboard[] @relation("SpinOffSourceVersion")
+
+  @@index([storyboardId])
+}
+
+model Chapter {
+  id        String   @id @default(cuid())
+  versionId String
+  version   Version  @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  /// Shared across versions that descend from the same original (architecture §2.2).
+  lineageId String
+  order     Int
+  title     String   @db.VarChar(200)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sections Section[]
+
+  @@index([versionId, order])
+  @@index([lineageId])
+}
+
+/// The atomic unit of contribution. A request always targets exactly one section.
+model Section {
+  id                String    @id @default(cuid())
+  chapterId         String
+  chapter           Chapter   @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  lineageId         String
+  order             Int
+  title             String?   @db.VarChar(200)
+  currentRevisionId String?   @unique
+  currentRevision   Revision? @relation("SectionHead", fields: [currentRevisionId], references: [id])
+  wordCount         Int       @default(0)
+  /// FR-2.4 — set when merged into the section above; history stays addressable.
+  mergedIntoId      String?
+  mergedInto        Section?  @relation("SectionMerge", fields: [mergedIntoId], references: [id])
+  mergedFrom        Section[] @relation("SectionMerge")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  revisions Revision[]            @relation("SectionRevisions")
+  requests  ContributionRequest[]
+  drafts    SectionDraft[]
+
+  @@index([chapterId, order])
+  @@index([lineageId])
+}
+
+/// Append-only. UPDATE and DELETE are refused by a trigger (NFR-3); see the
+/// invariants migration for the single, explicit hard-delete escape hatch.
+model Revision {
+  id             String         @id @default(cuid())
+  sectionId      String
+  section        Section        @relation("SectionRevisions", fields: [sectionId], references: [id])
+  parentId       String?
+  parent         Revision?      @relation("RevisionParent", fields: [parentId], references: [id])
+  children       Revision[]     @relation("RevisionParent")
+  /// Canonical restricted ProseMirror document (FR-4.1).
+  contentJson    Json
+  /// Derived from contentJson on write; for counts, comparison and search (FR-4.3).
+  contentText    String         @db.Text
+  wordCount      Int
+  /// sha256 of contentText — the timestamped proof of authorship (FR-13.6).
+  contentHash    String
+  source         RevisionSource
+  /// Who wrote the words.
+  authorId       String
+  author         User           @relation("RevisionAuthor", fields: [authorId], references: [id])
+  /// Who let them in (FR-8.1). Null unless source = ACCEPTED.
+  acceptedById   String?
+  acceptedBy     User?          @relation("RevisionAcceptor", fields: [acceptedById], references: [id])
+  suggestionId   String?        @unique
+  suggestion     Suggestion?    @relation("SuggestionRevision", fields: [suggestionId], references: [id])
+  /// FR-8.4 — restore never rewinds; it points at what it copied.
+  restoredFromId String?
+  restoredFrom   Revision?      @relation("RevisionRestore", fields: [restoredFromId], references: [id])
+  restoredTo     Revision[]     @relation("RevisionRestore")
+  createdAt      DateTime       @default(now())
+
+  headOf             Section?     @relation("SectionHead")
+  credits            Credit[]
+  suggestionsBasedOn Suggestion[] @relation("SuggestionBase")
+
+  @@index([sectionId, createdAt])
+  @@index([contentHash])
+}
+
+/// FR-4.4 — the 3-second autosave target. Per user, per section, overwritten in
+/// place; a durable Revision is cut on blur, navigation, or every 5 minutes.
+model SectionDraft {
+  sectionId   String
+  section     Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contentJson Json
+  contentText String   @db.Text
+  wordCount   Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@id([sectionId, userId])
+}
+
+// ---------------------------------------------------------------- help
+
+/// "A spot I'm stuck on." One open request per section: partial unique index
+/// in the invariants migration (FR-5.1).
+model ContributionRequest {
+  id           String       @id @default(cuid())
+  publicId     String       @unique
+  storyboardId String
+  storyboard   Storyboard   @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  sectionId    String
+  section      Section      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  kind         RequestKind
+  title        String       @db.VarChar(120)
+  /// 20–500 words (FR-5.3).
+  ask          String       @db.Text
+  /// 100–500 words; required for REWRITE and CONTINUE (FR-5.4).
+  preContext   String?      @db.Text
+  toneNotes    String?      @db.Text
+  /// string[] — hard constraints shown as a checklist on the composer (FR-5.6).
+  constraints  Json?
+  /// lineageId[] — suggested reading, rendered inline (FR-5.5).
+  readingList  Json?
+  /// FR-5.8 — adjustable within 100–2000.
+  minWords     Int          @default(150)
+  maxWords     Int          @default(1000)
+  state        RequestState @default(OPEN)
+  openedById   String
+  openedBy     User         @relation(fields: [openedById], references: [id])
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  resolvedAt   DateTime?
+  closedAt     DateTime?
+
+  suggestions Suggestion[]
+  ideas       Idea[]
+
+  @@index([storyboardId, state])
+  @@index([sectionId, state])
+  @@index([state, createdAt])
+}
+
+model Suggestion {
+  id             String              @id @default(cuid())
+  publicId       String              @unique
+  requestId      String
+  request        ContributionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  contributorId  String
+  contributor    User                @relation("SuggestionContributor", fields: [contributorId], references: [id])
+  /// Staleness anchor: the section head this was written against (FR-6.3).
+  baseRevisionId String
+  baseRevision   Revision            @relation("SuggestionBase", fields: [baseRevisionId], references: [id])
+  contentJson    Json
+  contentText    String              @db.Text
+  wordCount      Int                 @default(0)
+  /// Up to 200 words to the author (FR-6.2).
+  note           String?             @db.VarChar(1500)
+  state          SuggestionState     @default(DRAFT)
+  passReason     PassChip?
+  submittedAt    DateTime?
+  decidedAt      DateTime?
+  decidedById    String?
+  decidedBy      User?               @relation("SuggestionDecider", fields: [decidedById], references: [id])
+  withdrawnAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  /// The revision created when this was accepted (FR-8.1).
+  revision Revision? @relation("SuggestionRevision")
+  credits  Credit[]
+
+  @@index([requestId, state])
+  @@index([contributorId, state])
+}
+
+/// FR-6.9 — for UNBLOCK requests. Threaded one level deep. Never merged.
+model Idea {
+  id            String              @id @default(cuid())
+  requestId     String
+  request       ContributionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  authorId      String
+  author        User                @relation(fields: [authorId], references: [id])
+  parentId      String?
+  parent        Idea?               @relation("IdeaThread", fields: [parentId], references: [id])
+  replies       Idea[]              @relation("IdeaThread")
+  /// 20–400 words, plain text.
+  body          String              @db.Text
+  markedHelpful Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+
+  credits Credit[]
+
+  @@index([requestId, createdAt])
+  @@index([authorId])
+}
+
+/// Permanent. Survives revert (isLive = false) and spin-off (copied with
+/// inheritedFromId). Principle 1.3.3: never deleted while the storyboard exists.
+model Credit {
+  id              String      @id @default(cuid())
+  storyboardId    String
+  storyboard      Storyboard  @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  contributorId   String
+  contributor     User        @relation(fields: [contributorId], references: [id])
+  type            CreditType
+  sectionLineage  String?
+  revisionId      String?
+  revision        Revision?   @relation(fields: [revisionId], references: [id])
+  suggestionId    String?
+  suggestion      Suggestion? @relation(fields: [suggestionId], references: [id])
+  ideaId          String?
+  idea            Idea?       @relation(fields: [ideaId], references: [id])
+  /// False once the contributed text is no longer in the main draft (FR-8.5).
+  isLive          Boolean     @default(true)
+  /// FR-9.5 — set on credits copied into a spin-off.
+  inheritedFromId String?
+  inheritedFrom   Credit?     @relation("CreditInheritance", fields: [inheritedFromId], references: [id])
+  inheritedBy     Credit[]    @relation("CreditInheritance")
+  createdAt       DateTime    @default(now())
+
+  @@index([contributorId, createdAt])
+  @@index([storyboardId])
+  @@index([revisionId])
+}
+
+// ---------------------------------------------------------------- plumbing
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  payload   Json
+  readAt    DateTime?
+  emailedAt DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}
+
+/// FR-12.1 — email is per-type toggleable; in-app cannot be disabled.
+model NotificationPreference {
+  userId String
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type   NotificationType
+  email  Boolean          @default(true)
+
+  @@id([userId, type])
+}
+
+/// FR-13.5 — polymorphic target; deduplicated per reporter and target.
+model Report {
+  id           String         @id @default(cuid())
+  reporterId   String
+  reporter     User           @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetType   ReportTarget
+  targetId     String
+  category     ReportCategory
+  note         String?        @db.VarChar(1000)
+  state        ReportState    @default(OPEN)
+  resolvedById String?
+  resolvedBy   User?          @relation("ReportResolver", fields: [resolvedById], references: [id])
+  resolvedAt   DateTime?
+  createdAt    DateTime       @default(now())
+
+  @@unique([reporterId, targetType, targetId])
+  @@index([state, createdAt])
+  @@index([targetType, targetId])
+}
+
+/// FR-9.3 — the contribution calendar. One row per user per active day.
+model ActivityDay {
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day    DateTime @db.Date
+  count  Int      @default(0)
+
+  @@id([userId, day])
+}
+
+/// FR-3.2 — holds the proposed split until the writer confirms it.
+model ImportJob {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileKey      String
+  fileName     String      @db.VarChar(255)
+  format       String      @db.VarChar(16)
+  state        ImportState @default(UPLOADED)
+  /// Which detection strategy fired (FR-3.3), shown to the writer in words.
+  detectedBy   String?
+  proposal     Json?
+  error        String?
+  storyboardId String?
+  storyboard   Storyboard? @relation(fields: [storyboardId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([userId, createdAt])
+}
+
+/// NFR-2 — key is `${baseRevisionId}:${targetRevisionId}`. Revisions are
+/// immutable so entries never invalidate.
+model DiffCache {
+  key       String   @id
+  result    Json
+  stats     Json
+  createdAt DateTime @default(now())
+}

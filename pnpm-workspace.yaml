@@ -1,0 +1,63 @@
+packages:
+  - apps/*
+  - packages/*
+
+# One place for every version that more than one workspace package uses.
+# Bump here; every package that says "catalog:" follows.
+catalog:
+  # runtime
+  next: 16.3.5
+  react: 19.3.0
+  react-dom: 19.3.0
+  zod: 4.6.2
+  '@prisma/client': 7.10.0
+  '@prisma/adapter-pg': 7.10.0
+  pg: 8.23.0
+  # tooling
+  typescript: 5.9.3
+  '@types/node': 24.13.4
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
+  '@types/pg': 8.23.1
+  eslint: 9.39.5
+  '@eslint/js': 9.39.5
+  typescript-eslint: 8.70.0
+  eslint-config-next: 16.3.5
+  eslint-config-prettier: 10.1.8
+  prettier: 3.9.6
+  prisma: 7.10.0
+  tsx: 4.23.13
+  dotenv: 17.4.2
+  vitest: 4.1.11
+  tailwindcss: 4.3.3
+  '@tailwindcss/postcss': 4.3.3
+
+# pnpm refuses to run dependency install scripts unless approved here.
+# Each entry names why it needs one.
+allowBuilds:
+  '@prisma/engines': true # downloads the schema engine used by `prisma migrate`
+  prisma: true # same, via the CLI package
+  esbuild: true # verifies its platform binary (used by tsx and Vitest)
+  unrs-resolver: true # native resolver behind eslint-plugin-import
+
+# Supply-chain guard: pnpm (v11+) will not resolve packages published in the
+# last 24 hours (minimumReleaseAge default 1440) unless listed here. pnpm
+# appends entries itself when a fresh pin is accepted; keep the list tidy.
+minimumReleaseAgeExclude:
+  - '@next/env@16.3.5'
+  - '@next/eslint-plugin-next@16.3.5'
+  - '@next/swc-darwin-arm64@16.3.5'
+  - '@next/swc-darwin-x64@16.3.5'
+  - '@next/swc-linux-arm64-gnu@16.3.5'
+  - '@next/swc-linux-arm64-musl@16.3.5'
+  - '@next/swc-linux-x64-gnu@16.3.5'
+  - '@next/swc-linux-x64-musl@16.3.5'
+  - '@next/swc-win32-arm64-msvc@16.3.5'
+  - '@next/swc-win32-x64-msvc@16.3.5'
+  - eslint-config-next@16.3.5
+  - next@16.3.5
+  - resend@6.28.0
+
+saveExact: true
+engineStrict: true
+linkWorkspacePackages: true

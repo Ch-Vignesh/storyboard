@@ -1,0 +1,24 @@
+# Local Postgres matching production (Neon runs Postgres 16).
+#   docker compose up -d
+#   pnpm db:migrate
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: storyboard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: storyboard
+      POSTGRES_PASSWORD: storyboard
+      POSTGRES_DB: storyboard
+    ports:
+      - '5432:5432'
+    volumes:
+      - storyboard-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U storyboard -d storyboard']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  storyboard-pgdata:

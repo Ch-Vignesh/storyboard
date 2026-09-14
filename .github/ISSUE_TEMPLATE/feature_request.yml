@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a change to the product.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What a writer or helper cannot do today, in their words.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should happen instead. Check docs/01-srs.md section 8 first; some things are deferred on purpose.
+    validations:
+      required: true
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Product principles
+      options:
+        - label: This does not add a language model anywhere in the writing path.
+          required: true
+        - label: The interface still never speaks git.
+          required: true
