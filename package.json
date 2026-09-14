@@ -26,7 +26,8 @@
     "db:reset": "pnpm --filter @storyboard/db db:reset",
     "prepare": "husky",
     "e2e": "pnpm --filter @storyboard/app e2e",
-    "db:seed:demo": "pnpm --filter @storyboard/db db:seed:demo"
+    "db:seed:demo": "pnpm --filter @storyboard/db db:seed:demo",
+    "cron": "pnpm --filter @storyboard/app cron"
   },
   "devDependencies": {
     "@storyboard/config": "workspace:*",

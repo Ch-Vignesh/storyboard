@@ -140,11 +140,15 @@ export async function seedDemo(prisma: PrismaClient): Promise<string> {
     select: { id: true },
   })
 
-  // Pin genres for Maya so the dashboard's third region has something to show.
-  await prisma.userGenre.deleteMany({ where: { userId: users.maya! } })
-  await prisma.userGenre.createMany({
-    data: genres.map((genre, order) => ({ userId: users.maya!, genreId: genre.id, order })),
-  })
+  // Everyone pins genres: the dashboard's third region needs them, and so does
+  // the weekly digest, which deliberately never sends someone their own request.
+  for (const person of PEOPLE) {
+    const userId = users[person.username]!
+    await prisma.userGenre.deleteMany({ where: { userId } })
+    await prisma.userGenre.createMany({
+      data: genres.map((genre, order) => ({ userId, genreId: genre.id, order })),
+    })
+  }
 
   const storyboard = await prisma.storyboard.create({
     data: {
@@ -544,6 +548,27 @@ export async function seedDemo(prisma: PrismaClient): Promise<string> {
       authorId: users.arjun!,
       body: 'The other option is that he has no official reason at all and knows he has none, and that is why he is careful with her. A man acting on his own time is a different kind of threat to a man with a clipboard. Harder to write, but it means nobody can call the department and make him go away, which raises the pressure without you having to invent an institution.',
       createdAt: ago(6),
+    },
+  })
+
+  // ── 4. A request nobody has answered, old enough for the seven-day nudge.
+  //    FR-12.4's whole point is that this is a normal state, not a failure, so
+  //    the demo should contain one rather than implying every ask gets answers.
+  await prisma.contributionRequest.create({
+    data: {
+      publicId: 'demoquiet',
+      storyboardId: storyboard.id,
+      // Chapter one, section two: its rewrite request is RESOLVED, so the
+      // one-open-request-per-section index leaves this section free.
+      sectionId: sectionIds[0]![1]!,
+      kind: 'UNBLOCK',
+      title: 'Is the inspector reading the entries or counting them?',
+      ask: 'Small thing that I cannot settle. When he goes through eleven years of the logbook in one sitting, is he reading them or counting them? Counting is funnier and colder and makes the moment he starts actually reading land harder. Reading is more generous to him and makes him a person sooner. I have written it both ways and I cannot tell which one the book wants, which usually means I am asking the wrong question about it.',
+      minWords: 150,
+      maxWords: 1000,
+      state: 'OPEN',
+      openedById: users.maya!,
+      createdAt: ago(11),
     },
   })
 

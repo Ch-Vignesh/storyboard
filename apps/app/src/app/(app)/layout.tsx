@@ -12,6 +12,10 @@ export default async function AppLayout({ children }: Readonly<{ children: React
 
   return (
     <div className="min-h-screen">
+      {/* NFR-4 — the contents rail and the header are a lot to tab past. */}
+      <a href="#main" className="skip-link">
+        Skip to the main content
+      </a>
       <header className="border-b border-rule">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3.5">
           <Link
@@ -27,8 +31,16 @@ export default async function AppLayout({ children }: Readonly<{ children: React
             <Link href="/new" className="text-pencil hover:underline">
               Start a storyboard
             </Link>
+            <Link href="/notifications" className="text-ink-soft hover:text-ink">
+              Notifications
+            </Link>
+            <Link href="/settings" className="text-ink-soft hover:text-ink">
+              Settings
+            </Link>
             {session?.user.username ? (
-              <span className="text-ink-faint">@{session.user.username}</span>
+              <Link href={`/@${session.user.username}`} className="text-ink-faint hover:text-ink">
+                @{session.user.username}
+              </Link>
             ) : null}
             <form
               action={async () => {
@@ -43,7 +55,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
           </nav>
         </div>
       </header>
-      {children}
+      <div id="main">{children}</div>
     </div>
   )
 }

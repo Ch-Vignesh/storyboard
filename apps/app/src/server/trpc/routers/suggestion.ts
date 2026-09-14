@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadStoryboard } from '@/lib/authz/guard'
+import { recordActivity, recordActivityFor } from '@/server/activity'
 import { isAuthor } from '@/lib/authz'
 import { emptyDoc, flavourForStoryType, parseDoc } from '@/lib/doc/schema'
 import { derive, hashContent } from '@/lib/doc/text'
@@ -211,6 +212,7 @@ export const suggestionRouter = createTRPCRouter({
         requestId: request.id,
         suggestionId: suggestion.id,
       })
+      await recordActivity(ctx.db, userId)
 
       log.info(
         { event: 'suggestion.submit', suggestionId: suggestion.id, requestId: request.id, userId },
@@ -464,6 +466,9 @@ export const suggestionRouter = createTRPCRouter({
         ],
       })
 
+      // Both people did something: one wrote it, one decided on it.
+      await recordActivityFor(ctx.db, [suggestion.contributorId, deciderId])
+
       log.info(
         {
           event: 'suggestion.accepted',
@@ -546,6 +551,8 @@ export const suggestionRouter = createTRPCRouter({
           payload: { suggestionId: suggestion.id, requestId: suggestion.request.id },
         },
       })
+
+      await recordActivity(ctx.db, ctx.session.user.id)
 
       log.info(
         { event: 'suggestion.passed', suggestionId: suggestion.id, reason: input.reason ?? null },

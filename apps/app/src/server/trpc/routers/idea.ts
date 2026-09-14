@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadStoryboard } from '@/lib/authz/guard'
+import { recordActivity } from '@/server/activity'
 import { logger } from '@/lib/logger'
 import { DAILY_LIMITS } from '@/lib/schemas/constants'
 import { ideaBodySchema } from '@/lib/schemas/help'
@@ -96,6 +97,8 @@ export const ideaRouter = createTRPCRouter({
         },
         select: { id: true, body: true, createdAt: true, parentId: true },
       })
+
+      await recordActivity(ctx.db, userId)
 
       log.info(
         { event: 'idea.post', ideaId: idea.id, requestId: request.id, userId },

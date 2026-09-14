@@ -136,3 +136,54 @@
   height: 0;
   pointer-events: none;
 }
+
+/*
+ * Accessibility baseline.
+ *
+ * NFR-4 is WCAG 2.2 AA, and two of its criteria are easiest to satisfy once,
+ * globally, rather than per component.
+ */
+
+/* Respect a reader who has asked the operating system for less movement. The
+   product is mostly still, but transitions on the margin cards and the drag
+   handles are motion, and reduced-motion means reduced, not decorative. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skip link: the first thing a keyboard user reaches, invisible until focused.
+   The reader has a contents rail and a margin before the manuscript, so tabbing
+   past them on every page would be a real cost. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+}
+
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--color-paper);
+  border: 1px solid var(--color-pencil);
+  border-radius: var(--radius-control);
+  color: var(--color-pencil);
+  font-size: 14px;
+  outline: 2px solid var(--color-pencil);
+  outline-offset: 2px;
+}
+
+/* A focused control must never sit under the sticky header (WCAG 2.2 AA,
+   focus-not-obscured). The reader and the editor both have one. */
+:target,
+[id] {
+  scroll-margin-top: 5rem;
+}

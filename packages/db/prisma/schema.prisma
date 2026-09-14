@@ -175,6 +175,10 @@ model User {
   isAdmin         Boolean    @default(false)
   /// Set when the four onboarding steps are complete (FR-1.3, FR-1.5).
   onboardedAt     DateTime?
+  /// FR-9.4 — whether suggestions this person wrote that were passed on are
+  /// shown to anyone but them. False by default: defaulting to public would
+  /// make being passed on feel punitive, which FR-6.10 is at pains to avoid.
+  showPassedWork    Boolean  @default(false)
   /// NFR-5 — reading comfort, persisted per user rather than per browser.
   /// Percentages of the manuscript defaults (19px / 1.68) so they stay integers
   /// and the bounds in lib/schemas/constants.ts are exact. Decision 0009.

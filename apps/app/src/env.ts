@@ -18,6 +18,8 @@ export const env = createEnv({
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).optional(),
     /** Dev and test only: the console mailer also appends each message here. */
     MAIL_LOG_FILE: z.string().min(1).optional(),
+    /** Authorises /api/cron/[job] (decision 0012). Without it, no job runs. */
+    CRON_SECRET: z.string().min(16, 'CRON_SECRET must be at least 16 characters').optional(),
   },
   client: {
     NEXT_PUBLIC_APP_URL: z.url(),
@@ -34,6 +36,7 @@ export const env = createEnv({
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     LOG_LEVEL: process.env.LOG_LEVEL,
     MAIL_LOG_FILE: process.env.MAIL_LOG_FILE,
+    CRON_SECRET: process.env.CRON_SECRET,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     NEXT_PUBLIC_MARKETING_URL: process.env.NEXT_PUBLIC_MARKETING_URL,
   },

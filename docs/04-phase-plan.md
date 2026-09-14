@@ -14,21 +14,21 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase**        | 2 — The loop                                                                                                                                                                                                                                                                     |
-| **State**        | Phases 1 and 2 are both code complete and verified locally against a real Postgres 16.14: every check passes and all eleven flow tests pass against a production build. Neither is committed — the user reviews first.                                                           |
-| **Last updated** | 2026-09-14                                                                                                                                                                                                                                                                       |
-| **Next actions** | 1. Review and commit phases 1 and 2; confirm CI stays green with the flow tests in it. 2. Set up hosting accounts (see the checklist at the end); at minimum Neon, so `DATABASE_URL` exists outside this machine. 3. Begin Phase 3, which needs no open decision resolved first. |
+|                  |                                                                                                                                                                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Phase**        | 3 — Findable and durable                                                                                                                                                                                                                         |
+| **State**        | Phases 1 and 2 are committed (`9f17ace`) and pushed, CI green. Phase 3 is code complete and verified locally; both its exit criteria pass. Not committed — the user reviews first.                                                               |
+| **Last updated** | 2026-09-14                                                                                                                                                                                                                                       |
+| **Next actions** | 1. Review and commit Phase 3. 2. Set up hosting accounts (see the checklist at the end); at minimum Neon, so `DATABASE_URL` exists outside this machine, and a Vercel Cron entry per job in decision 0012. 3. Decide OD-3, which blocks Phase 4. |
 
 ## Overview
 
 | Phase | Name                   | Requirements                                                                          | Estimate  | Status                               |
 | ----- | ---------------------- | ------------------------------------------------------------------------------------- | --------- | ------------------------------------ |
 | 0     | Foundations            | FR-1.3 (steps 1–2), FR-1.4, FR-1.6, NFR-3, NFR-8, NFR-9                               | 1 week    | `[x]` complete, CI green 2026-09-14  |
-| 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[x]` code complete, awaiting review |
-| 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` code complete, awaiting review |
-| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[ ]`                                |
+| 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[x]` committed, CI green            |
+| 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` committed, CI green            |
+| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` code complete, awaiting review |
 | 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[ ]`                                |
 | 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[ ]`                                |
 | 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[ ]`                                |
@@ -168,24 +168,33 @@ Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 
 **Goal.** A user who signs up, pins genres and never creates anything still has a useful dashboard, and every notification type fires and renders in both surfaces.
 
-**Resolve first:** OD-2 (pen names). Changing identity display after people have credits is unpleasant.
+**Resolved:** OD-2 — one public name, no pen names. `username` is immutable and owns the URL; `displayName` is editable and is what the interface shows. See decision 0011.
 
 ### Tasks, in order
 
-1. [ ] Browse with filters (genre, type, request kind, word bounds, age) and the three sorts; storyboard cards with the open-requests badge as the primary call to action (FR-11.3, FR-11.4). Search limited to title and author name (FR-11.6).
-2. [ ] Dashboard regions two and three; genre pinning editable; the never-empty landing (FR-1.5, FR-11.1, FR-11.2).
-3. [ ] Reader margin: request cards with leader rules that thicken and turn blue pencil on hover; click scrolls and highlights the section (FR-11.5).
-4. [ ] Profiles: authored, accepted, ideas that helped, spin-offs, the 365-day contribution calendar from `ActivityDay`, reverse-chronological feed; "written but not used" collapsed and private by default (FR-9.3, FR-9.4). Credits page and plain-text credit export (FR-9.2, FR-9.6).
-5. [ ] Notification centre; per-type email toggles in settings; all twelve event types (FR-12.1, FR-12.2).
-6. [ ] Inngest: immediate email for decisions on your own work, hourly digest for the rest, Sunday weekly digest of open requests in your genres; the seven-day silence nudge with its two one-click actions (FR-12.3, FR-12.4). React Email templates, plain and single-column, no tracking pixels (FR-12.5).
-7. [ ] Settings screen: account, genres, notifications, reading preferences.
+1. [x] Browse with filters (genre, type, request kind, word bounds, age) and the three sorts; storyboard cards with the open-requests badge as the primary call to action (FR-11.3, FR-11.4). Search limited to title and author name (FR-11.6). _(2026-09-15)_
+2. [x] Dashboard regions two and three; genre pinning editable; the never-empty landing (FR-1.5, FR-11.1, FR-11.2). _(2026-09-15)_
+3. [x] Reader margin: request cards with leader rules that thicken and turn blue pencil on hover; click scrolls and highlights the section (FR-11.5). _(2026-09-15)_
+4. [x] Profiles: authored, accepted, ideas that helped, spin-offs, the 365-day contribution calendar from `ActivityDay`, reverse-chronological feed; "written but not used" collapsed and private by default (FR-9.3, FR-9.4). Credits page and plain-text credit export (FR-9.2, FR-9.6). _(2026-09-15)_
+5. [x] Notification centre; per-type email toggles in settings; all twelve event types (FR-12.1, FR-12.2). _(2026-09-15)_
+6. [x] Inngest: immediate email for decisions on your own work, hourly digest for the rest, Sunday weekly digest of open requests in your genres; the seven-day silence nudge with its two one-click actions (FR-12.3, FR-12.4). React Email templates, plain and single-column, no tracking pixels (FR-12.5). _(2026-09-15)_
+7. [x] Settings screen: account, genres, notifications, reading preferences. _(2026-09-15)_
 
 ### Exit criteria
 
-- [ ] A user who signs up, pins genres and never creates anything has a useful dashboard.
-- [ ] Every notification type fires in a test and renders in-app and by email.
+- [x] A user who signs up, pins genres and never creates anything has a useful dashboard. _Region one offers the one thing worth doing, region two hides itself when there is no news rather than showing an empty heading, and region three fills with open requests in the genres they pinned. FR-1.5 is satisfied by construction: there is no path to an empty dashboard._
+- [x] Every notification type fires in a test and renders in-app and by email. _`src/server/mail/digests.test.ts`, nine tests against a real Postgres: all twelve types defined with copy and a delivery class, every immediate type emailed individually, every hourly type batched into one message, no double sends, per-type switches honoured, suspended accounts never emailed, and the nudge wording held to FR-12.4._
 
 ### Notes
+
+- **The job runner is cron endpoints, not Inngest** (decision 0012). The work is four plain functions over a database and a clock; `/api/cron/[job]` and `pnpm cron <job>` both call them, and so do the tests. The cost is no automatic retries, which the `emailedAt` ledger mitigates for the hourly run and not for the weekly one — that is written down in the decision rather than discovered later.
+- **OD-2 is decision 0011.** One public name. `displayName` became editable in settings; `username` still owns the URL and never changes.
+- **`ActivityDay` was never written to before this phase.** The table existed from phase 0 and nothing filled it, so the contribution calendar would have been permanently empty. `server/activity.ts` now records a unit of work on save, suggestion sent, idea posted, accept, pass and request opened — after the transaction, and it never throws, because a calendar square is not worth failing a save over.
+- **One migration**, `20260914182045_show_passed_work`. FR-9.4 needs a per-user flag and it defaults to **false**: the requirement is explicit that defaulting unused work to public would make being passed on feel punitive.
+- **Three accessibility defects fixed across the whole application**, found by working through a UX checklist rather than by inspection. Inputs were 14px, which makes iOS Safari zoom the page on focus — they are now 16px on touch widths and 14px above. There was no skip link anywhere, on a product whose main screen puts a contents rail and a margin before the manuscript. And `prefers-reduced-motion` was unhandled.
+- **The email templates are not React Email**, which the architecture suggested. Every one of these messages is a sentence, a link and a sign-off; the whole HTML body is nine lines, and FR-12.5 asks for plain and single-column anyway. A component library would have been more code than the thing it renders.
+- **Demo data gained two things** so the prototype can demonstrate the digests: everyone pins genres (the weekly digest never sends someone their own request, so a single genre-pinning author produces nothing), and there is now a request nobody has answered, old enough to be nudged.
+- **Deferred deliberately:** avatars (FR-9.3 mentions them, nothing uploads one yet — that is phase 5's file handling), and the `?widen=1` deep link the nudge offers, which currently lands on the request rather than opening the word-bounds control.
 
 ---
 

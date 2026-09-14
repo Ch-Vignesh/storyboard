@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadSection, loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
+import { recordActivity } from '@/server/activity'
 import { publicId } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import { CONTINUE_TARGET_MAX_WORDS, REWRITE_TARGET_MIN_WORDS } from '@/lib/schemas/constants'
@@ -108,6 +109,9 @@ export const requestRouter = createTRPCRouter({
       },
       select: { id: true, publicId: true },
     })
+
+    // Opening a request is work: it is how an author asks for help (FR-9.3).
+    await recordActivity(ctx.db, ctx.session.user.id)
 
     log.info(
       { event: 'request.open', requestId: created.id, storyboardId, kind: input.kind },
@@ -281,6 +285,67 @@ export const requestRouter = createTRPCRouter({
         },
       })
     }),
+
+  /**
+   * FR-11.1 region two: requests you have helped with that have news.
+   *
+   * "News" is a decision on your own work, or movement under it: your
+   * suggestion was accepted or passed, it went stale, or your idea was
+   * credited. A request you sent something to that has simply gone quiet is not
+   * news, and putting it here would make the region a list of things to feel
+   * bad about.
+   */
+  withNews: protectedProcedure.query(async ({ ctx }) => {
+    const userId = ctx.session.user.id
+
+    const suggestions = await ctx.db.suggestion.findMany({
+      where: {
+        contributorId: userId,
+        state: { in: ['ACCEPTED', 'PASSED', 'STALE'] },
+        request: { storyboard: { deletedAt: null } },
+      },
+      orderBy: [{ decidedAt: 'desc' }, { submittedAt: 'desc' }],
+      take: 12,
+      select: {
+        id: true,
+        publicId: true,
+        state: true,
+        passReason: true,
+        decidedAt: true,
+        submittedAt: true,
+        request: {
+          select: {
+            publicId: true,
+            title: true,
+            storyboard: { select: { slug: true, title: true } },
+          },
+        },
+      },
+    })
+
+    const ideas = await ctx.db.idea.findMany({
+      where: {
+        authorId: userId,
+        markedHelpful: true,
+        request: { storyboard: { deletedAt: null } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+      select: {
+        id: true,
+        createdAt: true,
+        request: {
+          select: {
+            publicId: true,
+            title: true,
+            storyboard: { select: { slug: true, title: true } },
+          },
+        },
+      },
+    })
+
+    return { suggestions, ideas }
+  }),
 
   /** FR-5.10 — closing does not delete the suggestions; they stay readable. */
   close: protectedProcedure

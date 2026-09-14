@@ -26,6 +26,8 @@ export function ReaderShell({
   const trpc = useTRPC()
   const { storyboard, chapters, permissions, historyVisibleFrom } = data
   const [activeChapterId, setActiveChapterId] = useState(chapters[0]?.id ?? null)
+  // FR-11.5 — clicking a margin card scrolls to its section and highlights it.
+  const [highlighted, setHighlighted] = useState<string | null>(null)
   const flavour = flavourForStoryType(storyboard.type)
 
   // NFR-1 — one chapter at a time. A 120,000-word manuscript is never one
@@ -184,7 +186,15 @@ export function ReaderShell({
               ) : (
                 <div className="manuscript mt-6 max-w-measure">
                   {(chapter.data ?? []).map((section) => (
-                    <section key={section.id} id={`section-${section.id}`}>
+                    <section
+                      key={section.id}
+                      id={`section-${section.id}`}
+                      className={
+                        highlighted === section.id
+                          ? 'relative -mx-4 rounded-control bg-pencil-wash/60 px-4 transition-colors'
+                          : 'relative -mx-4 px-4 transition-colors'
+                      }
+                    >
                       {section.title ? (
                         <h3 className="font-manuscript text-[19px] font-medium">{section.title}</h3>
                       ) : null}
@@ -201,30 +211,57 @@ export function ReaderShell({
                           leader rule that thickens and turns blue on hover. */}
                       {(requestsBySection.get(section.id) ?? []).map((request) => (
                         <aside key={request.id} className="not-prose group relative mb-6">
+                          {/* The leader rule: a hairline from the card to the
+                              section it belongs to, which thickens and turns
+                              blue pencil on hover (architecture section 9). */}
                           <span
                             aria-hidden
-                            className="absolute -top-3 left-0 h-px w-10 bg-rule transition-colors group-hover:h-0.5 group-hover:bg-pencil"
+                            className={
+                              highlighted === section.id
+                                ? 'absolute -top-3 left-0 h-0.5 w-10 bg-pencil transition-all'
+                                : 'absolute -top-3 left-0 h-px w-10 bg-rule transition-all group-hover:h-0.5 group-hover:bg-pencil'
+                            }
                           />
-                          <Link
-                            href={`/s/${storyboard.slug}/help/${request.publicId}`}
-                            className="block border border-ochre/35 bg-ochre-wash px-4 py-3 shadow-lift transition-colors hover:border-ochre"
-                          >
-                            <span className="block text-[11.5px] tracking-wide text-ochre uppercase">
-                              {request.kind === 'UNBLOCK'
-                                ? 'stuck — wants ideas'
-                                : request.kind === 'CONTINUE'
-                                  ? 'stuck — needs writing'
-                                  : 'stuck — needs a rewrite'}
-                            </span>
-                            <span className="mt-1 block font-manuscript text-[17px] text-ink">
-                              {request.title}
-                            </span>
-                            <span className="mt-1 block text-[12px] text-ink-soft">
-                              {request.kind === 'UNBLOCK'
-                                ? `${String(request._count.ideas)} ${request._count.ideas === 1 ? 'idea' : 'ideas'}`
-                                : `${String(request._count.suggestions)} ${request._count.suggestions === 1 ? 'suggestion' : 'suggestions'} · ${String(request.minWords)}–${String(request.maxWords)} words`}
-                            </span>
-                          </Link>
+                          <div className="border border-ochre/35 bg-ochre-wash shadow-lift transition-colors group-hover:border-ochre">
+                            {/* FR-11.5 — the card itself scrolls and highlights;
+                                opening the request is its own explicit action,
+                                so neither is a surprise. */}
+                            <button
+                              type="button"
+                              className="block w-full px-4 pt-3 pb-1 text-left"
+                              aria-pressed={highlighted === section.id}
+                              onClick={() => {
+                                setHighlighted(section.id)
+                                document
+                                  .getElementById(`section-${section.id}`)
+                                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                              }}
+                            >
+                              <span className="block text-[11.5px] tracking-wide text-ochre uppercase">
+                                {request.kind === 'UNBLOCK'
+                                  ? 'stuck — wants ideas'
+                                  : request.kind === 'CONTINUE'
+                                    ? 'stuck — needs writing'
+                                    : 'stuck — needs a rewrite'}
+                              </span>
+                              <span className="mt-1 block font-manuscript text-[17px] text-ink">
+                                {request.title}
+                              </span>
+                              <span className="mt-1 block text-[12px] text-ink-soft">
+                                {request.kind === 'UNBLOCK'
+                                  ? `${String(request._count.ideas)} ${request._count.ideas === 1 ? 'idea' : 'ideas'}`
+                                  : `${String(request._count.suggestions)} ${request._count.suggestions === 1 ? 'suggestion' : 'suggestions'} · ${String(request.minWords)}–${String(request.maxWords)} words`}
+                              </span>
+                            </button>
+                            <p className="px-4 pt-1 pb-3">
+                              <Link
+                                href={`/s/${storyboard.slug}/help/${request.publicId}`}
+                                className="text-[12.5px] text-ochre underline-offset-2 hover:underline"
+                              >
+                                Read what they need →
+                              </Link>
+                            </p>
+                          </div>
                         </aside>
                       ))}
 

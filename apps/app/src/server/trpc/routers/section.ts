@@ -5,6 +5,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadChapter, loadSection } from '@/lib/authz/guard'
+import { recordActivity } from '@/server/activity'
 import { isAuthor, revisionVisibilityWhere } from '@/lib/authz'
 import {
   emptyDoc,
@@ -594,6 +595,10 @@ export const sectionRouter = createTRPCRouter({
         return revision.id
       })
 
+      // After the write, never inside it: a calendar square is not worth
+      // failing a save over.
+      await recordActivity(ctx.db, userId)
+
       return { revisionId, unchanged: false as const }
     }),
 
@@ -748,6 +753,8 @@ export const sectionRouter = createTRPCRouter({
           })),
         })
       }
+
+      await recordActivity(ctx.db, userId)
 
       log.info(
         {

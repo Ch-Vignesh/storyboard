@@ -14,6 +14,18 @@ import {
  * forms and the tRPC procedures so a bound cannot drift between them.
  */
 
+/**
+ * A single line of text, with no control characters.
+ *
+ * Used for anything that can end up in an email header. `.trim()` strips the
+ * ends of a string but not a newline in the middle of one, and a newline in a
+ * Subject is a header separator — see `safeSubject` in the mail templates for
+ * what that would allow. Refused here so the writer is told, and stripped there
+ * so it cannot matter.
+ */
+// eslint-disable-next-line no-control-regex -- matching them is the point
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
+
 /** Counts words the way the rest of the product does (`lib/doc/text.ts`). */
 export function countWords(text: string): number {
   if (text.trim().length === 0) return 0
@@ -70,6 +82,7 @@ export const createRequestSchema = z
       .string()
       .trim()
       .min(1, 'Give it a short title.')
+      .refine((value) => !CONTROL_CHARACTERS.test(value), 'Keep the title to one line.')
       .max(
         REQUEST_TITLE_MAX_CHARS,
         `Keep the title under ${String(REQUEST_TITLE_MAX_CHARS)} characters.`,
