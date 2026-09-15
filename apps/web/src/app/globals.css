@@ -25,16 +25,18 @@
 
 :root {
   /*
-   * The sheet. Warm, slightly yellow, and a shade darker than the panels that
-   * sit on it so a card reads as a fresher page laid on an older one.
+   * The sheet. Warm, but only just — the cream is carried by the texture
+   * rather than by the colour, which is the difference between paper and
+   * parchment. A shade darker than the panels that sit on it, so a card reads
+   * as a fresher page laid on an older one.
    */
-  --color-paper: #f5efe2;
-  --color-paper-sunk: #ece4d3;
-  --color-surface: #fbf7ef;
+  --color-paper: #faf7f0;
+  --color-paper-sunk: #f2ede1;
+  --color-surface: #fefcf8;
 
   /* Rules are the colour of a pencil line on cream, not grey on white. */
-  --color-rule: #ddd3be;
-  --color-rule-soft: #e7dfcd;
+  --color-rule: #e4ddd0;
+  --color-rule-soft: #efe9de;
 
   /*
    * The working colours, warmed just enough to belong on this ground. Ochre
@@ -42,10 +44,10 @@
    * that had to move, because a cool wash on warm paper looks like a printing
    * error.
    */
-  --color-ochre-wash: #f6ead8;
-  --color-moss-wash: #e6ecdf;
-  --color-pencil-wash: #e4e8f0;
-  --color-pencil-fg: #fbf7ef;
+  --color-ochre-wash: #faf1e5;
+  --color-moss-wash: #edf1e8;
+  --color-pencil-wash: #eaeef5;
+  --color-pencil-fg: #fefcf8;
   --color-ochre-edge: rgb(168 87 27 / 0.45);
   --color-moss-edge: rgb(46 107 79 / 0.5);
 
@@ -76,9 +78,9 @@ body {
   background-color: var(--color-paper);
   color: var(--color-ink);
   background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23f)' opacity='0.5'/%3E%3C/svg%3E"),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23f)' opacity='0.35'/%3E%3C/svg%3E"),
-    repeating-linear-gradient(90deg, rgb(92 74 46 / 0.03) 0 1px, transparent 1px 3px),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23f)' opacity='0.42'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23f)' opacity='0.28'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(90deg, rgb(92 74 46 / 0.022) 0 1px, transparent 1px 3px),
     radial-gradient(120% 80% at 50% 0%, rgb(255 253 246 / 0.85), transparent 60%);
   background-size:
     160px 160px,
