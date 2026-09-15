@@ -417,7 +417,11 @@ export default function HomePage() {
           </main>
 
           {/* ── The margin. Decorative drift only; the text never moves. */}
-          <aside aria-label="Notes" className="relative mt-6 lg:sticky lg:top-10 lg:mt-0">
+          {/* `lg:mt-12` is headroom, not taste. The notes inside drift by up to
+              24px, and at the top of the page that is upward — with the margin
+              flush to the grid they rose straight into the header nav. The gap
+              also lines the first note up with the hero's own top padding. */}
+          <aside aria-label="Notes" className="relative mt-6 lg:sticky lg:top-16 lg:mt-12">
             {/* A transpose mark loose in the margin, at the angle a hand makes
                 rather than the angle a grid does. */}
             <Transpose className="sway pointer-events-none absolute -top-8 right-2 hidden w-8 -rotate-6 text-ink-faint/40 lg:block" />

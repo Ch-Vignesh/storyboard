@@ -5,92 +5,90 @@
  *
  * Two things live here rather than in `packages/ui`, and deliberately:
  *
- * 1. **A dark theme.** The application is paper-and-ink and has no dark mode —
- *    the paper surface is the product's identity (see the note at the top of
- *    the shared theme). The marketing site is read once, often at night, often
- *    on a phone, by somebody who has not decided to care about us yet, and a
- *    page that ignores their system setting reads as careless. So the dark
- *    palette is scoped to this app. It is not an inversion: the ground moves to
- *    a blue-black that shares the ink's hue, and every working colour is
- *    re-mixed so it keeps its meaning — pencil still reads as a link, ochre
- *    still reads as a stuck point, moss still reads as accepted.
+ * 1. **Paper.** The application's ground is a cool near-white — laser stock,
+ *    the surface a manuscript is printed on to be worked on. The marketing
+ *    page is the cover rather than the contents, so it gets the other paper:
+ *    a warm laid sheet with tooth, the kind a book is made of. The ink stays
+ *    the product's blue-black, because ink on cream is what print looks like
+ *    and ink on cream is the whole idea.
+ *
+ *    **Light only.** There is no dark mode here. It was tried and removed: a
+ *    dark theme is a different material, not a different colour, and the one
+ *    thing this page is trying to say is *paper*. `color-scheme: light` is set
+ *    explicitly so a dark operating system does not repaint the form controls
+ *    and scrollbars underneath it.
  *
  * 2. **Scroll-linked motion**, which no other surface in the product uses.
  *
- * Nothing here is imported by `apps/app`.
+ * Nothing here is imported by `apps/app`, which keeps its own cool stock.
  */
 
-@theme {
-  --color-surface: var(--color-white);
-  --color-rule-soft: #ebece6;
-  --color-pencil-fg: var(--color-white);
+:root {
+  /*
+   * The sheet. Warm, slightly yellow, and a shade darker than the panels that
+   * sit on it so a card reads as a fresher page laid on an older one.
+   */
+  --color-paper: #f5efe2;
+  --color-paper-sunk: #ece4d3;
+  --color-surface: #fbf7ef;
+
+  /* Rules are the colour of a pencil line on cream, not grey on white. */
+  --color-rule: #ddd3be;
+  --color-rule-soft: #e7dfcd;
+
+  /*
+   * The working colours, warmed just enough to belong on this ground. Ochre
+   * still reads as a stuck point and moss as accepted; the washes are the ones
+   * that had to move, because a cool wash on warm paper looks like a printing
+   * error.
+   */
+  --color-ochre-wash: #f6ead8;
+  --color-moss-wash: #e6ecdf;
+  --color-pencil-wash: #e4e8f0;
+  --color-pencil-fg: #fbf7ef;
   --color-ochre-edge: rgb(168 87 27 / 0.45);
   --color-moss-edge: rgb(46 107 79 / 0.5);
-  --color-grain: rgb(17 32 43 / 0.022);
+
+  color-scheme: light;
 }
 
 /*
- * The three states a viewer can be in, not two: an explicit choice stamps the
- * root element, and the default system setting stamps nothing — so the media
- * query has to carry the un-stamped case, guarded so an explicit light choice
- * still beats a dark operating system.
+ * The texture, in four layers and no images.
+ *
+ * 1. **Fibre**, from an inline `feTurbulence` tile. This is the one that does
+ *    the work: it gives the surface tooth, so the page stops reading as a flat
+ *    fill. Kept very faint — at full strength it is television static, and the
+ *    difference between paper and noise is entirely in the amount.
+ * 2. **The same fibre again**, fixed to the viewport and at a different scale.
+ *    Two grains that never line up is what stops a 160px tile reading as a
+ *    tile on a wide screen; one alone repeats visibly.
+ * 3. **Laid lines**, the faint ribbing left by the mould in laid paper. Three
+ *    pixels apart and almost invisible, which is right: they are meant to be
+ *    felt rather than seen.
+ * 4. **A warm bloom** at the top, so the sheet is not uniformly lit.
+ *
+ * All of it on `body` rather than a pseudo-element. A fixed `::before` overlay
+ * was the obvious way to do layer 2 and it is wrong: at any z-index that keeps
+ * it above the background it also sits above the text, and multiplying grain
+ * over type dirties every word on the page.
  */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --color-paper: #0f171d;
-    --color-paper-sunk: #151f27;
-    --color-surface: #15202a;
-    --color-ink: #e9ebe6;
-    --color-ink-soft: #a4b1ba;
-    --color-ink-faint: #75848f;
-    --color-rule: #26343f;
-    --color-rule-soft: #1d2933;
-    --color-pencil: #86aee4;
-    --color-pencil-deep: #a3c3ee;
-    --color-pencil-wash: #16283c;
-    --color-pencil-fg: #0b1219;
-    --color-ochre: #dd9558;
-    --color-ochre-wash: #261a11;
-    --color-ochre-edge: rgb(221 149 88 / 0.5);
-    --color-moss: #74bb98;
-    --color-moss-wash: #12251d;
-    --color-moss-edge: rgb(116 187 152 / 0.55);
-    --color-grain: rgb(233 235 230 / 0.03);
-  }
-}
-
-:root[data-theme='dark'] {
-  --color-paper: #0f171d;
-  --color-paper-sunk: #151f27;
-  --color-surface: #15202a;
-  --color-ink: #e9ebe6;
-  --color-ink-soft: #a4b1ba;
-  --color-ink-faint: #75848f;
-  --color-rule: #26343f;
-  --color-rule-soft: #1d2933;
-  --color-pencil: #86aee4;
-  --color-pencil-deep: #a3c3ee;
-  --color-pencil-wash: #16283c;
-  --color-pencil-fg: #0b1219;
-  --color-ochre: #dd9558;
-  --color-ochre-wash: #261a11;
-  --color-ochre-edge: rgb(221 149 88 / 0.5);
-  --color-moss: #74bb98;
-  --color-moss-wash: #12251d;
-  --color-moss-edge: rgb(116 187 152 / 0.55);
-  --color-grain: rgb(233 235 230 / 0.03);
-}
-
-:root {
-  color-scheme: light dark;
-}
-
 body {
   background-color: var(--color-paper);
   color: var(--color-ink);
-  /* The faintest grain, so the ground reads as stock rather than as #fff. */
-  background-image: radial-gradient(circle at 1px 1px, var(--color-grain) 1px, transparent 0);
-  background-size: 22px 22px;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23f)' opacity='0.5'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23f)' opacity='0.35'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(90deg, rgb(92 74 46 / 0.03) 0 1px, transparent 1px 3px),
+    radial-gradient(120% 80% at 50% 0%, rgb(255 253 246 / 0.85), transparent 60%);
+  background-size:
+    160px 160px,
+    260px 260px,
+    3px 3px,
+    100% 100%;
+  background-repeat: repeat, repeat, repeat, no-repeat;
+  /* The scrolling grain is the tooth of the sheet; the fixed one is the light
+     falling across it. Swap them and the page reads as dirt on the screen. */
+  background-attachment: scroll, fixed, scroll, fixed;
 }
 
 /*

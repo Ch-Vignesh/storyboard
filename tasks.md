@@ -15,7 +15,7 @@ something that is not code.
 | --------------------------- | ------------------------ | ---------------------------------------------------------------------- |
 | Phase 9                     | committed, not pushed    | Deletion, `.epub`, Upstash, the CSP, Google sign-in, the age gate gone |
 | Phase 8 — the accounts half | blocked, and not on code | Five accounts. Follow `docs/05-deployment.md` in order                 |
-| Promotion page              | done, uncommitted        | Proof-mark clip art, parallax layers, an axe pass over apps/web        |
+| Promotion page              | committed, not pushed    | Proof-mark clip art, parallax layers, paper texture, light only        |
 | Phase 10                    | deliberately unplanned   | Drawn from real use, when there is some                                |
 
 ## Blocked, and not on code
@@ -55,7 +55,7 @@ committed; commit hashes are in `docs/04-phase-plan.md`.
 | 6 — Trust                  | Quota tiers, a Postgres sliding-window rate limiter, reporting, the admin queue, feature flags, the purge job                               | pushed           |
 | Audit after 6              | A read of the whole codebase: six real bugs found and fixed, each with a test that fails without the fix                                    | pushed           |
 | 7 — Launch                 | 25 seeded public-domain works with 56 hand-written stuck points, the marketing page, the age policy, the community rules                    | pushed           |
-| Marketing page             | Seven sections, dark theme, a CSS-only example switcher, scroll-linked motion with no libraries                                             | committed        |
+| Marketing page             | Seven sections on textured paper, a CSS-only example switcher, scroll-linked motion with no libraries                                       | committed        |
 | 8 — Into the world         | Everything below, plus phases 9–10 drafted                                                                                                  | pushed           |
 | 9 — The gaps we left       | Account deletion, `.epub`, Upstash, a Content-Security-Policy, Google sign-in, and the age gate removed                                     | uncommitted      |
 
