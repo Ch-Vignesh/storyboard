@@ -206,6 +206,23 @@ export const storyboardRouter = createTRPCRouter({
         },
       })
 
+      // Decision 0007's banner should appear only when there is something it is
+      // explaining. A storyboard that has always been public has `publicFrom`
+      // stamped at creation, so there is no history before it — and telling
+      // every reader of every public storyboard that it "was private until"
+      // the day it was made is both untrue and faintly alarming.
+      const hiddenHistory =
+        resource.publicFrom !== null &&
+        permissions.role !== 'owner' &&
+        permissions.role !== 'coauthor' &&
+        (await ctx.db.revision.count({
+          where: {
+            createdAt: { lt: resource.publicFrom },
+            section: { chapter: { version: { storyboardId } } },
+          },
+          take: 1,
+        })) > 0
+
       return {
         storyboard: {
           ...storyboard,
@@ -221,11 +238,9 @@ export const storyboardRouter = createTRPCRouter({
         version,
         chapters,
         permissions,
-        /** Decision 0007: the reader may not see the whole chain. */
-        historyVisibleFrom:
-          permissions.role === 'owner' || permissions.role === 'coauthor'
-            ? null
-            : resource.publicFrom,
+        /** Decision 0007: the reader may not see the whole chain — and is told
+         * so only when part of it is actually hidden from them. */
+        historyVisibleFrom: hiddenHistory ? resource.publicFrom : null,
       }
     }),
 

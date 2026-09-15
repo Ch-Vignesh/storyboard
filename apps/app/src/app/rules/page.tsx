@@ -25,7 +25,7 @@ export default function RulesPage() {
         How this place works
       </h1>
       <p className="mt-3 max-w-measure text-[15px] leading-relaxed text-ink-soft">
-        Five things. They are short because they are the ones that matter, not because there is fine
+        Six things. They are short because they are the ones that matter, not because there is fine
         print somewhere else.
       </p>
 
@@ -103,6 +103,22 @@ export default function RulesPage() {
           If you publish a book that contains other people&rsquo;s writing, credit them wherever it
           goes. We ask this rather than enforce it; a product that claimed to police your
           acknowledgements page would be lying.
+        </p>
+      </section>
+
+      <section className="mt-9">
+        <h2 className="font-manuscript text-[21px] font-medium text-ink">
+          6. Thirteen and over, and nothing private
+        </h2>
+        <p className="mt-2 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
+          You need to be at least 13 to have an account here. We ask once and we do not store your
+          age — a date of birth we cannot check is data we would be holding for no reason.
+        </p>
+        <p className="mt-2 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
+          There is no private messaging on this site and there is not going to be. Every way one
+          person can reach another — a request, a suggestion, an idea, a reply — is attached to a
+          piece of writing and visible to everyone who can read it. If somebody writes something
+          they should not, it is in public, and you can report it.
         </p>
       </section>
 

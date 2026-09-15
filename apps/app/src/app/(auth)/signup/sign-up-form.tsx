@@ -12,6 +12,9 @@ import { useTRPC } from '@/trpc/client'
 export function SignUpForm() {
   const trpc = useTRPC()
   const [email, setEmail] = useState('')
+  // OD-7 (decision 0020). Held in the form and never sent: the server has no
+  // age column, because an age nobody verifies is not worth storing.
+  const [oldEnough, setOldEnough] = useState(false)
   const signUp = useMutation(trpc.auth.signUp.mutationOptions())
 
   if (signUp.isSuccess) {
@@ -49,7 +52,25 @@ export function SignUpForm() {
           {signUp.error.message}
         </p>
       ) : null}
-      <Button type="submit" variant="primary" className="w-full" disabled={signUp.isPending}>
+      {/* OD-7, decision 0020 — thirteen and over, asked once and not stored.
+          A date picker would imply a verification this product does not do. */}
+      <label className="flex items-start gap-2.5 text-[13px] leading-relaxed text-ink-soft">
+        <input
+          type="checkbox"
+          required
+          checked={oldEnough}
+          onChange={(event) => setOldEnough(event.target.checked)}
+          className="mt-0.5"
+        />
+        <span>I am 13 or older.</span>
+      </label>
+
+      <Button
+        type="submit"
+        variant="primary"
+        className="w-full"
+        disabled={signUp.isPending || !oldEnough}
+      >
         {signUp.isPending ? 'Sending' : 'Email me a link'}
       </Button>
       {/* FR-13.4 — the rules, once, where somebody joining will see them. */}
@@ -58,7 +79,12 @@ export function SignUpForm() {
         <Link href="/rules" className="text-pencil hover:underline">
           how this place works
         </Link>{' '}
-        — five short things, and they are the ones that matter.
+        — six short things, and they are the ones that matter.
+      </p>
+      {/* Decision 0020 — why the checkbox above is the whole of the policy. */}
+      <p className="text-[12.5px] leading-relaxed text-ink-faint">
+        There are no private messages here and there never will be. Everything anyone writes to
+        anyone is attached to a piece of work and visible to whoever can read it.
       </p>
     </form>
   )

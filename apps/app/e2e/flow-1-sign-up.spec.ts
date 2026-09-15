@@ -15,6 +15,8 @@ test('a new writer signs up, verifies, onboards and reaches the dashboard', asyn
   // Step 1 — email.
   await page.goto('/signup')
   await page.getByLabel('Email').fill(email)
+  // OD-7, decision 0020 — the form does not submit without it.
+  await page.getByLabel(/i am 13 or older/i).check()
   await page.getByRole('button', { name: /email me a link/i }).click()
   await expect(page.getByText(/check your inbox/i)).toBeVisible()
 
@@ -62,6 +64,8 @@ test('a half-onboarded writer is sent back to the step they left', async ({ page
 
   await page.goto('/signup')
   await page.getByLabel('Email').fill(email)
+  // OD-7, decision 0020 — the form does not submit without it.
+  await page.getByLabel(/i am 13 or older/i).check()
   await page.getByRole('button', { name: /email me a link/i }).click()
   await page.goto(await readVerificationLink(email))
   await page.getByLabel('Password').fill('a-long-enough-passphrase')

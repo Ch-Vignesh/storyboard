@@ -19,7 +19,7 @@ import type { PrismaClient } from '../../../src/generated/prisma/client'
 import { EXAMPLE_STORYBOARD } from './example-storyboard'
 
 /** The account every seeded storyboard belongs to (FR-15.3). */
-const PLATFORM_ACCOUNT = {
+export const PLATFORM_ACCOUNT = {
   email: 'examples@storyboard.invalid',
   username: 'storyboard-examples',
   displayName: 'Storyboard examples',

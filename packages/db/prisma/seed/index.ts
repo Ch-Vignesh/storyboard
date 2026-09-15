@@ -12,6 +12,7 @@ import { loadRootEnv } from '@storyboard/config/env'
 import { createPrismaClient } from '../../src/client'
 import { GENRES } from './genres'
 import { seedExampleStoryboard } from './storyboards'
+import { seedLibrary } from './storyboards/seed-library'
 
 loadRootEnv()
 
@@ -32,6 +33,13 @@ async function main(): Promise<void> {
 
     const example = await seedExampleStoryboard(prisma)
     console.warn(`example storyboard: ${example}`)
+
+    // FR-15.1 to FR-15.4 — the launch library.
+    const library = await seedLibrary(prisma)
+    console.warn(
+      `library: ${String(library.created)} created, ${String(library.skipped)} already present, ` +
+        `${String(library.requests)} requests (${String(library.answered)} answered)`,
+    )
   } finally {
     await prisma.$disconnect()
   }

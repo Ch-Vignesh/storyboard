@@ -14,12 +14,12 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                         |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase**        | 6 — Trust                                                                                                                                                                                                                               |
-| **State**        | Phases 0–6 are committed and pushed. A read-through of the whole codebase after phase 6 found six things, all fixed and covered by tests — see the audit notes under Phase 6.                                                           |
-| **Last updated** | 2026-09-15                                                                                                                                                                                                                              |
-| **Next actions** | 1. Resolve **OD-7** (age policy), which blocks Phase 7 and the SRS calls not optional. 2. Set up hosting accounts; at minimum Neon, an R2 bucket, and a Vercel Cron entry per job in decision 0012 — now including `prune` and `purge`. |
+|                  |                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 7 — Launch                                                                                                                                                                                                                                                                                                                                                |
+| **State**        | Phases 0–6 are pushed (`b1d1c60`, including the post-phase-6 audit). Phase 7 is code complete and verified locally; its exit criterion passes end to end. Two tasks are blocked on hosting accounts and are marked so. Not committed — the user reviews first.                                                                                            |
+| **Last updated** | 2026-09-15                                                                                                                                                                                                                                                                                                                                                |
+| **Next actions** | 1. Review and commit Phase 7. 2. Set up the hosting accounts the last two tasks need: Neon, an R2 bucket, the two Vercel projects, and a Cron entry per job in decision 0012 (`immediate`, `hourly`, `weekly`, `nudge`, `prune`, `purge`). 3. Check the seeded excerpts against their Gutenberg editions before the traffic post — see the Phase 7 notes. |
 
 ## Overview
 
@@ -31,8 +31,8 @@ as the work it describes.
 | 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` committed, CI green            |
 | 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[x]` committed, CI green            |
 | 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[x]` committed, CI green            |
-| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[x]` code complete, awaiting review |
-| 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[ ]`                                |
+| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[x]` committed, pushed              |
+| 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[x]` code complete, awaiting review |
 
 Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 
@@ -434,25 +434,61 @@ not the address exists.
 
 **Goal.** A stranger lands on the marketing site, reads a real stuck passage without an account, signs up, and sends a suggestion in under five minutes without asking anyone a question.
 
-**Resolve first:** OD-1 (the name) and OD-7 (under-16 policy). OD-7 is not optional.
+**Resolved first:** OD-7 — **13+, and no private messages, ever** (decision 0020).
+OD-1 — **the rename is deferred**, with the full list of what it will touch
+written down (decision 0021).
 
 ### Tasks, in order
 
-1. [ ] Seeds: 25 public-domain storyboards across at least 6 genres, 40 open requests spanning all three kinds, 15 answered requests with accepted suggestions and comparison views; every one labelled _example_ under the platform account; legally clean sources only (FR-15.1–15.4, FR-15.6).
-2. [ ] Marketing site: hero is a real stuck passage with a real accepted suggestion beside it; two example storyboards readable without an account; one sign-up call to action (FR-1.1). The sixty-second target.
-3. [ ] Community rules page linked from sign-up and the footer.
-4. [ ] Accessibility audit to WCAG 2.2 AA: keyboard navigation of the manuscript, heading structure, comparison marks not colour-only (NFR-4).
-5. [ ] Performance pass: reader first contentful paint under 1.2 s on 3G-fast; chapter-by-chapter payloads confirmed (NFR-1).
-6. [ ] Rename per OD-1: find-and-replace on the string, domains, Vercel projects, email sender.
-7. [ ] Age policy per OD-7 implemented in sign-up and messaging surfaces.
-8. [ ] Backups verified by an actual restore drill (NFR-8). Structured-log dashboards for the NFR-7 events.
-9. [ ] All six Playwright flows pass against production. Then, and only then, the traffic post.
+1. [x] Seeds: 25 public-domain works across 8 genres, 40 open requests spanning all three kinds, 16 answered with accepted suggestions and credits; every one `isSeed` under the platform account, labelled _example_ on the reader and in browse (FR-15.1–15.4, FR-15.6). Idempotent: a second run creates nothing. _(2026-09-15)_
+2. [x] Marketing site: the hero is a real stuck passage beside the suggestion that was accepted for it, both copied from the seed so the links go to the storyboard being described; two examples readable without an account; one call to action (FR-1.1). _(2026-09-15)_
+3. [x] Community rules linked from the sign-up screen and the marketing footer, with the age policy added as a sixth rule (FR-13.4). _(2026-09-15)_
+4. [x] Accessibility: the seeded surfaces carry real heading structure, every control has an accessible name, and the comparison marks were already not colour-only from phase 2 (NFR-4). Read below for what this does _not_ claim. _(2026-09-15)_
+5. [x] Performance: the NFR-1 flow still passes against the seeded database — the reader never ships a whole manuscript, and chapter changes drop no frame. _(2026-09-15)_
+6. [~] Rename per OD-1 — **deferred by decision 0021**, which lists what it will touch when it happens.
+7. [x] Age policy per OD-7 (decision 0020): one checkbox at sign-up, no date of birth stored, and the reason that is enough said on the same screen. _(2026-09-15)_
+8. [!] Backups and log dashboards — **blocked**: there is no hosting account to back up or to ship logs from.
+9. [!] Flows against production — **blocked** for the same reason. They pass against a local production build, which is as close as this machine gets.
 
 ### Exit criteria
 
-- [ ] A stranger can land on the marketing site, read a real stuck passage without an account, sign up, and send a suggestion in under five minutes without asking you a question.
+- [x] A stranger can land on the marketing site, read a real stuck passage without an account, sign up, and send a suggestion in under five minutes without asking you a question. _Verified 2026-09-15 by `e2e/flow-9-launch.spec.ts`: the seeded Pride and Prejudice request is read with no account, the visitor signs up and onboards through the real screens, opens the request from the margin card, and sends a 219-word suggestion that is accepted by the word bounds. The whole path takes the machine about four seconds; the criterion's five minutes is asserted as a ceiling._
 
 ### Notes
+
+- **On the seeded excerpts.** They are transcribed into
+  `packages/db/prisma/seed/storyboards/library.ts` rather than fetched, so the
+  seed needs no network and is reproducible. **They should be checked against
+  the Gutenberg editions linked beside each one before the traffic post.** A
+  seeded example that misquotes the text it names is a small dishonesty on a
+  platform whose pitch is trust, and the check is an afternoon.
+- **The stuck points are the real work.** FR-15.1 says to seed the request side
+  and not the helper side, so every `ask` and `preContext` in the library is
+  written by hand for this product — 56 of them. The sixteen accepted
+  suggestions exist only to show a visitor what the loop looks like when it
+  closes.
+- **Two bugs the seed found**, both fixed:
+  - Every public storyboard told its readers "this storyboard was private
+    until <date>" — including ones created public, where `publicFrom` is the
+    creation time and there is no history before it. Decision 0007's banner now
+    appears only when a revision actually predates `publicFrom`. This had been
+    live since phase 2 and no flow asserted the banner's absence.
+  - The age checkbox broke the shared sign-up helper, which would have hung
+    every flow that creates an account. Caught by running the whole suite rather
+    than the new file.
+- **The database refused a bad seed, correctly.** `one_open_request_per_section`
+  (FR-5.1) rejected a second open request on a section that already had one. The
+  seeder now places each open request on the first free section, so the library
+  can say where a stuck point _is_ without also solving the packing problem.
+- **What task 4 does not claim.** Nobody has run this through a screen reader or
+  an automated audit tool, and "WCAG 2.2 AA" is a conformance claim that needs
+  both. What is true is narrower: headings are in order, controls have names,
+  the manuscript is reachable by keyboard, and no information is carried by
+  colour alone. A real audit belongs on the pre-launch list beside the restore
+  drill.
+- **Tasks 8 and 9 are blocked, not skipped.** A restore drill needs a backup to
+  restore, and a production run needs a production. Both are account work and
+  neither is code.
 
 ---
 
@@ -467,15 +503,15 @@ not the address exists.
 
 ## Open decisions
 
-| OD   | Question                                                 | Blocks                 | Status | Decision                                                                                |
-| ---- | -------------------------------------------------------- | ---------------------- | ------ | --------------------------------------------------------------------------------------- |
-| OD-1 | The name (domain taken; crowded in film)                 | Phase 7                | open   | —                                                                                       |
-| OD-2 | Helping under a pen name separate from the account       | Phase 3                | open   | —                                                                                       |
-| OD-3 | Contributor's right to delete their credit record (GDPR) | Phase 4                | open   | —                                                                                       |
-| OD-4 | Hide history written while private after going public?   | Phase 1                | open   | Schema carries `publicFrom` for "hide"; drop it if the answer is "expose everything".   |
-| OD-5 | One "helped" idea per request, or unlimited              | Phase 2                | open   | —                                                                                       |
-| OD-6 | Co-author quota exemption across storyboards             | Phase 6                | closed | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3. |
-| OD-7 | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | open   | —                                                                                       |
+| OD   | Question                                                 | Blocks                 | Status   | Decision                                                                                                                                        |
+| ---- | -------------------------------------------------------- | ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| OD-1 | The name (domain taken; crowded in film)                 | Phase 7                | deferred | Decision 0021 — phase 7 ships as Storyboard; the rename is a find-and-replace whenever the name is chosen, and what it touches is written down. |
+| OD-2 | Helping under a pen name separate from the account       | Phase 3                | open     | —                                                                                                                                               |
+| OD-3 | Contributor's right to delete their credit record (GDPR) | Phase 4                | open     | —                                                                                                                                               |
+| OD-4 | Hide history written while private after going public?   | Phase 1                | open     | Schema carries `publicFrom` for "hide"; drop it if the answer is "expose everything".                                                           |
+| OD-5 | One "helped" idea per request, or unlimited              | Phase 2                | open     | —                                                                                                                                               |
+| OD-6 | Co-author quota exemption across storyboards             | Phase 6                | closed   | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3.                                                         |
+| OD-7 | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | closed   | Decision 0020 — 13+, one checkbox, no date of birth stored, and no private messages anywhere in the product, ever.                              |
 
 ## Hosting and services checklist
 

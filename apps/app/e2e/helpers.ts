@@ -58,6 +58,8 @@ export async function signUpAndOnboard(page: Page): Promise<{ email: string; use
 
   await page.goto('/signup')
   await page.getByLabel('Email').fill(email)
+  // OD-7, decision 0020 — one checkbox, and the form does not submit without it.
+  await page.getByLabel(/i am 13 or older/i).check()
   await page.getByRole('button', { name: /email me a link/i }).click()
 
   await page.goto(await readVerificationLink(email))
