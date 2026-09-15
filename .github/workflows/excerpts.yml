@@ -1,0 +1,50 @@
+name: Seeded excerpts
+
+# Checks the seeded library's quotations against the editions they cite
+# (FR-15.2, decision 0023).
+#
+# Not part of CI: it talks to gutenberg.org, so running it on every pull request
+# would make unrelated work fail when a third party is slow, and would ask a
+# free service for twenty-five files far more often than is polite. Monthly, on
+# demand, and whenever the library itself changes is the right cadence for a
+# check on data that only moves when somebody edits it.
+
+on:
+  schedule:
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'packages/db/prisma/seed/storyboards/library.ts'
+      - 'scripts/check-excerpts.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  excerpts:
+    name: Every excerpt matches its edition
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Cache the downloaded editions
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/gutenberg
+          key: gutenberg-editions-v1
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check
+        run: pnpm check-excerpts

@@ -38,7 +38,13 @@ async function main(): Promise<void> {
     const library = await seedLibrary(prisma)
     console.warn(
       `library: ${String(library.created)} created, ${String(library.skipped)} already present, ` +
-        `${String(library.requests)} requests (${String(library.answered)} answered)`,
+        `${String(library.requests)} requests (${String(library.answered)} answered)` +
+        // Silent when there is nothing to say, and loud when there is: a
+        // corrected excerpt on a database that already had it is the one line
+        // of this output somebody needs to notice (decision 0023).
+        (library.corrected
+          ? `\nlibrary: ${String(library.corrected)} excerpt(s) corrected to match their cited edition`
+          : ''),
     )
   } finally {
     await prisma.$disconnect()

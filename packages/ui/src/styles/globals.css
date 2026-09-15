@@ -17,7 +17,11 @@
   --color-paper-sunk: #f2f2ee; /* rails, wells */
   --color-ink: #11202b; /* blue-black, manuscript text */
   --color-ink-soft: #55636d; /* secondary */
-  --color-ink-faint: #8a949c; /* metadata */
+  /* Metadata. Dark enough to clear 4.5:1 on paper — at #8a949c it was 2.98:1,
+     which is a WCAG 1.4.3 failure on every timestamp and byline in the product
+     (NFR-4). Still the faintest of the three inks: 4.54:1 against ink-soft's
+     5.98:1 and ink's 15.4:1, so the hierarchy reads as it did. */
+  --color-ink-faint: #6b757d;
   --color-rule: #dfe0da; /* hairlines */
   --color-pencil: #2b5ca8; /* blue pencil: links, insertions, primary action */
   --color-pencil-deep: #244e90; /* pencil, pressed */
@@ -86,6 +90,25 @@
 
   a {
     @apply text-pencil no-underline;
+  }
+
+  /*
+   * WCAG 1.4.1, and NFR-4 (found by `e2e/accessibility.spec.ts`).
+   *
+   * A link standing on its own — a nav item, a card, a row that is entirely a
+   * target — is unambiguous without an underline. A link *inside a run of
+   * text* is not: the only thing separating it from the words either side is
+   * its colour, which is exactly what 1.4.1 forbids, and `hover:underline`
+   * does not help somebody who is not hovering. So links in prose carry an
+   * underline at rest.
+   *
+   * `:where()` keeps this at zero specificity, so any `no-underline` on the
+   * element still wins and nothing here overrides a deliberate choice.
+   */
+  :where(p, li, dd, blockquote, figcaption) a {
+    text-decoration-line: underline;
+    text-decoration-thickness: from-font;
+    text-underline-offset: 0.16em;
   }
 
   button {

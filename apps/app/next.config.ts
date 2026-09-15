@@ -9,6 +9,20 @@ const securityHeaders = [
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  /*
+   * Two years, subdomains included, no `preload` (phase 8).
+   *
+   * The session cookie is already Secure, so this is not what stops it being
+   * read — it is what stops the first request of a session going out in the
+   * clear at all, which is the one a typed address makes. `preload` is left off
+   * deliberately: it is a submission to a list baked into browsers and is
+   * effectively irreversible, and this product has not run long enough on this
+   * domain to make a promise that shape.
+   *
+   * Sent on plain HTTP too, where browsers ignore it. Harmless, and it means
+   * the header is not conditional on a guess about the environment.
+   */
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
 ]
 
 const nextConfig: NextConfig = {

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd ../.. && pnpm turbo run build --filter=@storyboard/app",
+  "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
+  "framework": "nextjs",
+  "crons": [
+    { "path": "/api/cron/immediate", "schedule": "*/10 * * * *" },
+    { "path": "/api/cron/hourly", "schedule": "0 * * * *" },
+    { "path": "/api/cron/weekly", "schedule": "0 9 * * 1" },
+    { "path": "/api/cron/nudge", "schedule": "30 8 * * *" },
+    { "path": "/api/cron/prune", "schedule": "15 3 * * *" },
+    { "path": "/api/cron/purge", "schedule": "45 3 * * *" }
+  ]
+}

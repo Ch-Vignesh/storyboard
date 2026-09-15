@@ -128,7 +128,16 @@ export function ReaderShell({
                     <span className="block truncate">
                       {index + 1}. {entry.title}
                     </span>
-                    <span className="mt-0.5 block text-[11.5px] text-ink-faint tabular-nums">
+                    {/* The active chapter sits on a pencil wash, and the faint
+                        ink that clears 4.5:1 on paper only reaches 4.0:1 on it
+                        (NFR-4). Tinted ground, darker ink. */}
+                    <span
+                      className={
+                        entry.id === activeChapterId
+                          ? 'mt-0.5 block text-[11.5px] text-pencil-deep tabular-nums'
+                          : 'mt-0.5 block text-[11.5px] text-ink-faint tabular-nums'
+                      }
+                    >
                       {entry.sections
                         .reduce((total, section) => total + section.wordCount, 0)
                         .toLocaleString('en-GB')}{' '}

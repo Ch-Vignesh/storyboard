@@ -53,7 +53,14 @@ function slugify(title: string): string {
   )
 }
 
-export type LibraryResult = { created: number; skipped: number; requests: number; answered: number }
+export type LibraryResult = {
+  created: number
+  skipped: number
+  requests: number
+  answered: number
+  /** Sections whose text was corrected on a database that already had them. */
+  corrected: number
+}
 
 export async function seedLibrary(prisma: PrismaClient): Promise<LibraryResult> {
   const platform = await prisma.user.upsert({
@@ -89,7 +96,7 @@ export async function seedLibrary(prisma: PrismaClient): Promise<LibraryResult> 
     helpers.set(helper.username, row.id)
   }
 
-  const result: LibraryResult = { created: 0, skipped: 0, requests: 0, answered: 0 }
+  const result: LibraryResult = { created: 0, skipped: 0, requests: 0, answered: 0, corrected: 0 }
 
   for (const work of LIBRARY) {
     const existing = await prisma.storyboard.findUnique({
@@ -98,6 +105,7 @@ export async function seedLibrary(prisma: PrismaClient): Promise<LibraryResult> 
     })
     if (existing) {
       result.skipped += 1
+      result.corrected += await reconcileText(prisma, work, existing.id, platform.id)
       continue
     }
 
@@ -108,6 +116,79 @@ export async function seedLibrary(prisma: PrismaClient): Promise<LibraryResult> 
   }
 
   return result
+}
+
+/**
+ * Bring an already-seeded work's prose back in line with the library.
+ *
+ * Idempotency by existence alone has a hole that phase 8 walked into: once a
+ * work is seeded, editing the library never reaches the database again. So the
+ * thirteen misquotations `pnpm check-excerpts` found (decision 0023) were fixed
+ * in the file and stayed wrong in every database that had already been seeded —
+ * including, had this gone unnoticed, production, permanently.
+ *
+ * The correction is written as a **new revision**, not an update. Revisions are
+ * append-only and a trigger enforces it (NFR-3), so this is not a workaround:
+ * it is the same thing the product does when an author edits a section, and it
+ * leaves the wrong text visible in the history where it belongs.
+ *
+ * Only seeded works, only where the text actually differs, and only when the
+ * current revision is one the platform wrote. If a contributor's accepted
+ * suggestion is what stands there now, that is somebody's work and a seed
+ * script does not touch it.
+ */
+async function reconcileText(
+  prisma: PrismaClient,
+  work: SeedWork,
+  storyboardId: string,
+  platformId: string,
+): Promise<number> {
+  const sections = await prisma.section.findMany({
+    where: {
+      chapter: { version: { storyboardId, isMain: true } },
+      deletedAt: null,
+    },
+    orderBy: { order: 'asc' },
+    select: {
+      id: true,
+      order: true,
+      currentRevision: { select: { id: true, contentText: true, authorId: true, source: true } },
+    },
+  })
+
+  let corrected = 0
+
+  for (const [index, wanted] of work.chapter.sections.entries()) {
+    const section = sections.find((candidate) => candidate.order === index)
+    const current = section?.currentRevision
+    if (!section || !current) continue
+    if (current.contentText === wanted.trim()) continue
+
+    // Somebody else's prose stands here now. Leave it alone.
+    if (current.source !== 'AUTHORED' || current.authorId !== platformId) continue
+
+    const derived = derive(wanted)
+    await prisma.$transaction(async (tx) => {
+      const revision = await tx.revision.create({
+        data: {
+          sectionId: section.id,
+          parentId: current.id,
+          contentJson: doc([wanted]),
+          ...derived,
+          source: 'AUTHORED',
+          authorId: platformId,
+        },
+        select: { id: true },
+      })
+      await tx.section.update({
+        where: { id: section.id },
+        data: { currentRevisionId: revision.id, wordCount: derived.wordCount },
+      })
+    })
+    corrected += 1
+  }
+
+  return corrected
 }
 
 async function seedOne(

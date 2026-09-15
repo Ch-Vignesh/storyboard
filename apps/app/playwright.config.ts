@@ -15,7 +15,18 @@ loadRootEnv()
 const PORT = Number(process.env.E2E_PORT ?? 3100)
 // One host throughout. Auth.js sets the session cookie on the host that served
 // the page, so mixing 127.0.0.1 and localhost silently loses the session.
-const baseURL = `http://localhost:${String(PORT)}`
+const localURL = `http://localhost:${String(PORT)}`
+
+/**
+ * Against a deployment rather than a build of this working tree (phase 8).
+ *
+ * With `PLAYWRIGHT_BASE_URL` set, nothing is built and no server is started —
+ * the flows run against whatever is already there. They sign up real accounts
+ * and write real storyboards, so this is a deliberate act against a deployment
+ * you own, not something to point at production on a habit.
+ */
+const deployed = process.env.PLAYWRIGHT_BASE_URL
+const baseURL = deployed ?? localURL
 
 export default defineConfig({
   testDir: './e2e',
@@ -34,20 +45,22 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: `pnpm build && pnpm start --port ${String(PORT)}`,
-    url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 300_000,
-    env: {
-      // The console mailer prints the verification link to stdout, which is how
-      // the sign-up flow gets its token without a mail server (decision 0002).
-      RESEND_API_KEY: '',
-      NEXT_PUBLIC_APP_URL: baseURL,
-      AUTH_URL: baseURL,
-      AUTH_TRUST_HOST: 'true',
-    },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  },
+  webServer: deployed
+    ? undefined
+    : {
+        command: `pnpm build && pnpm start --port ${String(PORT)}`,
+        url: localURL,
+        reuseExistingServer: !process.env.CI,
+        timeout: 300_000,
+        env: {
+          // The console mailer prints the verification link to stdout, which is how
+          // the sign-up flow gets its token without a mail server (decision 0002).
+          RESEND_API_KEY: '',
+          NEXT_PUBLIC_APP_URL: localURL,
+          AUTH_URL: localURL,
+          AUTH_TRUST_HOST: 'true',
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
 })

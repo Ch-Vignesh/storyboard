@@ -1,6 +1,8 @@
 import { createEnv } from '@t3-oss/env-nextjs'
 import { z } from 'zod'
 
+import { deploymentProblems, deploymentWarnings, preflightReport } from './env-preflight'
+
 /**
  * Typed, validated environment. Import `env` instead of reading process.env
  * so a missing variable fails at startup with its name, not at 2 a.m. with a
@@ -57,3 +59,23 @@ export const env = createEnv({
   emptyStringAsUndefined: true,
   skipValidation: process.env.SKIP_ENV_VALIDATION === '1',
 })
+
+/**
+ * The second check: not "can this start" but "should this be facing the public".
+ *
+ * Server only — the client bundle has no business knowing whether a mail key is
+ * set, and `env.RESEND_API_KEY` is not readable there anyway. Skipped alongside
+ * the schema when `SKIP_ENV_VALIDATION` is set, so the two can be turned off
+ * together for tooling that only needs the module to import.
+ */
+if (typeof window === 'undefined' && process.env.SKIP_ENV_VALIDATION !== '1') {
+  const problems = deploymentProblems(env)
+  if (problems.length) {
+    if (process.env.ALLOW_INCOMPLETE_DEPLOYMENT === '1') {
+      console.warn(preflightReport(problems))
+    } else {
+      throw new Error(preflightReport(problems))
+    }
+  }
+  for (const warning of deploymentWarnings(env)) console.warn(`Warning: ${warning}`)
+}

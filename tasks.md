@@ -11,33 +11,37 @@ something that is not code.
 
 ## Now
 
-| What                            | State   | Note                                                                |
-| ------------------------------- | ------- | ------------------------------------------------------------------- |
-| Marketing page (FR-1.1) rebuild | done    | Seven sections, dark theme, CSS-only example switcher. Uncommitted. |
-| Phases 8–10                     | drafted | See `docs/04-phase-plan.md`. Nothing started.                       |
+| What                        | State                    | Note                                                                     |
+| --------------------------- | ------------------------ | ------------------------------------------------------------------------ |
+| Phase 8 — the code half     | done                     | Deployment config, startup preflight, restore drill, a11y pass, excerpts |
+| Phase 8 — the accounts half | blocked, and not on code | Five accounts. Follow `docs/05-deployment.md` in order                   |
+| Phases 9–10                 | drafted                  | See `docs/04-phase-plan.md`. Nothing started                             |
 
 ## Blocked, and not on code
 
 These are the only things standing between the product and a launch. Every one
-of them needs an account or a decision, not a commit.
+of them needs an account, a DNS record, or a person — not a commit.
 
-| What                                      | Needs                             | Blocks                |
-| ----------------------------------------- | --------------------------------- | --------------------- |
-| Neon database                             | an account                        | everything deployed   |
-| R2 bucket                                 | a Cloudflare account              | manuscript uploads    |
-| Two Vercel projects (`app`, `web`)        | an account                        | everything deployed   |
-| Six cron entries                          | Vercel Cron, once deployed        | digests, prune, purge |
-| Backup restore drill (NFR-8)              | a backup to restore               | phase 7 task 8        |
-| Accessibility audit (NFR-4)               | a screen reader and an audit tool | the WCAG claim        |
-| Seeded excerpts checked against Gutenberg | an afternoon                      | the traffic post      |
-| The name (OD-1)                           | a decision, deliberately deferred | nothing               |
+| What                                  | Needs                             | Blocks                        |
+| ------------------------------------- | --------------------------------- | ----------------------------- |
+| Neon database                         | an account                        | everything deployed           |
+| R2 bucket **and its CORS rule**       | a Cloudflare account              | manuscript uploads            |
+| Two Vercel projects (`app`, `web`)    | an account, on the **Pro** tier   | everything deployed           |
+| Resend, and a verified sending domain | an account and DNS                | every email; start this early |
+| Running the restore drill for real    | a backup to restore               | the NFR-8 claim               |
+| A screen-reader pass                  | an hour and a screen reader       | the WCAG 2.2 AA claim         |
+| The 26 flows against production       | a deployment                      | the traffic post              |
+| The name (OD-1)                       | a decision, deliberately deferred | nothing                       |
+
+Vercel's Hobby tier allows two scheduled jobs at most once a day. This product
+has six, one of them every ten minutes — so Hobby silently drops four of them.
 
 ---
 
 ## Done
 
-Seven phases, each with its exit criteria verified locally before it was
-committed. Commit hashes are in `docs/04-phase-plan.md`.
+Eight phases. Each had its exit criteria verified locally before it was
+committed; commit hashes are in `docs/04-phase-plan.md`.
 
 | Phase                      | What it added                                                                                                                               | State            |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
@@ -50,8 +54,40 @@ committed. Commit hashes are in `docs/04-phase-plan.md`.
 | 6 — Trust                  | Quota tiers, a Postgres sliding-window rate limiter, reporting, the admin queue, feature flags, the purge job                               | pushed           |
 | Audit after 6              | A read of the whole codebase: six real bugs found and fixed, each with a test that fails without the fix                                    | pushed           |
 | 7 — Launch                 | 25 seeded public-domain works with 56 hand-written stuck points, the marketing page, the age policy, the community rules                    | pushed           |
+| Marketing page             | Seven sections, dark theme, a CSS-only example switcher, scroll-linked motion with no libraries                                             | committed        |
+| 8 — Into the world         | Everything below, plus phases 9–10 drafted                                                                                                  | uncommitted      |
 
-### What the audit found
+### What phase 8 found
+
+The phase predicted it would need no code — it is account work. Five things
+disagreed, and every one of them was invisible until the repository was pointed
+at the internet and looked at.
+
+1. **The build would have failed on Vercel.** Turborepo runs in `strict` env
+   mode and three variables were not declared in `globalEnv`, so they would have
+   been filtered out of the build. Locally this is invisible, because
+   `next.config.ts` loads the root `.env` itself and there is no such file on a
+   host. Separately, an undeclared `NEXT_PUBLIC_*` means changing a public URL
+   does not invalidate the build cache — which is how a deployment serves an old
+   URL baked into the browser bundle.
+2. **A misconfigured deployment started happily.** No mail key: every
+   verification link goes to stdout and every new account is stranded, with
+   healthy-looking logs. No cron secret: no digest ever runs. No object store on
+   a serverless host: uploads land on a machine that goes away. Decision 0022.
+3. **Thirteen of forty-five seeded quotations were wrong**, including a citation
+   pointing at the wrong book. And fixing the file was not enough — the seeder
+   was idempotent by existence, so no correction could ever reach a database
+   that had been seeded once. Decision 0023.
+4. **Two systemic accessibility failures.** The faintest ink was 2.98:1 on
+   paper, failing WCAG 1.4.3 on every timestamp and byline in the product; and
+   every link inside a run of text was distinguished from that text by colour
+   alone, because the base style set `no-underline` and components added
+   `hover:underline`, which does nothing for somebody who is not hovering.
+5. **No 404 page** — on a product where unpublished work deliberately answers
+   404 rather than 403, so it is the front door of every private draft rather
+   than a page people reach by accident.
+
+### What the audit after phase 6 found
 
 Worth keeping visible, because two of the six had shipped in the phase before
 and neither would have been found by building the next feature.
@@ -82,8 +118,8 @@ What each part of the repository is for, and where to look first.
 | `packages/import`  | Six file formats in, one `NormalisedDoc` out, plus the chapter cascade   |
 | `packages/export`  | One `Manuscript` in, `.docx` / `.md` / `.pdf` / `.fountain` out          |
 | `packages/config`  | tsconfig presets, ESLint configs, the root `.env` loader                 |
-| `scripts`          | The vocabulary linter and its tests                                      |
-| `docs`             | The spec, the architecture, the phase plan, and 21 decision records      |
+| `scripts`          | The vocabulary linter, the excerpt checker, and their tests              |
+| `docs`             | The spec, architecture, phase plan, deployment runbook, 23 decisions     |
 
 ### Where the rules are enforced
 
@@ -95,6 +131,9 @@ What each part of the repository is for, and where to look first.
 | One main version per storyboard            | A partial unique index                        |
 | The interface never speaks git             | `pnpm check-vocabulary`, in CI                |
 | Every mutation refuses a suspended account | `apps/app/src/server/trpc/procedures.test.ts` |
+| A public deployment is fully configured    | `apps/app/src/env-preflight.ts`, at startup   |
+| Seeded quotations match their editions     | `pnpm check-excerpts`, monthly and on change  |
+| What a signed-out person may see           | One filter, reused by browse and the sitemap  |
 
 ---
 
@@ -110,8 +149,16 @@ pnpm typecheck      pnpm test               pnpm build
 Plus, for anything touching the database or a screen:
 
 ```
-pnpm db:deploy                       # migrations apply with no drift
-pnpm --filter @storyboard/app exec playwright test    # 22 flows
+pnpm db:deploy                                        # migrations apply with no drift
+pnpm --filter @storyboard/app exec playwright test    # 26 flows
 ```
 
-**Current:** 328 unit and database tests, 22 Playwright flows, all passing.
+And the two that are not on every commit:
+
+```
+pnpm check-excerpts          # after editing the seed library. Hits the network
+pnpm db:drill "<url>"        # against a restored backup, before launch and quarterly
+```
+
+**Current:** 357 unit and database tests, 26 Playwright flows (22 journeys plus
+4 accessibility scans), all passing.

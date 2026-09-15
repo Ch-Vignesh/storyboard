@@ -1,4 +1,10 @@
 {
   "extends": "@storyboard/config/tsconfig/library.json",
-  "include": ["src/**/*.ts", "prisma/**/*.ts", "prisma.config.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "prisma/**/*.ts",
+    "scripts/**/*.ts",
+    "prisma.config.ts",
+    "vitest.config.ts"
+  ]
 }

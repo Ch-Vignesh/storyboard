@@ -9,10 +9,20 @@
  * **On the excerpts.** These are openings, transcribed here rather than fetched
  * at seed time so that `pnpm db:seed` needs no network and is reproducible. They
  * are short on purpose: enough for a reader to feel the voice and for a request
- * to have something to point at. Before launch, check them against the
- * Gutenberg editions linked below — a seeded example that misquotes the text it
- * names is a small dishonesty on a platform whose pitch is trust, and the check
- * is an afternoon.
+ * to have something to point at.
+ *
+ * Every one of them is checked against the edition it cites by
+ * `pnpm check-excerpts` (decision 0023). **Run it after adding or editing a
+ * work.** The first run found thirteen of forty-five did not match — a wrong
+ * ebook number, five sentences closed with a full stop the author did not
+ * write, a dropped parenthetical, and a handful of moved words. A seeded
+ * example that misquotes the text it names is a small dishonesty on a platform
+ * whose pitch is trust.
+ *
+ * Several excerpts stop mid-sentence, with no closing punctuation. That is
+ * deliberate and it is not a typo: some of them carry a request asking a
+ * contributor to write what comes next, so the passage has to stop where the
+ * author of the request stopped rather than where the novelist did.
  *
  * **On the stuck points.** Every `ask` and `preContext` below is written by hand
  * for this product. FR-15.2 is explicit that the *requests* are what is seeded,
@@ -134,7 +144,7 @@ export const LIBRARY: SeedWork[] = [
     chapter: {
       title: 'Chapter one',
       sections: [
-        'It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.',
+        'It is a truth universally acknowledged, that a single man in possession of a good fortune must be in want of a wife.',
         'However little known the feelings or views of such a man may be on his first entering a neighbourhood, this truth is so well fixed in the minds of the surrounding families, that he is considered as the rightful property of some one or other of their daughters.',
         '“My dear Mr. Bennet,” said his lady to him one day, “have you heard that Netherfield Park is let at last?” Mr. Bennet replied that he had not. “But it is,” returned she; “for Mrs. Long has just been here, and she told me all about it.” Mr. Bennet made no answer.',
       ],
@@ -284,7 +294,7 @@ export const LIBRARY: SeedWork[] = [
       title: 'Loomings',
       sections: [
         'Call me Ishmael. Some years ago—never mind how long precisely—having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world.',
-        'It is a way I have of driving off the spleen and regulating the circulation. Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly November in my soul; whenever I find myself involuntarily pausing before coffin warehouses, and bringing up the rear of every funeral I meet; then, I account it high time to get to sea as soon as I can.',
+        'It is a way I have of driving off the spleen and regulating the circulation. Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly November in my soul; whenever I find myself involuntarily pausing before coffin warehouses, and bringing up the rear of every funeral I meet;',
       ],
     },
     requests: [
@@ -369,7 +379,7 @@ export const LIBRARY: SeedWork[] = [
       title: 'Chapter one',
       sections: [
         'I have just returned from a visit to my landlord—the solitary neighbour that I shall be troubled with. This is certainly a beautiful country! In all England, I do not believe that I could have fixed on a situation so completely removed from the stir of society.',
-        'A perfect misanthropist’s heaven: and Mr. Heathcliff and I are such a suitable pair to divide the desolation between us. A capital fellow! He little imagined how my heart warmed towards him when I beheld his black eyes withdraw so suspiciously under their brows, as I rode up.',
+        'A perfect misanthropist’s Heaven—and Mr. Heathcliff and I are such a suitable pair to divide the desolation between us. A capital fellow! He little imagined how my heart warmed towards him when I beheld his black eyes withdraw so suspiciously under their brows, as I rode up',
       ],
     },
     requests: [
@@ -390,7 +400,7 @@ export const LIBRARY: SeedWork[] = [
           by: 'example-helper-1',
           note: 'Gave him one detail he has misread completely, and let him move straight past it.',
           prose:
-            'A perfect misanthropist’s heaven: and Mr. Heathcliff and I are such a suitable pair to divide the desolation between us. A capital fellow! He little imagined how my heart warmed towards him when I beheld his black eyes withdraw so suspiciously under their brows, as I rode up, and his fingers shelter themselves, with a jealous resolution, still further in his waistcoat, as I announced my name. I have not been so well received anywhere this twelvemonth.',
+            'A perfect misanthropist’s Heaven—and Mr. Heathcliff and I are such a suitable pair to divide the desolation between us. A capital fellow! He little imagined how my heart warmed towards him when I beheld his black eyes withdraw so suspiciously under their brows, as I rode up, and his fingers shelter themselves, with a jealous resolution, still further in his waistcoat, as I announced my name. I have not been so well received anywhere this twelvemonth.',
         },
       },
     ],
@@ -480,7 +490,7 @@ export const LIBRARY: SeedWork[] = [
     chapter: {
       title: 'One',
       sections: [
-        'The Time Traveller (for so it will be convenient to speak of him) was expounding a recondite matter to us. His pale grey eyes shone and twinkled, and his usually pale face was flushed and animated. The fire burnt brightly, and the soft radiance of the incandescent lights in the lilies of silver caught the bubbles that flashed and passed in our glasses.',
+        'The Time Traveller (for so it will be convenient to speak of him) was expounding a recondite matter to us. His grey eyes shone and twinkled, and his usually pale face was flushed and animated. The fire burnt brightly, and the soft radiance of the incandescent lights in the lilies of silver caught the bubbles that flashed and passed in our glasses.',
         '“You must follow me carefully. I shall have to controvert one or two ideas that are almost universally accepted. The geometry, for instance, they taught you at school is founded on a misconception.” “Is not that rather a large thing to expect us to begin upon?” said Filby, an argumentative person with red hair.',
       ],
     },
@@ -575,7 +585,7 @@ export const LIBRARY: SeedWork[] = [
     chapter: {
       title: 'Chapter one',
       sections: [
-        'There was no possibility of taking a walk that day. We had been wandering, indeed, in the leafless shrubbery an hour in the morning; but since dinner the cold winter wind had brought with it clouds so sombre, and a rain so penetrating, that further out-door exercise was now out of the question.',
+        'There was no possibility of taking a walk that day. We had been wandering, indeed, in the leafless shrubbery an hour in the morning; but since dinner (Mrs. Reed, when there was no company, dined early) the cold winter wind had brought with it clouds so sombre, and a rain so penetrating, that further outdoor exercise was now out of the question.',
         'I was glad of it: I never liked long walks, especially on chilly afternoons: dreadful to me was the coming home in the raw twilight, with nipped fingers and toes, and a heart saddened by the chidings of Bessie, the nurse, and humbled by the consciousness of my physical inferiority to Eliza, John, and Georgiana Reed.',
       ],
     },
@@ -645,7 +655,7 @@ export const LIBRARY: SeedWork[] = [
     chapter: {
       title: 'Book one',
       sections: [
-        'Tell me, O Muse, of that ingenious hero who travelled far and wide after he had sacked the famous town of Troy. Many cities did he visit, and many were the nations with whose manners and customs he was acquainted; moreover he suffered much by sea while trying to save his own life and bring his men safely home.',
+        'Tell me, O Muse, of that ingenious hero who travelled far and wide after he had sacked the famous town of Troy. Many cities did he visit, and many were the nations with whose manners and customs he was acquainted; moreover he suffered much by sea while trying to save his own life and bring his men safely home',
       ],
     },
     requests: [
@@ -729,8 +739,8 @@ export const LIBRARY: SeedWork[] = [
     chapter: {
       title: 'Chapter one',
       sections: [
-        'Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress. Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters.',
-        'Her profile as well as her stature and bearing seemed to gain the more dignity from her plain garments, which by the side of provincial fashion gave her the impressiveness of a fine quotation from the Bible,—or from one of our elder poets,—in a paragraph of to-day’s newspaper.',
+        'Miss Brooke had that kind of beauty which seems to be thrown into relief by poor dress.',
+        'Her hand and wrist were so finely formed that she could wear sleeves not less bare of style than those in which the Blessed Virgin appeared to Italian painters; and her profile as well as her stature and bearing seemed to gain the more dignity from her plain garments, which by the side of provincial fashion gave her the impressiveness of a fine quotation from the Bible,—or from one of our elder poets,—in a paragraph of to-day’s newspaper.',
       ],
     },
     requests: [
@@ -801,7 +811,7 @@ export const LIBRARY: SeedWork[] = [
     source: {
       author: 'Virginia Woolf',
       firstPublished: 1925,
-      url: 'https://www.gutenberg.org/ebooks/63107',
+      url: 'https://www.gutenberg.org/ebooks/71865',
     },
     chapter: {
       title: 'One',
@@ -849,7 +859,7 @@ export const LIBRARY: SeedWork[] = [
     chapter: {
       title: 'The old sea-dog at the Admiral Benbow',
       sections: [
-        'Squire Trelawney, Dr. Livesey, and the rest of these gentlemen having asked me to write down the whole particulars about Treasure Island, from the beginning to the end, keeping nothing back but the bearings of the island, and that only because there is still treasure not yet lifted, I take up my pen in the year of grace 17—, and go back to the time when my father kept the Admiral Benbow inn.',
+        'Squire Trelawney, Dr. Livesey, and the rest of these gentlemen having asked me to write down the whole particulars about Treasure Island, from the beginning to the end, keeping nothing back but the bearings of the island, and that only because there is still treasure not yet lifted, I take up my pen in the year of grace 17—, and go back to the time when my father kept the Admiral Benbow inn',
       ],
     },
     requests: [
@@ -883,7 +893,7 @@ export const LIBRARY: SeedWork[] = [
     chapter: {
       title: 'A voyage to Lilliput',
       sections: [
-        'My father had a small estate in Nottinghamshire: I was the third of five sons. He sent me to Emanuel College in Cambridge at fourteen years old, where I resided three years, and applied myself close to my studies; but the charge of maintaining me, although I had a very scanty allowance, being too great for a narrow fortune, I was bound apprentice to Mr. James Bates, an eminent surgeon in London.',
+        'My father had a small estate in Nottinghamshire; I was the third of five sons. He sent me to Emanuel College in Cambridge at fourteen years old, where I resided three years, and applied myself close to my studies; but the charge of maintaining me, although I had a very scanty allowance, being too great for a narrow fortune, I was bound apprentice to Mr. James Bates, an eminent surgeon in London',
       ],
     },
     requests: [
@@ -1004,8 +1014,8 @@ export const LIBRARY: SeedWork[] = [
     chapter: {
       title: 'One',
       sections: [
-        'A green and yellow parrot, which hung in a cage outside the door, kept repeating over and over: “Allez vous-en! Allez vous-en! Sapristi! That’s all right!” He could speak a little Spanish, and also a language which nobody understood, unless it was the mocking-bird that hung on the other side of the door.',
-        'Mr. Pontellier, unable to read his newspaper with any degree of comfort, arose with an expression and an exclamation of disgust. He walked down the gallery and across the narrow bridges which connected the Lebrun cottages one with the other.',
+        'A green and yellow parrot, which hung in a cage outside the door, kept repeating over and over: “Allez vous-en! Allez vous-en! Sapristi! That’s all right!” He could speak a little Spanish, and also a language which nobody understood, unless it was the mocking-bird that hung on the other side of the door, whistling his fluty notes out upon the breeze with maddening persistence.',
+        'Mr. Pontellier, unable to read his newspaper with any degree of comfort, arose with an expression and an exclamation of disgust. He walked down the gallery and across the narrow “bridges” which connected the Lebrun cottages one with the other.',
       ],
     },
     requests: [

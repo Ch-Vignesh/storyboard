@@ -14,28 +14,28 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase**        | 8 — Into the world (nothing started; every task needs an account first)                                                                                                                                                                  |
-| **State**        | All seven phases are pushed (`97f7a47`). The marketing page has been rebuilt to seven sections with a dark theme — uncommitted. Phases 8 to 10 are drafted below. `tasks.md` at the repository root is the short version of all of this. |
-| **Last updated** | 2026-09-15                                                                                                                                                                                                                               |
-| **Next actions** | 1. Review and commit the marketing page. 2. Start Phase 8 by opening the accounts it lists — Neon, Cloudflare R2, two Vercel projects, Resend. Nothing else in the plan can move until those exist.                                      |
+|                  |                                                                                                                                                                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 8 — Into the world (every part that is code is done; the rest needs accounts)                                                                                                                                                                                                   |
+| **State**        | Everything phase 8 can do without an account is done and verified: the deployment configuration, the startup preflight, the restore drill, the automated accessibility pass, and the seeded-excerpt check — which found thirteen misquotations and a wrong citation, all fixed. |
+| **Last updated** | 2026-09-15                                                                                                                                                                                                                                                                      |
+| **Next actions** | 1. Open the five accounts (Neon, Cloudflare R2, two Vercel projects, Resend) and follow `docs/05-deployment.md`. 2. Run the restore drill and the screen-reader pass, and record both dates here. Nothing else in the plan can move until the accounts exist.                   |
 
 ## Overview
 
-| Phase | Name                   | Requirements                                                                          | Estimate  | Status                              |
-| ----- | ---------------------- | ------------------------------------------------------------------------------------- | --------- | ----------------------------------- |
-| 0     | Foundations            | FR-1.3 (steps 1–2), FR-1.4, FR-1.6, NFR-3, NFR-8, NFR-9                               | 1 week    | `[x]` complete, CI green 2026-09-14 |
-| 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[x]` committed, CI green           |
-| 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` committed, CI green           |
-| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` committed, CI green           |
-| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[x]` committed, CI green           |
-| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[x]` committed, CI green           |
-| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[x]` committed, pushed             |
-| 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[x]` committed, pushed             |
-| 8     | Into the world         | NFR-8, and every blocked task from phases 0–7                                         | 1 week    | `[ ]`                               |
-| 9     | The gaps we left       | FR-14.2 (.epub), FR-1.6, OD-3 (second half), decision 0017                            | 2 weeks   | `[ ]`                               |
-| 10    | What writers ask for   | Driven by use, not by this plan                                                       | open      | `[ ]`                               |
+| Phase | Name                   | Requirements                                                                          | Estimate  | Status                                |
+| ----- | ---------------------- | ------------------------------------------------------------------------------------- | --------- | ------------------------------------- |
+| 0     | Foundations            | FR-1.3 (steps 1–2), FR-1.4, FR-1.6, NFR-3, NFR-8, NFR-9                               | 1 week    | `[x]` complete, CI green 2026-09-14   |
+| 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[x]` committed, CI green             |
+| 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` committed, CI green             |
+| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` committed, CI green             |
+| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[x]` committed, CI green             |
+| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[x]` committed, CI green             |
+| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[x]` committed, pushed               |
+| 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[x]` committed, pushed               |
+| 8     | Into the world         | NFR-8, and every blocked task from phases 0–7                                         | 1 week    | `[~]` code done, accounts outstanding |
+| 9     | The gaps we left       | FR-14.2 (.epub), FR-1.6, OD-3 (second half), decision 0017                            | 2 weeks   | `[ ]`                                 |
+| 10    | What writers ask for   | Driven by use, not by this plan                                                       | open      | `[ ]`                                 |
 
 Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 
@@ -510,27 +510,45 @@ exist.
 
 ### Tasks, in order
 
-1. [ ] **Neon.** A Postgres 16 project with branch previews and daily backups at 30-day retention (NFR-8). `pnpm db:deploy` against it, then `pnpm db:seed` — which is idempotent, so it can run on every deploy.
-2. [ ] **Cloudflare R2.** One bucket, one access key, the four `R2_*` variables. Without them uploads fall back to a directory on the application server, which works and does not survive a redeploy.
-3. [ ] **Two Vercel projects**, `apps/app` and `apps/web`, from the same repository. Both need the root `.env` values; only the app needs `DATABASE_URL`, `AUTH_SECRET` and `CRON_SECRET`.
-4. [ ] **Six cron entries** (decision 0012), each a POST to `/api/cron/{job}` with the `CRON_SECRET` as a bearer token: `immediate` (every 10 min), `hourly`, `weekly`, `nudge` (daily), `prune` (daily), `purge` (daily). The endpoint fails closed without the secret, so a missing variable is a silent no-op rather than an open door.
-5. [ ] **Resend**, a verified sending domain, and `EMAIL_FROM` on it. Until then the console mailer logs to stdout, which is correct for development and useless in production.
-6. [ ] **The restore drill** (NFR-8). Not "backups are enabled" — take a backup, restore it into a fresh database, run `prisma migrate status` against it, and read a storyboard out of it. A backup nobody has restored is a hope.
-7. [ ] **The accessibility audit** phase 7 could not make a claim about: a screen reader through the reader, the editor and the request flow, plus an automated pass. Then, and only then, is "WCAG 2.2 AA" a thing this product says about itself.
-8. [ ] **Check the seeded excerpts** against the Gutenberg editions linked in `packages/db/prisma/seed/storyboards/library.ts`. An afternoon, and it removes the one dishonesty currently in the repository.
-9. [ ] **The 22 flows against production**, with `PLAYWRIGHT_BASE_URL` pointed at the deployed app. Then the traffic post.
+Marked `[x]` only where the work is actually finished. Everything still `[ ]`
+needs an account, a DNS record, or a person with a screen reader — none of which
+a commit can supply.
+
+1. [ ] **Neon.** A Postgres 16 project with branch previews and daily backups at 30-day retention (NFR-8). Two connection strings, and they are not interchangeable: the pooled one is `DATABASE_URL`, the direct one is `DIRECT_DATABASE_URL` and is what migrations use, because DDL cannot run over a transaction-mode pooler. `packages/db/prisma.config.ts` prefers it; the application never reads it.
+2. [ ] **Cloudflare R2.** One bucket, one access key, the four `R2_*` variables — **and the bucket's CORS rule**, which is the step that costs an afternoon when it is missed: the browser PUTs straight to R2, so the bucket has to allow the application's origin or every upload fails with an error that names nothing. The exact policy is in `docs/05-deployment.md`.
+3. [x] **Deployment configuration.** `apps/app/vercel.json` and `apps/web/vercel.json` — build through Turborepo from the workspace root, plus the six cron entries. Note the plan limit: Vercel's Hobby tier allows two scheduled jobs at most once a day, and this product has six, one every ten minutes.
+4. [x] **The build actually works on a host with no `.env`.** Turborepo runs in `strict` env mode and `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_MARKETING_URL` and `CRON_SECRET` were not declared in `globalEnv`. Locally that is invisible, because `next.config.ts` loads the root `.env` itself. On Vercel there is no such file, so the first deployment would have failed on a required variable that was being filtered out — and, separately, a changed public URL would not have invalidated the build cache, which is how a deployment serves an old URL baked into the browser bundle.
+5. [ ] **Resend**, a verified sending domain, and `EMAIL_FROM` on it. Start this early: the DNS wait is measured in hours.
+6. [x] **A deployment cannot start half-configured** (decision 0022). `apps/app/src/env-preflight.ts`. Every one of the fallbacks that is right on a laptop is silently wrong on the internet — no mail key means every verification link goes to stdout and every new account is stranded, no cron secret means no digest ever runs, no object store on a serverless host means uploads land on a machine that goes away. None of them raised anything. Now a publicly reachable deployment refuses to start and names all of them at once.
+7. [x] **The restore drill**, as a command (NFR-8). `pnpm db:drill "<url>"`. It checks that every migration is applied, that the invariants are really there — the immutability trigger and both partial unique indexes, which `prisma migrate status` cannot see and which a rebuilt database loses silently — that the tables hold rows, and that a whole storyboard reads out. It refuses any URL that is also `DATABASE_URL`. Verified in both directions against a copy of the development database: it passes on a good one and names exactly what is wrong with a damaged one.
+   - [ ] **Run it against a real restored backup**, and write the date here. An undated drill did not happen.
+8. [x] **The automated accessibility pass** (NFR-4). `apps/app/e2e/accessibility.spec.ts`, axe against WCAG 2.2 A and AA over the sign-up path, the reader, a request, the dashboard, the editor and the import screen. It found two systemic failures, both now fixed at the token level rather than instance by instance: `--color-ink-faint` was 2.98:1 on paper, failing 1.4.3 on every timestamp and byline in the product, and every link inside a run of text was distinguished from that text by colour alone (1.4.1) because the base style set `no-underline` and the components added `hover:underline`, which does nothing for somebody who is not hovering.
+   - [ ] **The screen-reader pass**, which no test file can close. Until somebody has been through the reader, the editor and the request flow by ear, the product should not claim WCAG 2.2 AA — automated checking covers roughly a third of it.
+9. [x] **The seeded excerpts are checked against the editions they cite** (decision 0023). `pnpm check-excerpts`. Thirteen of forty-five did not match: a wrong ebook number (Mrs Dalloway cited the 1923 short story while quoting the 1925 novel), five sentences closed with a full stop the author did not write, a dropped parenthetical in Jane Eyre, and a handful of moved words. All fixed, and the check passes on all forty-five.
+   - Fixing the file turned out not to be enough: the seeder was idempotent by existence, so no correction could ever reach a database that had been seeded once. It now reconciles the text as a new revision, leaving contributors' accepted suggestions alone.
+10. [x] **A 404, an error boundary, `robots.txt` and a sitemap.** The 404 matters more here than in most products: unpublished work answers 404 rather than 403 to a stranger, deliberately, so it is the front door of every private draft rather than a page people reach by accident. The sitemap takes its filter from `visibleStoryboardsWhere(null)` — the authorization layer's own definition of what a signed-out person may see — rather than writing a second one that could drift.
+11. [x] **HSTS**, two years, subdomains included, no `preload` — a submission to a list baked into browsers is effectively irreversible and this product has not run long enough on this domain to promise that.
+12. [x] **The flows can run against a deployment.** `PLAYWRIGHT_BASE_URL` was not supported: `baseURL` was hard-coded, so task 13 was not actually possible. With it set, nothing is built and no server is started.
+13. [ ] **The 26 flows against production**, with `PLAYWRIGHT_BASE_URL` pointed at the deployed app. They sign up real accounts, so this is a deliberate act against a deployment you own. Then the traffic post.
 
 ### Exit criteria
 
 - [ ] A person who has never seen this before, on their own device, on the public internet, reads a stuck passage and sends a suggestion.
-- [ ] A backup taken today restores into a working database.
+- [ ] A backup taken today restores into a working database — `pnpm db:drill` against it, all five checks green, date recorded here.
 - [ ] The digests arrive by email, from a domain that passes SPF and DKIM.
+- [x] A misconfigured deployment refuses to start rather than pretending to work.
+- [x] Every seeded quotation matches the edition it cites.
+- [x] The automated accessibility pass is green, and what it cannot claim is written down.
 
 ### Notes
 
-- Nothing in this phase should require a code change. If it does, that is a
-  finding worth writing down — it means something was configured in a file that
-  should have been an environment variable.
+- This phase predicted it would need no code. It needed some, and the exceptions
+  are the interesting part rather than a failure of the plan — each one was a
+  thing that only shows up when you point the repository at the internet and
+  look. Decisions 0022 and 0023 are the two that were worth writing down. The
+  Turborepo `globalEnv` omission (task 4) is the clearest example of the note's
+  own prediction coming true in reverse: something that worked locally _only_
+  because a file was doing the work an environment variable should have done.
 
 ---
 
@@ -593,17 +611,18 @@ beside it.
 
 ## Open decisions
 
-| OD   | Question                                                 | Blocks                 | Status   | Decision                                                                                                                                                                                     |
-| ---- | -------------------------------------------------------- | ---------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OD-1 | The name (domain taken; crowded in film)                 | Phase 7                | deferred | Decision 0021 — phase 7 ships as Storyboard; the rename is a find-and-replace whenever the name is chosen, and what it touches is written down.                                              |
-| OD-2 | Helping under a pen name separate from the account       | Phase 3                | open     | —                                                                                                                                                                                            |
-| OD-3 | Contributor's right to delete their credit record (GDPR) | Phase 4                | open     | —                                                                                                                                                                                            |
-| OD-4 | Hide history written while private after going public?   | Phase 1                | open     | Schema carries `publicFrom` for "hide"; drop it if the answer is "expose everything".                                                                                                        |
-| OD-5 | One "helped" idea per request, or unlimited              | Phase 2                | open     | —                                                                                                                                                                                            |
-| OD-6 | Co-author quota exemption across storyboards             | Phase 6                | closed   | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3.                                                                                                      |
-| OD-7 | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | closed   | Decision 0020 — 13+, one checkbox, no date of birth stored, and no private messages anywhere in the product, ever.                                                                           |
-| OD-8 | What is searchable in an unpublished manuscript          | Phase 10               | open     | Full-text search is in the deferred table for a privacy reason, not a technical one. Somebody has to say what a stranger may search inside work nobody has published.                        |
-| OD-9 | Whether the marketing site should be a Next.js app       | Phase 9                | open     | One static page currently ships ~560 KB of framework JavaScript it never uses. Plain HTML, or a static-site generator, would be a fraction of that — against the cost of a second toolchain. |
+| OD    | Question                                                 | Blocks                 | Status   | Decision                                                                                                                                                                                                                                                                                                                                             |
+| ----- | -------------------------------------------------------- | ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OD-1  | The name (domain taken; crowded in film)                 | Phase 7                | deferred | Decision 0021 — phase 7 ships as Storyboard; the rename is a find-and-replace whenever the name is chosen, and what it touches is written down.                                                                                                                                                                                                      |
+| OD-2  | Helping under a pen name separate from the account       | Phase 3                | open     | —                                                                                                                                                                                                                                                                                                                                                    |
+| OD-3  | Contributor's right to delete their credit record (GDPR) | Phase 4                | open     | —                                                                                                                                                                                                                                                                                                                                                    |
+| OD-4  | Hide history written while private after going public?   | Phase 1                | open     | Schema carries `publicFrom` for "hide"; drop it if the answer is "expose everything".                                                                                                                                                                                                                                                                |
+| OD-5  | One "helped" idea per request, or unlimited              | Phase 2                | open     | —                                                                                                                                                                                                                                                                                                                                                    |
+| OD-6  | Co-author quota exemption across storyboards             | Phase 6                | closed   | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3.                                                                                                                                                                                                                                                              |
+| OD-7  | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | closed   | Decision 0020 — 13+, one checkbox, no date of birth stored, and no private messages anywhere in the product, ever.                                                                                                                                                                                                                                   |
+| OD-8  | What is searchable in an unpublished manuscript          | Phase 10               | open     | Full-text search is in the deferred table for a privacy reason, not a technical one. Somebody has to say what a stranger may search inside work nobody has published.                                                                                                                                                                                |
+| OD-9  | Whether the marketing site should be a Next.js app       | Phase 9                | open     | One static page currently ships ~560 KB of framework JavaScript it never uses. Plain HTML, or a static-site generator, would be a fraction of that — against the cost of a second toolchain.                                                                                                                                                         |
+| OD-10 | A Content-Security-Policy, and what it costs             | Phase 9                | open     | The application renders prose that strangers wrote and has no CSP. A strict one needs a nonce threaded from the proxy through the layout, which is a real change with a real chance of breaking a screen quietly — so it wants its own deliberate pass rather than being bolted onto a deployment phase. HSTS and the other headers are already set. |
 
 ## Hosting and services checklist
 
