@@ -10,7 +10,20 @@ import { loadStoryboardAsAuthor } from '@/lib/authz/guard'
 
 export async function createTRPCContext(opts: { headers: Headers }) {
   const session = await auth()
-  return { db: prisma, session, headers: opts.headers }
+
+  // FR-13.5 — a suspension has to bite now, not when the token happens to
+  // expire. Sessions are JWTs and can outlive a suspension by up to 30 days, so
+  // the account's live state is read once per authenticated request and carried
+  // on the actor. One indexed lookup by primary key; the alternative is a
+  // suspended person writing for a month.
+  const account = session?.user
+    ? await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { status: true, isAdmin: true },
+      })
+    : null
+
+  return { db: prisma, session, account, headers: opts.headers }
 }
 
 export type Context = Awaited<ReturnType<typeof createTRPCContext>>
@@ -32,14 +45,48 @@ const t = initTRPC.context<Context>().create({
  * The session as `lib/authz` wants it. A guest is `null`, which is the only
  * shape `can()` accepts for "signed out" — there is no anonymous actor object.
  *
- * `status` is deliberately absent: sign-in already refuses a non-ACTIVE
- * account, so a session implies an active one at the moment it was issued. A
- * JWT outliving a suspension (up to 30 days) is a real gap, and phase 6 — which
- * builds suspension and re-audits this module — is where it gets closed.
+ * The account's live status travels with it (FR-13.5). Pass the context's
+ * `account` wherever you have one: without it this reads as an active account,
+ * which is right for the callers that have already established that and wrong
+ * for anyone who has not.
  */
-export function actorFrom(session: Session | null): Actor {
-  return session?.user ? { id: session.user.id } : null
+export function actorFrom(
+  session: Session | null,
+  account?: { status: 'ACTIVE' | 'SUSPENDED' | 'DELETED' } | null,
+): Actor {
+  if (!session?.user) return null
+  return account ? { id: session.user.id, status: account.status } : { id: session.user.id }
 }
+
+/**
+ * Refuses a suspended or deleted account before a procedure runs (FR-13.5).
+ *
+ * `can()` already refuses every capability for such an actor, but not every
+ * mutation goes through a storyboard — reporting, profile edits and account
+ * settings do not — so the gate is here as well as there.
+ */
+export const activeProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.session?.user) {
+    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Sign in first.' })
+  }
+  if (ctx.account && ctx.account.status !== 'ACTIVE') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message:
+        'This account is suspended while some reports about it are reviewed. Your work stays where it is.',
+    })
+  }
+  return next({ ctx: { ...ctx, session: { ...ctx.session, user: ctx.session.user } } })
+})
+
+/** Requires a signed-in administrator (FR-15.5). */
+export const adminProcedure = t.procedure.use(({ ctx, next }) => {
+  // Not FORBIDDEN: an admin screen is not a thing to be told about.
+  if (!ctx.session?.user || !ctx.account?.isAdmin) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found.' })
+  }
+  return next({ ctx: { ...ctx, session: { ...ctx.session, user: ctx.session.user } } })
+})
 
 export const createTRPCRouter = t.router
 export const createCallerFactory = t.createCallerFactory
@@ -69,7 +116,7 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
 export const authorProcedure = protectedProcedure
   .input(z.object({ storyboardId: z.string().min(1) }))
   .use(async ({ ctx, input, next }) => {
-    const storyboard = await loadStoryboardAsAuthor(ctx.db, actorFrom(ctx.session), {
+    const storyboard = await loadStoryboardAsAuthor(ctx.db, actorFrom(ctx.session, ctx.account), {
       id: input.storyboardId,
     })
     return next({ ctx: { ...ctx, storyboard } })

@@ -14,7 +14,7 @@ export const creditRouter = createTRPCRouter({
   forStoryboard: publicProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId } = await loadStoryboard(ctx.db, actor, { id: input.storyboardId })
 
       const credits = await ctx.db.credit.findMany({

@@ -32,8 +32,16 @@ export const SUGGESTION_NOTE_MAX_WORDS = 200
 /** FR-6.9 */
 export const IDEA_WORDS = { min: 20, max: 400 } as const
 
-/** FR-13.2: submitted suggestions a contributor may hold per storyboard. */
-export const SUGGESTION_QUOTA_PER_STORYBOARD = 3
+/**
+ * FR-13.2 with OD-6 resolved (decision 0016): submitted suggestions a person
+ * may hold on one storyboard at a time. The owner has no ceiling on their own
+ * storyboard; a co-author has a generous one; everyone else has three.
+ */
+export const SUGGESTION_QUOTA = {
+  owner: Number.POSITIVE_INFINITY,
+  coauthor: 10,
+  contributor: 3,
+} as const
 
 /** FR-13.3 */
 export const DAILY_LIMITS = {
@@ -42,6 +50,18 @@ export const DAILY_LIMITS = {
   ideasPerRequest: 3,
   storyboardsCreated: 5,
   spinOffsPerStoryboard: 1,
+  /** Not in FR-13.3's list. A reporting endpoint with no ceiling is a
+   * harassment tool, because the queue at the other end is a person's time. */
+  reportsMade: 20,
+} as const
+
+/**
+ * FR-13.3 on the unauthenticated surfaces. Generous, because the failure mode
+ * of a tight limit here is a real person locked out of their own sign-up.
+ */
+export const AUTH_LIMITS = {
+  signUpsPerAddress: 5,
+  resendsPerAddress: 5,
 } as const
 
 /** FR-13.5 */

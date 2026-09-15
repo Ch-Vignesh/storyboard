@@ -13,6 +13,8 @@
 
 import { TRPCError } from '@trpc/server'
 
+import { SUGGESTION_QUOTA } from '@/lib/schemas/constants'
+
 import { ACTION_LABELS, MATRIX, WRITE_ACTIONS, type MatrixAction, type Role } from './matrix'
 
 export { ACTION_LABELS, MATRIX, MATRIX_ACTIONS, ROLES } from './matrix'
@@ -54,6 +56,26 @@ export function roleOn(actor: Actor, resource: StoryboardResource): Role {
   return 'reader'
 }
 
+/**
+ * FR-13.2 and decision 0016 — how many submitted suggestions this person may
+ * hold on this storyboard at once.
+ *
+ * Here rather than in `suggestion.submit` because it is a question about what a
+ * role may do, and NFR-6 says those are answered at the data layer. The caller
+ * still counts inside its own transaction; this only says what to count to.
+ */
+export function quotaFor(actor: Actor, resource: StoryboardResource): number {
+  switch (roleOn(actor, resource)) {
+    case 'owner':
+      return SUGGESTION_QUOTA.owner
+    case 'coauthor':
+      return SUGGESTION_QUOTA.coauthor
+    case 'reader':
+    case 'guest':
+      return SUGGESTION_QUOTA.contributor
+  }
+}
+
 /** True when the actor is the owner or an accepted co-author. */
 export function isAuthor(actor: Actor, resource: StoryboardResource): boolean {
   const role = roleOn(actor, resource)
@@ -85,9 +107,12 @@ export function can(actor: Actor, action: Action, resource: StoryboardResource):
   const matrixAction = resolve(action, resource)
   const role = roleOn(actor, resource)
 
-  // 1. Suspended and deleted accounts are inert. A suspension is reversible
-  //    (FR-13.7), so this is a gate and not a data change.
-  if (actor?.status && actor.status !== 'ACTIVE') return false
+  // 1. A suspended account writes nothing (FR-13.5). Reading is left alone:
+  //    decision 0018 freezes the person, not the work, and a suspended person
+  //    reading a public storyboard is doing what any stranger may do. A deleted
+  //    account is inert entirely.
+  if (actor?.status === 'DELETED') return false
+  if (actor?.status === 'SUSPENDED' && WRITE_ACTIONS.has(matrixAction)) return false
 
   // 2. Soft-deleted: authors only, and read-only even for them.
   if (resource.deletedAt !== null) {

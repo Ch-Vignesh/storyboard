@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
+import { ReportButton } from '@/components/report-button'
 import { hasProfile, nameOf } from '@/lib/people'
 import { caller } from '@/trpc/server'
 
@@ -166,6 +167,11 @@ export default async function ContributorsPage({ params }: Params) {
           </section>
         </>
       )}
+
+      {/* FR-13.5 — reporting the storyboard itself, not a person on this list. */}
+      <section className="mt-12 border-t border-rule pt-6">
+        <ReportButton targetType="STORYBOARD" targetId={storyboard.storyboard.id} />
+      </section>
     </main>
   )
 }

@@ -9,6 +9,9 @@ import { emailSchema, passwordSchema } from '@/lib/schemas/auth'
 import { getMailer } from '@/server/mail/mailer'
 import { verifyEmailMail } from '@/server/mail/templates/verify-email'
 
+import { AUTH_LIMITS } from '@/lib/schemas/constants'
+import { DAY_MS, HOUR_MS, enforce, key, whenToRetry } from '@/server/limits'
+
 import { type Context, createTRPCRouter, publicProcedure } from '../init'
 
 const tokenInput = z.object({ token: z.string().min(20).max(200) })
@@ -50,12 +53,26 @@ export const authRouter = createTRPCRouter({
   signUp: publicProcedure
     .input(z.object({ email: emailSchema }))
     .mutation(async ({ ctx, input }) => {
+      // Keyed on the address rather than the person: there is no person yet.
+      // An address is not an identity, but it is what the action is about, and
+      // it is what somebody abusing this has to keep changing.
+      await enforce(
+        ctx.db,
+        key.signUp(input.email),
+        { limit: AUTH_LIMITS.signUpsPerAddress, windowMs: DAY_MS },
+        () => 'That address has been used to sign up several times today.',
+      )
+
       const existing = await ctx.db.user.findUnique({ where: { email: input.email } })
       if (existing?.emailVerifiedAt) {
         logger.info({ event: 'auth.signup.existing' }, 'sign-up attempted for a verified address')
         return { status: 'sent' as const }
       }
-      const user = existing ?? (await ctx.db.user.create({ data: { email: input.email } }))
+      // FR-13.4 — the rules are on the screen that produced this call, so
+      // this records that they were shown rather than claiming they were read.
+      const user =
+        existing ??
+        (await ctx.db.user.create({ data: { email: input.email, rulesSeenAt: new Date() } }))
       return { status: await issueVerification(ctx.db, user) }
     }),
 
@@ -63,6 +80,16 @@ export const authRouter = createTRPCRouter({
   resendVerification: publicProcedure
     .input(z.object({ email: emailSchema }))
     .mutation(async ({ ctx, input }) => {
+      // The 60-second cooldown below is about not spamming one person; this is
+      // about not letting this endpoint be used to send mail all day.
+      await enforce(
+        ctx.db,
+        key.verificationResend(input.email),
+        { limit: AUTH_LIMITS.resendsPerAddress, windowMs: HOUR_MS },
+        (retryAt) =>
+          `That link has been sent several times already. Try again ${whenToRetry(retryAt)}.`,
+      )
+
       const user = await ctx.db.user.findUnique({ where: { email: input.email } })
       if (!user || user.emailVerifiedAt) return { status: 'sent' as const }
       return { status: await issueVerification(ctx.db, user) }

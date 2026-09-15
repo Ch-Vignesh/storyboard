@@ -4,12 +4,13 @@ import { z } from 'zod'
 
 import { loadStoryboard } from '@/lib/authz/guard'
 import { recordActivity, recordActivityFor } from '@/server/activity'
-import { isAuthor } from '@/lib/authz'
+import { quotaFor } from '@/lib/authz'
 import { emptyDoc, flavourForStoryType, parseDoc } from '@/lib/doc/schema'
 import { derive, hashContent } from '@/lib/doc/text'
 import { publicId } from '@/lib/ids'
 import { logger } from '@/lib/logger'
-import { DAILY_LIMITS, SUGGESTION_QUOTA_PER_STORYBOARD } from '@/lib/schemas/constants'
+import { DAILY_LIMITS } from '@/lib/schemas/constants'
+import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { passChipSchema, suggestionNoteSchema } from '@/lib/schemas/help'
 
 import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
@@ -52,7 +53,7 @@ export const suggestionRouter = createTRPCRouter({
   startDraft: protectedProcedure
     .input(z.object({ requestId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { request, storyboard } = await loadRequestFor(ctx.db, actor, input.requestId)
 
       if (request.kind === 'UNBLOCK') {
@@ -154,30 +155,27 @@ export const suggestionRouter = createTRPCRouter({
         })
       }
 
-      // FR-13.3 — ten a day.
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-      const sentToday = await ctx.db.suggestion.count({
-        where: { contributorId: userId, submittedAt: { gte: since } },
-      })
-      if (sentToday >= DAILY_LIMITS.suggestionsSent) {
-        throw new TRPCError({
-          code: 'TOO_MANY_REQUESTS',
-          message: `You can send ${String(DAILY_LIMITS.suggestionsSent)} suggestions a day. Try again tomorrow.`,
-        })
-      }
-
-      const storyboard = await loadStoryboard(
+      // FR-13.3 — ten in any twenty-four hours, not ten since midnight.
+      await enforce(
         ctx.db,
-        { id: userId },
-        {
-          id: request.storyboardId,
-        },
+        key.suggestionsSent(userId),
+        { limit: DAILY_LIMITS.suggestionsSent, windowMs: DAY_MS },
+        (retryAt) =>
+          `You can send ${String(DAILY_LIMITS.suggestionsSent)} suggestions a day. Try again ${whenToRetry(retryAt)}.`,
       )
-      // FR-13.2 — owners and co-authors are exempt on their own storyboards.
-      const exempt = isAuthor({ id: userId }, storyboard.resource)
+
+      const actor = actorFrom(ctx.session, ctx.account)
+      const storyboard = await loadStoryboard(ctx.db, actor, { id: request.storyboardId })
+      // FR-13.2 with OD-6 resolved (decision 0016): three tiers, not an
+      // exemption. The owner has no ceiling on their own storyboard; a
+      // co-author has a generous one, because the quota protects the owner's
+      // attention and a co-author is trusted with it, not exempt from it.
+      const quota = quotaFor(actor, storyboard.resource)
 
       const result = await ctx.db.$transaction(async (tx) => {
-        if (!exempt) {
+        if (Number.isFinite(quota)) {
+          // Counted inside the transaction, so two submissions racing cannot
+          // both read `quota - 1` and both be let through.
           const held = await tx.suggestion.count({
             where: {
               contributorId: userId,
@@ -185,10 +183,10 @@ export const suggestionRouter = createTRPCRouter({
               request: { storyboardId: request.storyboardId },
             },
           })
-          if (held >= SUGGESTION_QUOTA_PER_STORYBOARD) {
+          if (held >= quota) {
             throw new TRPCError({
               code: 'TOO_MANY_REQUESTS',
-              message: `You can have ${String(SUGGESTION_QUOTA_PER_STORYBOARD)} suggestions waiting on this storyboard at once. Wait for a decision, or withdraw one.`,
+              message: `You can have ${String(quota)} suggestions waiting on this storyboard at once. Wait for a decision on one, or withdraw it.`,
             })
           }
         }
@@ -289,7 +287,7 @@ export const suggestionRouter = createTRPCRouter({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
       }
 
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { permissions } = await loadStoryboard(ctx.db, actor, {
         id: suggestion.request.storyboardId,
       })
@@ -327,7 +325,7 @@ export const suggestionRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const suggestion = await ctx.db.suggestion.findUnique({
         where: { id: input.suggestionId },
         select: {
@@ -495,7 +493,7 @@ export const suggestionRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const suggestion = await ctx.db.suggestion.findUnique({
         where: { id: input.suggestionId },
         select: {

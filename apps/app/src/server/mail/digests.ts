@@ -9,6 +9,8 @@ import {
   type NotificationType,
 } from '@/lib/schemas/notifications'
 import { QUIET_REQUEST_NUDGE_DAYS } from '@/lib/schemas/constants'
+import { pruneRateLimits } from '@/server/limits'
+import { purgeDeletedStoryboards } from '@/server/purge'
 
 import { getMailer, type Mailer } from './mailer'
 import {
@@ -395,6 +397,11 @@ export const CRON_JOBS = {
   hourly: runHourlyDigest,
   weekly: (db: Db) => runWeeklyDigest(db),
   nudge: (db: Db) => runQuietNudge(db),
+  // Not mail, but the same runner: one scheduler is easier to reason about
+  // than two, and this is the only other thing that wants a daily tick.
+  prune: (db: Db) => pruneRateLimits(db as PrismaClient),
+  // FR-2.6 — the thirty days are up. Same runner, same daily tick.
+  purge: (db: Db) => purgeDeletedStoryboards(db as PrismaClient),
 } as const
 
 export type CronJob = keyof typeof CRON_JOBS

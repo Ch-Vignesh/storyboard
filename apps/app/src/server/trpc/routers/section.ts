@@ -44,7 +44,7 @@ export const sectionRouter = createTRPCRouter({
   get: publicProcedure
     .input(z.object({ sectionId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, permissions } = await loadSection(ctx.db, actor, input.sectionId)
 
       const section = await ctx.db.section.findUniqueOrThrow({
@@ -86,7 +86,7 @@ export const sectionRouter = createTRPCRouter({
   listForChapter: publicProcedure
     .input(z.object({ chapterId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { chapterId } = await loadChapter(ctx.db, actor, input.chapterId)
 
       return ctx.db.section.findMany({
@@ -112,7 +112,7 @@ export const sectionRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { chapterId, storyboardId } = await loadChapter(
         ctx.db,
         actor,
@@ -177,7 +177,7 @@ export const sectionRouter = createTRPCRouter({
   rename: protectedProcedure
     .input(z.object({ sectionId: z.string().min(1), title: titleSchema }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId } = await loadSection(
         ctx.db,
         actor,
@@ -200,7 +200,7 @@ export const sectionRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { chapterId } = await loadChapter(
         ctx.db,
         actor,
@@ -237,7 +237,7 @@ export const sectionRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ sectionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, chapterId } = await loadSection(
         ctx.db,
         actor,
@@ -282,7 +282,7 @@ export const sectionRouter = createTRPCRouter({
   split: protectedProcedure
     .input(z.object({ sectionId: z.string().min(1), atBlockIndex: z.number().int().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, chapterId, storyboardId } = await loadSection(
         ctx.db,
         actor,
@@ -393,7 +393,7 @@ export const sectionRouter = createTRPCRouter({
   joinWithPrevious: protectedProcedure
     .input(z.object({ sectionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, chapterId, storyboardId } = await loadSection(
         ctx.db,
         actor,
@@ -484,7 +484,7 @@ export const sectionRouter = createTRPCRouter({
   saveDraft: protectedProcedure
     .input(z.object({ sectionId: z.string().min(1), contentJson: docInput }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, storyboardId } = await loadSection(ctx.db, actor, input.sectionId)
 
       const flavour = await flavourOf(ctx.db, storyboardId)
@@ -515,7 +515,7 @@ export const sectionRouter = createTRPCRouter({
   discardDraft: protectedProcedure
     .input(z.object({ sectionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId } = await loadSection(ctx.db, actor, input.sectionId)
       await ctx.db.sectionDraft.deleteMany({
         where: { sectionId, userId: ctx.session.user.id },
@@ -540,7 +540,7 @@ export const sectionRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, storyboardId, currentRevisionId } = await loadSection(
         ctx.db,
         actor,
@@ -617,7 +617,7 @@ export const sectionRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, resource, currentRevisionId } = await loadSection(
         ctx.db,
         actor,
@@ -665,7 +665,7 @@ export const sectionRouter = createTRPCRouter({
   restoreRevision: protectedProcedure
     .input(z.object({ sectionId: z.string().min(1), revisionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, currentRevisionId } = await loadSection(
         ctx.db,
         actor,

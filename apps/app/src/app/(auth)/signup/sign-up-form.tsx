@@ -3,6 +3,7 @@
 import { Button } from '@storyboard/ui/components/button'
 import { Input } from '@storyboard/ui/components/input'
 import { Label } from '@storyboard/ui/components/label'
+import Link from 'next/link'
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 
@@ -51,6 +52,14 @@ export function SignUpForm() {
       <Button type="submit" variant="primary" className="w-full" disabled={signUp.isPending}>
         {signUp.isPending ? 'Sending' : 'Email me a link'}
       </Button>
+      {/* FR-13.4 — the rules, once, where somebody joining will see them. */}
+      <p className="text-[12.5px] leading-relaxed text-ink-faint">
+        Most of what is here is a draft nobody has published. Before you help with one, read{' '}
+        <Link href="/rules" className="text-pencil hover:underline">
+          how this place works
+        </Link>{' '}
+        — five short things, and they are the ones that matter.
+      </p>
     </form>
   )
 }

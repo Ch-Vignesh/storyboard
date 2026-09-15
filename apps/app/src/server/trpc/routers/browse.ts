@@ -17,7 +17,7 @@ import { actorFrom, createTRPCRouter, publicProcedure } from '../init'
  */
 export const browseRouter = createTRPCRouter({
   requests: publicProcedure.input(browseFiltersSchema).query(async ({ ctx, input }) => {
-    const actor = actorFrom(ctx.session)
+    const actor = actorFrom(ctx.session, ctx.account)
     const age = AGE_FILTERS.find((entry) => entry.value === input.age)
 
     const where: Prisma.ContributionRequestWhereInput = {
@@ -113,7 +113,7 @@ export const browseRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
 
       const rows = await ctx.db.storyboard.findMany({
         where: {

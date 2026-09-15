@@ -6,6 +6,7 @@ import { loadStoryboard } from '@/lib/authz/guard'
 import { recordActivity } from '@/server/activity'
 import { logger } from '@/lib/logger'
 import { DAILY_LIMITS } from '@/lib/schemas/constants'
+import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { ideaBodySchema } from '@/lib/schemas/help'
 
 import { actorFrom, createTRPCRouter, protectedProcedure } from '../init'
@@ -28,7 +29,7 @@ export const ideaRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const request = await ctx.db.contributionRequest.findUnique({
         where: { id: input.requestId },
         select: { id: true, kind: true, state: true, storyboardId: true },
@@ -67,17 +68,20 @@ export const ideaRouter = createTRPCRouter({
         }
       }
 
-      // FR-13.3 — twenty a day, and three per request.
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-      const postedToday = await ctx.db.idea.count({
-        where: { authorId: userId, createdAt: { gte: since } },
-      })
-      if (postedToday >= DAILY_LIMITS.ideasPosted) {
-        throw new TRPCError({
-          code: 'TOO_MANY_REQUESTS',
-          message: `You can post ${String(DAILY_LIMITS.ideasPosted)} ideas a day. Try again tomorrow.`,
-        })
-      }
+      // FR-13.3 — twenty in any twenty-four hours (decision 0017).
+      await enforce(
+        ctx.db,
+        key.ideasPosted(userId),
+        { limit: DAILY_LIMITS.ideasPosted, windowMs: DAY_MS },
+        (retryAt) =>
+          `You can post ${String(DAILY_LIMITS.ideasPosted)} ideas a day. Try again ${whenToRetry(retryAt)}.`,
+      )
+
+      // And three per request — which is a cap on a conversation rather than a
+      // rate, so it counts the ideas themselves and has no window at all. A
+      // reply to somebody else's idea is not one of the three: the limit is
+      // there to stop one person filling a request with openings, not to stop
+      // them talking.
       const onThisRequest = await ctx.db.idea.count({
         where: { authorId: userId, requestId: request.id, parentId: null },
       })
@@ -117,7 +121,7 @@ export const ideaRouter = createTRPCRouter({
   markHelpful: protectedProcedure
     .input(z.object({ ideaId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const idea = await ctx.db.idea.findUnique({
         where: { id: input.ideaId },
         select: {

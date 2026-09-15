@@ -57,7 +57,7 @@ export const requestRouter = createTRPCRouter({
    * to continue into. Both enforced here with a plain-language error.
    */
   create: protectedProcedure.input(createRequestSchema).mutation(async ({ ctx, input }) => {
-    const actor = actorFrom(ctx.session)
+    const actor = actorFrom(ctx.session, ctx.account)
     const { sectionId, storyboardId, wordCount } = await loadSection(
       ctx.db,
       actor,
@@ -130,7 +130,7 @@ export const requestRouter = createTRPCRouter({
       })
       if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'That request does not exist.' })
 
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { permissions } = await loadStoryboard(ctx.db, actor, { id: row.storyboardId })
 
       // FR-5.5 — the reading list renders inline, in order, never as links that
@@ -212,7 +212,7 @@ export const requestRouter = createTRPCRouter({
   listForStoryboard: publicProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId } = await loadStoryboard(ctx.db, actor, { id: input.storyboardId })
 
       return ctx.db.contributionRequest.findMany({
@@ -247,7 +247,7 @@ export const requestRouter = createTRPCRouter({
         .optional(),
     )
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       return ctx.db.contributionRequest.findMany({
         where: {
           state: { in: ['OPEN', 'ANSWERED'] },

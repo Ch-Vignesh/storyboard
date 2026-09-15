@@ -66,7 +66,7 @@ export const compareRouter = createTRPCRouter({
   revisions: publicProcedure
     .input(z.object({ baseId: z.string().min(1), targetId: z.string().min(1) }))
     .query(async ({ ctx, input }): Promise<ComparisonResult & { cached: boolean }> => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { base, target } = await loadPair(ctx.db, actor, input.baseId, input.targetId)
 
       const key = `${base.id}:${target.id}`
@@ -102,7 +102,7 @@ export const compareRouter = createTRPCRouter({
   versions: publicProcedure
     .input(z.object({ baseVersionId: z.string().min(1), targetVersionId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const base = await loadVersion(ctx.db, actor, input.baseVersionId)
       const target = await loadVersion(ctx.db, actor, input.targetVersionId)
 
@@ -203,7 +203,7 @@ export const compareRouter = createTRPCRouter({
   suggestionAgainstHead: publicProcedure
     .input(z.object({ suggestionId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const suggestion = await ctx.db.suggestion.findUnique({
         where: { id: input.suggestionId },
         select: {

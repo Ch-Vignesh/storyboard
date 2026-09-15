@@ -7,6 +7,8 @@ import { ContributionCalendar } from '@/components/contribution-calendar'
 import { STORY_TYPE_LABELS } from '@/lib/schemas/storyboard'
 import { caller } from '@/trpc/server'
 
+import { ReportButton } from '@/components/report-button'
+
 import { EraseCredit } from './erase-credit'
 import { PassedWork } from './passed-work'
 
@@ -198,7 +200,7 @@ export default async function ProfilePage({ params }: Params) {
         canToggle={data.canTogglePassed}
       />
 
-      <section className="mt-12 border-t border-rule pt-6">
+      <section className="mt-12 flex flex-wrap items-baseline justify-between gap-4 border-t border-rule pt-6">
         <p className="text-[13px] text-ink-faint">
           <Link
             href={`/u/${user.username ?? username}/credits`}
@@ -207,6 +209,8 @@ export default async function ProfilePage({ params }: Params) {
             Credit lines for a manuscript&rsquo;s front matter
           </Link>
         </p>
+        {/* FR-13.5 — quiet, and only on somebody else's profile. */}
+        {!data.isSelf ? <ReportButton targetType="USER" targetId={user.id} /> : null}
       </section>
     </main>
   )

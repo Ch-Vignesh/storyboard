@@ -41,7 +41,7 @@ export const profileRouter = createTRPCRouter({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'No such profile.' })
       }
 
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const isSelf = actor?.id === user.id
 
       // Only public storyboards count anywhere on a profile: a private one's

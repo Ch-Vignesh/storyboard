@@ -28,7 +28,7 @@ export const versionRouter = createTRPCRouter({
   list: publicProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId, permissions } = await loadStoryboard(ctx.db, actor, {
         id: input.storyboardId,
       })
@@ -83,7 +83,7 @@ export const versionRouter = createTRPCRouter({
   create: protectedProcedure
     .input(z.object({ baseVersionId: z.string().min(1), name: nameSchema }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { versionId, storyboardId } = await loadVersion(
         ctx.db,
         actor,
@@ -117,7 +117,7 @@ export const versionRouter = createTRPCRouter({
   rename: protectedProcedure
     .input(z.object({ versionId: z.string().min(1), name: nameSchema }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { versionId } = await loadVersion(ctx.db, actor, input.versionId, 'version:create')
       return ctx.db.version.update({
         where: { id: versionId },
@@ -137,7 +137,7 @@ export const versionRouter = createTRPCRouter({
   promoteToMain: protectedProcedure
     .input(z.object({ versionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { versionId, storyboardId, isMain } = await loadVersion(
         ctx.db,
         actor,
@@ -191,7 +191,7 @@ export const versionRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ versionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { versionId, isMain } = await loadVersion(
         ctx.db,
         actor,

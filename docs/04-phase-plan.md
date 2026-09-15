@@ -14,12 +14,12 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                                                |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase**        | 5 — Import and export                                                                                                                                                                                                                                          |
-| **State**        | Phases 0–4 are committed and pushed, CI green (`c7bc9e0`). Phase 5 is committed and verified locally; its exit criterion passes end to end.                                                                                                                    |
-| **Last updated** | 2026-09-15                                                                                                                                                                                                                                                     |
-| **Next actions** | 1. Review Phase 5. 2. Set up hosting accounts (see the checklist at the end); at minimum Neon, so `DATABASE_URL` exists outside this machine, an R2 bucket for manuscript uploads, and a Vercel Cron entry per job in decision 0012. 3. Start Phase 6 (trust). |
+|                  |                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 6 — Trust                                                                                                                                                                                                                                                                                                        |
+| **State**        | Phases 0–5 are committed and pushed, CI green (`f26d4c5`). Phase 6 is code complete and verified locally; all three exit criteria pass. Not committed — the user reviews first.                                                                                                                                  |
+| **Last updated** | 2026-09-15                                                                                                                                                                                                                                                                                                       |
+| **Next actions** | 1. Review and commit Phase 6. 2. Resolve **OD-7** (age policy), which blocks Phase 7 and is not optional. 3. Set up hosting accounts (see the checklist at the end); at minimum Neon, an R2 bucket for manuscript uploads, and a Vercel Cron entry per job in decision 0012 — now including `prune` and `purge`. |
 
 ## Overview
 
@@ -30,8 +30,8 @@ as the work it describes.
 | 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` committed, CI green            |
 | 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` committed, CI green            |
 | 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[x]` committed, CI green            |
-| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[x]` code complete, awaiting review |
-| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[ ]`                                |
+| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[x]` committed, CI green            |
+| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[x]` code complete, awaiting review |
 | 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[ ]`                                |
 
 Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
@@ -309,26 +309,64 @@ accepted into and is re-attributed to "a former contributor".
 
 **Goal.** The product holds under bad actors and careless ones, and a mistake cannot expose an unpublished manuscript.
 
-**Resolve first:** OD-6 (co-author quota exemption across storyboards).
+**Resolved first:** OD-6 — **a co-author gets a bigger quota, not an exemption**
+(decision 0016). Owner: no cap. Co-author: ten. Everyone else: three.
 
 ### Tasks, in order
 
-1. [ ] Quota: at most three submitted suggestions per contributor per storyboard, counted inside the submit transaction; owners and co-authors exempt on their own storyboards per OD-6 (FR-13.2, architecture §6.1).
-2. [ ] Global rate limits with Upstash sliding windows: 10 suggestions/day, 20 ideas/day, 3 ideas per request, 5 storyboards/day, 1 spin-off per storyboard per day (FR-13.3). Also on sign-up and verification resend.
-3. [ ] Community rules page at a permanent URL, shown once at sign-up (FR-13.4).
-4. [ ] Reporting: user, storyboard, suggestion, idea; five categories; dedup per reporter and target; ten upheld reports suspend pending review; counts never public (FR-13.5).
-5. [ ] Admin: report queue with one-key decisions, reversible suspension, seeded-content manager, feature flags (FR-13.7, FR-15.5).
-6. [ ] The honest visibility copy everywhere it belongs (FR-13.6).
-7. [ ] Re-audit `lib/authz` line by line with fresh attention; private storyboard returns 404 to a signed-in stranger at every route including the API (NFR-6).
-8. [ ] Hard-delete job for storyboards past the 30-day grace, using the trigger's escape hatch inside one transaction (FR-2.6). Account deletion per OD-3.
+1. [x] Quota, counted inside the submit transaction, in three tiers per decision 0016 (FR-13.2, architecture §6.1). `quotaFor()` lives beside the capability matrix. _(2026-09-15)_
+2. [x] Global rate limits as a sliding window: 10 suggestions/day, 20 ideas/day, 3 ideas per request, 5 storyboards/day, 1 spin-off per storyboard per day, 20 reports/day, plus sign-up and verification resend (FR-13.3). In Postgres rather than Upstash — decision 0017. _(2026-09-15)_
+3. [x] Community rules at `/rules`, a permanent URL, shown once on the sign-up screen and recorded on the account (FR-13.4). _(2026-09-15)_
+4. [x] Reporting: user, storyboard, suggestion, idea; five categories; deduplicated per reporter and target; ten **upheld** reports suspend pending review; counts never public (FR-13.5). _(2026-09-15)_
+5. [x] Admin at `/admin`: report queue with uphold/dismiss and an undo, reversible suspension, seeded-content manager with FR-15.4's targets, feature flags (FR-13.7, FR-15.5). _(2026-09-15)_
+6. [x] The honest visibility copy on the import screen as well as the create screen, which was the one place it was missing (FR-13.6). _(2026-09-15)_
+7. [x] `lib/authz` re-audited. The gap phase 1 left in writing is closed: the account's live status now reaches `can()` on every request (NFR-6). _(2026-09-15)_
+8. [x] Purge job for storyboards past the 30-day grace, through the NFR-3 trigger's escape hatch in one transaction (FR-2.6). _(2026-09-15)_
 
 ### Exit criteria
 
-- [ ] A fourth submitted suggestion is refused with a clear message.
-- [ ] Ten upheld reports suspend an account.
-- [ ] A private storyboard returns 404, not 403, to a signed-in stranger at every route including the API.
+- [x] A fourth submitted suggestion is refused with a clear message. _Verified 2026-09-15 by `e2e/flow-8-trust.spec.ts`: three go through the real composer and wait on the author; the fourth is refused with "You can have 3 suggestions waiting on this storyboard at once. Wait for a decision on one, or withdraw it."_
+- [x] Ten upheld reports suspend an account. _Verified in the same file: nine upheld reports from nine different people (FR-13.5 deduplicates per reporter, so one person cannot do this alone), then a tenth filed through the real report control and upheld through the real admin queue. The account's `status` becomes `SUSPENDED`, it can no longer sign in, and — decision 0018 — a guest can still read its storyboard._
+- [x] A private storyboard returns 404, not 403, to a signed-in stranger at every route including the API. _Verified in the same file across nine routes and the export endpoint._
 
 ### Notes
+
+- **OD-6 resolved as three tiers** (decision 0016). The argument for the
+  exemption as written — a co-author can edit directly, so capping their
+  suggestions prevents nothing — proves less than it looks: the quota protects
+  the owner's **attention**, not the manuscript. Ten is admittedly arbitrary, and
+  it is one number in `lib/schemas/constants.ts`.
+- **Suspension freezes the person, not the work** (decision 0018). FR-13.5
+  suspends _pending review_, so nobody has decided anything yet; and the work is
+  not only theirs — a credit sits on somebody else's contributors page. Hiding it
+  would alter a third party's manuscript over an accusation against a stranger.
+- **Phase 1 left a real hole, and this phase closed it.** `actorFrom` did not
+  carry account status, so `can()`'s suspension check never fired: a JWT issued
+  before a suspension kept writing for up to thirty days. The context now reads
+  the account's live state once per authenticated request. The comment in
+  `init.ts` that flagged this in phase 1 has been replaced by the fix.
+- **Rate limits are in Postgres** (decision 0017), sliding rather than fixed —
+  "ten in the last twenty-four hours", not "ten since midnight", because a fixed
+  window lets somebody send ten at 23:59 and ten more at 00:01.
+- **A refusal records nothing.** If a refused attempt wrote a hit, the window
+  would slide forward every time somebody bounced off it and the limit would
+  become permanent. There is a test for exactly this.
+- **Upholding counts, filing does not.** A brigade can generate a hundred
+  reports and suspend nobody; the ten in FR-13.5 are ten decisions by a person.
+- **`server-only` is aliased under Vitest** (`apps/app/test/server-only.ts')
+  so server modules can be tested without dropping the guard that keeps them out
+  of client components. The alternative was to leave the import off the modules
+  that need testing, which trades a real protection for a test-runner
+  convenience.
+- **Prettier will rewrite `\u0000` escapes inside a `/u` regex into literal
+  control characters**, which turns the file binary. The control-character rule
+  now has exactly one home, in `lib/schemas/help.ts`, and the report schema
+  imports it.
+- Two things are deliberately not here: **account deletion** (OD-3's second
+  half) needs the same purge machinery pointed at a person rather than a
+  storyboard, and is better done next to OD-7's age policy in phase 7 — and
+  `isAdmin` **has no interface**, because the first administrator has to be made
+  in the database by whoever runs the deployment.
 
 ---
 
@@ -369,15 +407,15 @@ accepted into and is re-attributed to "a former contributor".
 
 ## Open decisions
 
-| OD   | Question                                                 | Blocks                 | Status | Decision                                                                              |
-| ---- | -------------------------------------------------------- | ---------------------- | ------ | ------------------------------------------------------------------------------------- |
-| OD-1 | The name (domain taken; crowded in film)                 | Phase 7                | open   | —                                                                                     |
-| OD-2 | Helping under a pen name separate from the account       | Phase 3                | open   | —                                                                                     |
-| OD-3 | Contributor's right to delete their credit record (GDPR) | Phase 4                | open   | —                                                                                     |
-| OD-4 | Hide history written while private after going public?   | Phase 1                | open   | Schema carries `publicFrom` for "hide"; drop it if the answer is "expose everything". |
-| OD-5 | One "helped" idea per request, or unlimited              | Phase 2                | open   | —                                                                                     |
-| OD-6 | Co-author quota exemption across storyboards             | Phase 6                | open   | —                                                                                     |
-| OD-7 | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | open   | —                                                                                     |
+| OD   | Question                                                 | Blocks                 | Status | Decision                                                                                |
+| ---- | -------------------------------------------------------- | ---------------------- | ------ | --------------------------------------------------------------------------------------- |
+| OD-1 | The name (domain taken; crowded in film)                 | Phase 7                | open   | —                                                                                       |
+| OD-2 | Helping under a pen name separate from the account       | Phase 3                | open   | —                                                                                       |
+| OD-3 | Contributor's right to delete their credit record (GDPR) | Phase 4                | open   | —                                                                                       |
+| OD-4 | Hide history written while private after going public?   | Phase 1                | open   | Schema carries `publicFrom` for "hide"; drop it if the answer is "expose everything".   |
+| OD-5 | One "helped" idea per request, or unlimited              | Phase 2                | open   | —                                                                                       |
+| OD-6 | Co-author quota exemption across storyboards             | Phase 6                | closed | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3. |
+| OD-7 | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | open   | —                                                                                       |
 
 ## Hosting and services checklist
 

@@ -31,7 +31,16 @@ export async function GET(request: Request, { params }: Params): Promise<NextRes
   }
 
   const session = await auth()
-  const actor = actorFrom(session)
+  // FR-13.5 — a route handler has no tRPC context, so it reads the account's
+  // live status the same way the context does. Exporting is a write action in
+  // every sense that matters: it takes the manuscript out.
+  const account = session?.user
+    ? await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { status: true, isAdmin: true },
+      })
+    : null
+  const actor = actorFrom(session, account)
 
   let storyboardId: string
   try {

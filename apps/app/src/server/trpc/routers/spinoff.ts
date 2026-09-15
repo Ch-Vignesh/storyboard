@@ -6,6 +6,7 @@ import { canReadStoryboard, loadStoryboard } from '@/lib/authz/guard'
 import { publicId, slugify } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import { DAILY_LIMITS } from '@/lib/schemas/constants'
+import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { titleSchema } from '@/lib/schemas/storyboard'
 
 import { copyTree } from './version'
@@ -38,7 +39,7 @@ export const spinOffRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const userId = ctx.session.user.id
 
       // FR-10.7 is enforced inside `can()`: spinning off requires a public
@@ -63,18 +64,14 @@ export const spinOffRouter = createTRPCRouter({
         },
       })
 
-      // FR-13.3 — one spin-off of a given storyboard per user per day. Phase 6
-      // moves the limits into Redis; a row count is exact and free until then.
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-      const recent = await ctx.db.storyboard.count({
-        where: { ownerId: userId, forkedFromId: storyboardId, forkedAt: { gte: since } },
-      })
-      if (recent >= DAILY_LIMITS.spinOffsPerStoryboard) {
-        throw new TRPCError({
-          code: 'TOO_MANY_REQUESTS',
-          message: 'You have already started your own version of this story today.',
-        })
-      }
+      // FR-13.3 — one spin-off of a given storyboard per person per day.
+      await enforce(
+        ctx.db,
+        key.spinOff(userId, storyboardId),
+        { limit: DAILY_LIMITS.spinOffsPerStoryboard, windowMs: DAY_MS },
+        (retryAt) =>
+          `You have already started your own version of this story today. You can start another ${whenToRetry(retryAt)}.`,
+      )
 
       const source = await ctx.db.version.findFirst({
         where: input.versionId
@@ -211,7 +208,7 @@ export const spinOffRouter = createTRPCRouter({
   lineage: publicProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId } = await loadStoryboard(ctx.db, actor, { id: input.storyboardId })
 
       const ancestors: Array<{
@@ -330,7 +327,7 @@ export const spinOffRouter = createTRPCRouter({
   listFor: publicProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId } = await loadStoryboard(ctx.db, actor, { id: input.storyboardId })
 
       const spinOffs = await ctx.db.storyboard.findMany({

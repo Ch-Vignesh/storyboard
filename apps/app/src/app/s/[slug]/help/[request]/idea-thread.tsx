@@ -8,6 +8,7 @@ import { useState } from 'react'
 
 import { IDEA_WORDS } from '@/lib/schemas/constants'
 import { countWords } from '@/lib/schemas/help'
+import { ReportButton } from '@/components/report-button'
 import { useTRPC } from '@/trpc/client'
 
 type Idea = {
@@ -31,6 +32,7 @@ export function IdeaThread({
   canPost,
   signedIn,
   hasHelpfulIdea,
+  viewerId,
 }: {
   requestId: string
   ideas: Idea[]
@@ -38,6 +40,8 @@ export function IdeaThread({
   canPost: boolean
   signedIn: boolean
   hasHelpfulIdea: boolean
+  /** Whose ideas not to offer a report control on. Null for a guest. */
+  viewerId: string | null
 }) {
   const trpc = useTRPC()
   const router = useRouter()
@@ -118,6 +122,10 @@ export function IdeaThread({
                   >
                     Reply
                   </button>
+                ) : null}
+                {/* FR-13.5 — last in the row, and only on somebody else's. */}
+                {canPost && idea.author.id !== viewerId ? (
+                  <ReportButton targetType="IDEA" targetId={idea.id} />
                 ) : null}
               </div>
 

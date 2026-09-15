@@ -8,6 +8,7 @@ import { derive } from '@/lib/doc/text'
 import { publicId, slugify } from '@/lib/ids'
 import { loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
 import { DAILY_LIMITS } from '@/lib/schemas/constants'
+import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import {
   createStoryboardSchema,
   updateStoryboardSchema,
@@ -28,18 +29,14 @@ export const storyboardRouter = createTRPCRouter({
   create: protectedProcedure.input(createStoryboardSchema).mutation(async ({ ctx, input }) => {
     const userId = ctx.session.user.id
 
-    // FR-13.3 — five a day. Counted here rather than in Redis because phase 1
-    // has no Redis and a row count is exact; phase 6 moves it.
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    const createdToday = await ctx.db.storyboard.count({
-      where: { ownerId: userId, createdAt: { gte: since } },
-    })
-    if (createdToday >= DAILY_LIMITS.storyboardsCreated) {
-      throw new TRPCError({
-        code: 'TOO_MANY_REQUESTS',
-        message: `You can start ${DAILY_LIMITS.storyboardsCreated} storyboards a day. Try again tomorrow.`,
-      })
-    }
+    // FR-13.3 — five in any twenty-four hours (decision 0017).
+    await enforce(
+      ctx.db,
+      key.storyboardsCreated(userId),
+      { limit: DAILY_LIMITS.storyboardsCreated, windowMs: DAY_MS },
+      (retryAt) =>
+        `You can start ${String(DAILY_LIMITS.storyboardsCreated)} storyboards a day. Try again ${whenToRetry(retryAt)}.`,
+    )
 
     const genres = await ctx.db.genre.findMany({
       where: { id: { in: input.genreIds } },
@@ -143,7 +140,7 @@ export const storyboardRouter = createTRPCRouter({
   get: publicProcedure
     .input(z.object({ slug: z.string().min(1), versionId: z.string().optional() }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId, resource, permissions } = await loadStoryboard(ctx.db, actor, {
         slug: input.slug,
       })
@@ -286,7 +283,7 @@ export const storyboardRouter = createTRPCRouter({
 
   /** Title, logline, genres and the rights note (FR-2.1, FR-14.5). */
   update: protectedProcedure.input(updateStoryboardSchema).mutation(async ({ ctx, input }) => {
-    const actor = actorFrom(ctx.session)
+    const actor = actorFrom(ctx.session, ctx.account)
     const { storyboardId } = await loadStoryboard(
       ctx.db,
       actor,
@@ -334,7 +331,7 @@ export const storyboardRouter = createTRPCRouter({
   setVisibility: protectedProcedure
     .input(z.object({ storyboardId: z.string().min(1), visibility: visibilitySchema }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId, resource } = await loadStoryboard(
         ctx.db,
         actor,
@@ -376,7 +373,7 @@ export const storyboardRouter = createTRPCRouter({
   markFinished: protectedProcedure
     .input(z.object({ storyboardId: z.string().min(1), finished: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       // The same capability as changing visibility: it is the author's
       // statement about their own work, and a co-author does not make it.
       const { storyboardId } = await loadStoryboard(
@@ -429,7 +426,7 @@ export const storyboardRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId } = await loadStoryboard(
         ctx.db,
         actor,
@@ -477,7 +474,7 @@ export const storyboardRouter = createTRPCRouter({
   deletionImpact: protectedProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId } = await loadStoryboard(
         ctx.db,
         actor,
@@ -500,7 +497,7 @@ export const storyboardRouter = createTRPCRouter({
   browse: publicProcedure
     .input(z.object({ take: z.number().int().min(1).max(50).default(20) }).optional())
     .query(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       return ctx.db.storyboard.findMany({
         where: visibleStoryboardsWhere(actor),
         orderBy: { createdAt: 'desc' },

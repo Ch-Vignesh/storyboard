@@ -173,6 +173,15 @@ model User {
   avatarUrl       String?
   status          UserStatus @default(ACTIVE)
   isAdmin         Boolean    @default(false)
+  /// FR-13.5 — when the account was suspended, and by whom. The work stays
+  /// readable (decision 0018); what stops is signing in and writing.
+  suspendedAt     DateTime?
+  suspendedById   String?
+  suspendedBy     User?      @relation("UserSuspender", fields: [suspendedById], references: [id])
+  suspendedUsers  User[]     @relation("UserSuspender")
+  /// FR-13.4 — the community rules are shown once, at sign-up. This records
+  /// that they were, so nobody is shown them twice or misses them once.
+  rulesSeenAt     DateTime?
   /// Set when the four onboarding steps are complete (FR-1.3, FR-1.5).
   onboardedAt     DateTime?
   /// FR-9.4 — whether suggestions this person wrote that were passed on are
@@ -187,6 +196,7 @@ model User {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
+  featureFlagsSet    FeatureFlag[]
   pinnedGenres       UserGenre[]
   storyboards        Storyboard[]             @relation("StoryboardOwner")
   collaborations     Collaborator[]           @relation("CollaboratorUser")
@@ -630,6 +640,29 @@ model Report {
   @@unique([reporterId, targetType, targetId])
   @@index([state, createdAt])
   @@index([targetType, targetId])
+}
+
+/// FR-13.3 — one row per limited action, counted in a sliding window.
+/// Decision 0017: Postgres until there is a Redis worth moving to. Pruned by
+/// the cron runner; a row older than the longest window is of no interest.
+model RateLimitHit {
+  id  String   @id @default(cuid())
+  /// The thing being limited, e.g. `suggestion:submit:<userId>`. Opaque here.
+  key String   @db.VarChar(200)
+  at  DateTime @default(now())
+
+  @@index([key, at])
+}
+
+/// FR-15.5 — a switch an owner can throw without a deploy.
+model FeatureFlag {
+  key         String   @id @db.VarChar(80)
+  enabled     Boolean  @default(false)
+  /// What it does, in the admin screen's own words.
+  description String   @db.VarChar(300)
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id])
 }
 
 /// FR-9.3 — the contribution calendar. One row per user per active day.

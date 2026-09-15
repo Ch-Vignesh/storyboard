@@ -20,7 +20,7 @@ export const chapterRouter = createTRPCRouter({
   create: protectedProcedure
     .input(z.object({ versionId: z.string().min(1), title: titleSchema }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { versionId, storyboardId } = await loadVersion(
         ctx.db,
         actor,
@@ -81,7 +81,7 @@ export const chapterRouter = createTRPCRouter({
   rename: protectedProcedure
     .input(z.object({ chapterId: z.string().min(1), title: titleSchema }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { chapterId } = await loadChapter(
         ctx.db,
         actor,
@@ -105,7 +105,7 @@ export const chapterRouter = createTRPCRouter({
       z.object({ versionId: z.string().min(1), chapterIds: z.array(z.string().min(1)).min(1) }),
     )
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { versionId } = await loadVersion(
         ctx.db,
         actor,
@@ -154,7 +154,7 @@ export const chapterRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ chapterId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const actor = actorFrom(ctx.session)
+      const actor = actorFrom(ctx.session, ctx.account)
       const { chapterId, versionId } = await loadChapter(
         ctx.db,
         actor,

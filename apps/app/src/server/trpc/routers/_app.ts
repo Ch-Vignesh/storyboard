@@ -1,4 +1,5 @@
 import { createCallerFactory, createTRPCRouter } from '../init'
+import { adminRouter } from './admin'
 import { authRouter } from './auth'
 import { browseRouter } from './browse'
 import { chapterRouter } from './chapter'
@@ -8,6 +9,7 @@ import { ideaRouter } from './idea'
 import { importRouter } from './import'
 import { notificationRouter } from './notification'
 import { profileRouter } from './profile'
+import { reportRouter } from './report'
 import { requestRouter } from './request'
 import { sectionRouter } from './section'
 import { settingsRouter } from './settings'
@@ -19,11 +21,13 @@ import { userRouter } from './user'
 
 export const appRouter = createTRPCRouter({
   auth: authRouter,
+  admin: adminRouter,
   user: userRouter,
   storyboard: storyboardRouter,
   chapter: chapterRouter,
   section: sectionRouter,
   request: requestRouter,
+  report: reportRouter,
   suggestion: suggestionRouter,
   idea: ideaRouter,
   import: importRouter,

@@ -24,7 +24,7 @@ import {
  * so it cannot matter.
  */
 // eslint-disable-next-line no-control-regex -- matching them is the point
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
+export const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 
 /** Counts words the way the rest of the product does (`lib/doc/text.ts`). */
 export function countWords(text: string): number {

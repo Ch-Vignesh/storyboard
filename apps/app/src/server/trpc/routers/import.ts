@@ -26,6 +26,7 @@ import { publicId, slugify } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import { confirmedOutlineSchema } from '@/lib/schemas/import'
 import { DAILY_LIMITS } from '@/lib/schemas/constants'
+import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { createStoryboardSchema } from '@/lib/schemas/storyboard'
 import { createUploadTarget, deleteObject, getObject, uploadKey } from '@/server/storage'
 
@@ -72,24 +73,21 @@ export const importRouter = createTRPCRouter({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'That file is larger than 5 MB.' })
       }
 
-      // FR-13.3 — the same daily ceiling as creating a storyboard by hand, since
-      // that is what a committed import becomes.
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-      const today = await ctx.db.importJob.count({
-        where: { userId, createdAt: { gte: since } },
-      })
-      if (today >= DAILY_LIMITS.storyboardsCreated * 2) {
-        throw new TRPCError({
-          code: 'TOO_MANY_REQUESTS',
-          message: 'You have started a lot of imports today. Try again tomorrow.',
-        })
-      }
+      // FR-13.3 — twice the daily ceiling for creating a storyboard by hand,
+      // since that is what a committed import becomes and an abandoned one is
+      // cheap. Counted before the key is minted, so a refusal writes nothing.
+      await enforce(
+        ctx.db,
+        key.importsStarted(userId),
+        { limit: DAILY_LIMITS.storyboardsCreated * 2, windowMs: DAY_MS },
+        (retryAt) => `You have started a lot of imports today. Try again ${whenToRetry(retryAt)}.`,
+      )
 
-      const key = uploadKey(userId, input.fileName)
-      const target = await createUploadTarget(key, 'application/octet-stream')
+      const fileKey = uploadKey(userId, input.fileName)
+      const target = await createUploadTarget(fileKey, 'application/octet-stream')
 
       const job = await ctx.db.importJob.create({
-        data: { userId, fileKey: key, fileName: input.fileName, format, state: 'UPLOADED' },
+        data: { userId, fileKey, fileName: input.fileName, format, state: 'UPLOADED' },
         select: { id: true },
       })
 

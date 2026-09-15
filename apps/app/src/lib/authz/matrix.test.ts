@@ -204,10 +204,30 @@ describe('assertCan', () => {
 })
 
 describe('account status (FR-13.5)', () => {
-  it('lets a suspended owner do nothing, including read', () => {
+  /**
+   * This used to assert that a suspended account could do nothing at all,
+   * reading included. Decision 0018 narrowed it in phase 6: a suspension
+   * freezes the person, not the work, and a suspended person reading a public
+   * storyboard is doing what any stranger may do. `trust.test.ts` covers the
+   * new rule from both sides; what stays here is that writing stops dead.
+   */
+  it('lets a suspended owner write nothing at all', () => {
     const suspended: Actor = { id: OWNER, status: 'SUSPENDED' }
     for (const action of MATRIX_ACTIONS) {
-      expect(can(suspended, action, storyboard())).toBe(false)
+      if (action === 'storyboard:readPublic' || action === 'storyboard:readPrivate') continue
+      expect(can(suspended, action, storyboard()), action).toBe(false)
+    }
+  })
+
+  it('leaves reading alone, which is the whole of decision 0018', () => {
+    const suspended: Actor = { id: OWNER, status: 'SUSPENDED' }
+    expect(can(suspended, 'storyboard:read', storyboard())).toBe(true)
+  })
+
+  it('lets a deleted account do nothing, including read', () => {
+    const deleted: Actor = { id: OWNER, status: 'DELETED' }
+    for (const action of MATRIX_ACTIONS) {
+      expect(can(deleted, action, storyboard()), action).toBe(false)
     }
   })
 

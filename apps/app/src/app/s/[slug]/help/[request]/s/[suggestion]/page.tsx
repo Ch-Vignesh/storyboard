@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
 import { PASS_CHIPS, SUGGESTION_STATE_LABELS } from '@/lib/schemas/help'
+import { ReportButton } from '@/components/report-button'
 import { caller } from '@/trpc/server'
 
 import { DecisionPanel } from './decision-panel'
@@ -94,6 +95,12 @@ export default async function SuggestionPage({ params }: Params) {
         isStale={comparison.isStale}
         backHref={`/s/${slug}/help/${requestPublicId}`}
       />
+
+      {/* FR-13.5 — the person deciding on a suggestion is the person best
+          placed to say it should not have been sent. */}
+      <section className="mt-10 border-t border-rule pt-6">
+        <ReportButton targetType="SUGGESTION" targetId={suggestion.id} />
+      </section>
     </main>
   )
 }

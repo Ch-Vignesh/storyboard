@@ -184,6 +184,7 @@ export default async function RequestPage({ params }: Params) {
           canPost={permissions.canPostIdea}
           signedIn={signedIn}
           hasHelpfulIdea={data.hasHelpfulIdea}
+          viewerId={session?.user?.id ?? null}
         />
       )}
     </main>
