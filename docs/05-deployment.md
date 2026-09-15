@@ -267,6 +267,31 @@ happened.
 
 ---
 
+## Checking it, after every step
+
+```sh
+pnpm check-deploy                       # is it configured, and does any of it work
+pnpm check-deploy --email you@you.com   # and send one real message, end to end
+```
+
+Run it after each account above, with that account's variables in the
+environment. It is the difference between believing a key is right and knowing
+it — it connects to the database, round-trips an object through the bucket, and
+sends a real email if you ask it to.
+
+This is deliberately not the same check the application makes at startup. The
+preflight asks whether the variables are _present_, which is all it can safely
+do at boot: a check that phoned a third party on every start would turn
+somebody else's outage into yours. This one asks whether they are _right_, by
+using them, which is only safe because a person chose to run it.
+
+Two things it cannot check, and says so rather than implying otherwise. The
+bucket's CORS rule is enforced by the browser, not the API, so no shell command
+can see it — and it is the step most often missed. And whether the email
+actually _arrived_, and in which folder, is something only you can look at.
+
+---
+
 ## 7. Before you tell anybody
 
 ```sh

@@ -29,7 +29,8 @@
     "prepare": "husky",
     "e2e": "pnpm --filter @storyboard/app e2e",
     "db:seed:demo": "pnpm --filter @storyboard/db db:seed:demo",
-    "cron": "pnpm --filter @storyboard/app cron"
+    "cron": "pnpm --filter @storyboard/app cron",
+    "check-deploy": "pnpm --filter @storyboard/app check-deploy"
   },
   "devDependencies": {
     "@storyboard/config": "workspace:*",
