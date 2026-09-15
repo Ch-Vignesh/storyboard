@@ -144,7 +144,7 @@ User
 - **FR-1.3** Sign-up is: email → verification link → set password → choose username → pick at least three genres. Username is immutable in v1 and appears in credit lines forever; warn at the point of choosing.
 - **FR-1.4** Verification link expires in 24 hours and is re-sendable with a 60-second cooldown.
 - **FR-1.5** After onboarding the user lands on the dashboard, never on an empty state. If they have no storyboards, the dashboard shows open requests matching their chosen genres.
-- **FR-1.6** Authentication is email and password in v1. OAuth is deferred; do not build the abstraction for it now beyond what Auth.js gives free.
+- **FR-1.6** Authentication is email and password in v1. OAuth is deferred; do not build the abstraction for it now beyond what Auth.js gives free. _(A Google provider exists and is inert unless AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET are set; email and password is the supported path. Decision 0027.)_
 
 **Sixty-second target:** a new user reads a real stuck passage within 60 seconds of landing on the marketing site, without an account. The account wall sits in front of _helping_, not _reading_.
 

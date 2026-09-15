@@ -83,8 +83,12 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     })
   }
 
-  it('defines a delivery class and copy for all twelve types (FR-12.2)', () => {
-    expect(NOTIFICATION_TYPES).toHaveLength(12)
+  it('defines a delivery class and copy for every type (FR-12.2)', () => {
+    // The count is asserted so that adding a type is a deliberate act — a new
+    // one with no label and no delivery class would otherwise be silently
+    // undeliverable. It went from twelve to thirteen when REQUEST_CLOSED
+    // arrived with FR-2.7.
+    expect(NOTIFICATION_TYPES).toHaveLength(13)
     for (const type of NOTIFICATION_TYPES) {
       const definition = NOTIFICATIONS[type]
       expect(definition.label.length, `${type} needs a label`).toBeGreaterThan(0)

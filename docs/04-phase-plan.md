@@ -613,6 +613,39 @@ beside it.
 
 ---
 
+## Audit before deployment
+
+A read of the whole codebase against the SRS, requirement by requirement,
+prompted by the decision to stop adding phases and get the thing deployed.
+Two requirements were genuinely unbuilt. Both had the same shape: the half
+that shows up in a demo was there, and the half somebody only notices weeks
+later was not.
+
+1. **FR-2.7, the second half.** Making a storyboard private closed nothing and
+   told nobody. It was the one TODO left in the codebase, carrying a phase 2
+   label. A contributor part-way through a suggestion lost the request, the
+   passage and the context at once, because a private storyboard answers 404
+   to anyone who is not an author — and had no way to find out why. Marking a
+   storyboard finished (FR-14.1) had the same silence, so both now go through
+   one helper that closes and notifies. A thirteenth notification type,
+   `REQUEST_CLOSED`, and five tests.
+
+2. **FR-9.6.** The contributors page listed credits and had no way to get them
+   out as text, which is what the requirement is for: an acknowledgements page
+   in a book. It also lacked two of the four things the requirement names —
+   the chapter and the permanent address. Resolving a credit to an address is
+   the interesting part: a credit records a _lineage_, not a section, so the
+   address has to be resolved against wherever that lineage sits in the main
+   draft now. One that no longer appears there gets a line with no address
+   rather than a wrong one.
+
+Everything else in the SRS is implemented. Forty-four requirement numbers are
+never written down in the code, which is not the same as being unbuilt — most
+are, and the check that found these two was reading each one rather than
+counting mentions.
+
+---
+
 ## Every phase, every pull request
 
 - `pnpm check-vocabulary`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` pass.

@@ -4,8 +4,11 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
 import { ReportButton } from '@/components/report-button'
+import { env } from '@/env'
 import { hasProfile, nameOf } from '@/lib/people'
 import { caller } from '@/trpc/server'
+
+import { CreditLines, type CreditLine } from './credit-lines'
 
 type Params = { params: Promise<{ slug: string }> }
 
@@ -79,6 +82,24 @@ export default async function ContributorsPage({ params }: Params) {
   const inherited = credits.filter((credit) => credit.inheritedFromId !== null)
   const earned = credits.filter((credit) => credit.inheritedFromId === null)
   const origin = lineage.ancestors[0]
+
+  /*
+   * FR-9.6 — name, role, chapter, date and the permanent URL, in that order.
+   * Built here rather than in the client component so the addresses are
+   * absolute: a line pasted into a manuscript is read by somebody who has never
+   * been to this site, and a relative path means nothing to them.
+   */
+  const creditLines: CreditLine[] = credits.map((credit) => ({
+    name: nameOf(credit.contributor),
+    role: TYPE_LABELS[credit.type],
+    chapter: credit.place?.chapter ?? null,
+    date: credit.createdAt.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }),
+    url: credit.place ? `${env.NEXT_PUBLIC_APP_URL}${credit.place.path}` : null,
+  }))
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
@@ -167,6 +188,9 @@ export default async function ContributorsPage({ params }: Params) {
           </section>
         </>
       )}
+
+      {/* FR-9.6 — the same list as plain text, for a book's front matter. */}
+      <CreditLines title={storyboard.storyboard.title} lines={creditLines} />
 
       {/* FR-13.5 — reporting the storyboard itself, not a person on this list. */}
       <section className="mt-12 border-t border-rule pt-6">

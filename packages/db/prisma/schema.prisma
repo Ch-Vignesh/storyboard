@@ -122,6 +122,8 @@ enum NotificationType {
   SPIN_OFF_CREATED
   CONTRIBUTION_REMOVED
   REQUEST_QUIET_SEVEN_DAYS
+  /// FR-2.7 and FR-14.1 — the request you were answering is no longer open.
+  REQUEST_CLOSED
   WEEKLY_DIGEST
 }
 

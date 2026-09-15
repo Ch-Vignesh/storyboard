@@ -15,6 +15,7 @@ import {
   visibilitySchema,
 } from '@/lib/schemas/storyboard'
 import { logger } from '@/lib/logger'
+import { closeOpenRequests } from '@/server/close-requests'
 
 import {
   activeProcedure,
@@ -372,10 +373,21 @@ export const storyboardRouter = createTRPCRouter({
         select: { id: true, visibility: true, publicFrom: true },
       })
 
-      // TODO(phase 2, FR-2.7): going private closes every open request and
-      // notifies anyone with a suggestion in flight. Neither exists yet.
+      /*
+       * FR-2.7's second half. Going private closes every open request and tells
+       * anyone with a suggestion in flight.
+       *
+       * This is the half that matters most and was missing longest. A public
+       * storyboard turning private does not merely close the door on new work —
+       * it 404s for everybody who is not an author, so a contributor who was
+       * part-way through a suggestion loses the request, the passage and the
+       * context all at once, with no way to ask what happened. The notification
+       * is the only thing standing between that and an evening wasted.
+       */
+      const closed = goingPublic ? 0 : await closeOpenRequests(ctx.db, storyboardId)
+
       log.info(
-        { event: 'storyboard.setVisibility', storyboardId, visibility: input.visibility },
+        { event: 'storyboard.setVisibility', storyboardId, visibility: input.visibility, closed },
         'visibility changed',
       )
       return updated
@@ -415,24 +427,13 @@ export const storyboardRouter = createTRPCRouter({
           select: { id: true, slug: true, state: true, finishedAt: true },
         })
 
-        if (input.finished) {
-          const open = await tx.contributionRequest.findMany({
-            where: {
-              section: { chapter: { version: { storyboardId } } },
-              state: 'OPEN',
-            },
-            select: { id: true },
-          })
-          if (open.length > 0) {
-            await tx.contributionRequest.updateMany({
-              where: { id: { in: open.map((request) => request.id) } },
-              data: { state: 'CLOSED', closedAt: new Date() },
-            })
-          }
-        }
-
         return storyboard
       })
+
+      // FR-14.1 — a finished storyboard closes its open requests, and now says
+      // so. Outside the transaction: notifications are not part of the decision
+      // and a mail table should never be able to roll back a state change.
+      if (input.finished) await closeOpenRequests(ctx.db, storyboardId)
 
       log.info(
         { event: 'storyboard.markFinished', storyboardId, finished: input.finished },

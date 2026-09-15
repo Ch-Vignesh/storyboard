@@ -16,6 +16,7 @@ something that is not code.
 | Phase 9                     | committed, not pushed    | Deletion, `.epub`, Upstash, the CSP, Google sign-in, the age gate gone |
 | Phase 8 — the accounts half | blocked, and not on code | Five accounts. Follow `docs/05-deployment.md` in order                 |
 | Promotion page              | committed, not pushed    | Proof-mark clip art, parallax layers, paper texture, light only        |
+| Audit before deploy         | done, uncommitted        | FR-2.7 and FR-9.6 were unbuilt; both now built and tested              |
 | Phase 10                    | deliberately unplanned   | Drawn from real use, when there is some                                |
 
 ## Blocked, and not on code

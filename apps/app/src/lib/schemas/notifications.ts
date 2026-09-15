@@ -1,5 +1,5 @@
 /**
- * The twelve notification types (FR-12.2), with the words the interface uses
+ * The thirteen notification types (FR-12.2), with the words the interface uses
  * for each and how each one is delivered (FR-12.3).
  *
  * One table, because a type that exists in the enum but not here would be
@@ -19,6 +19,7 @@ export const NOTIFICATION_TYPES = [
   'SPIN_OFF_CREATED',
   'CONTRIBUTION_REMOVED',
   'REQUEST_QUIET_SEVEN_DAYS',
+  'REQUEST_CLOSED',
   'WEEKLY_DIGEST',
 ] as const
 
@@ -109,6 +110,15 @@ export const NOTIFICATIONS: Record<NotificationType, Definition> = {
   REQUEST_QUIET_SEVEN_DAYS: {
     label: 'Nobody has answered yet',
     sentence: 'A passage you opened for help has had no answers for a week.',
+    delivery: 'immediate',
+    canDisableEmail: true,
+  },
+  REQUEST_CLOSED: {
+    label: 'A passage you were answering was closed',
+    sentence:
+      'The author closed it, or made the storyboard private. Any suggestion you sent stays on your profile.',
+    // Immediate: somebody may be mid-draft on it right now, and every hour they
+    // spend after this point is an hour spent on something nobody can accept.
     delivery: 'immediate',
     canDisableEmail: true,
   },

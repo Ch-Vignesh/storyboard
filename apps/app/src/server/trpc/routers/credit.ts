@@ -52,6 +52,65 @@ export const creditRouter = createTRPCRouter({
         byContributor.set(key, entry)
       }
 
-      return { credits, contributors: [...byContributor.values()] }
+      /*
+       * FR-9.6 — where each credit points, so it can be written into a
+       * manuscript's front matter as plain text.
+       *
+       * A credit stores a `sectionLineage`, not a section id, because the
+       * section it refers to is a lineage that survives edits, splits and
+       * alternate versions (FR-8.2). Resolving it to an address therefore means
+       * asking where that lineage sits in the **main** draft right now — which
+       * is the only version a stranger following the link can read, and the
+       * only one whose numbering is stable enough to print in a book.
+       *
+       * A lineage that no longer appears in the main draft resolves to nothing,
+       * and the line is written without an address rather than with a wrong one.
+       */
+      const lineages = [...new Set(credits.map((credit) => credit.sectionLineage))].filter(
+        (lineage): lineage is string => Boolean(lineage),
+      )
+
+      const sections = lineages.length
+        ? await ctx.db.section.findMany({
+            where: {
+              lineageId: { in: lineages },
+              deletedAt: null,
+              chapter: { version: { storyboardId, isMain: true } },
+            },
+            select: {
+              lineageId: true,
+              order: true,
+              chapter: { select: { order: true, title: true } },
+            },
+          })
+        : []
+
+      // Only when something actually resolved; the slug is otherwise unused.
+      const slug = sections.length
+        ? (
+            await ctx.db.storyboard.findUniqueOrThrow({
+              where: { id: storyboardId },
+              select: { slug: true },
+            })
+          ).slug
+        : ''
+
+      const placeOf = new Map(
+        sections.map((section) => [
+          section.lineageId,
+          {
+            chapter: section.chapter.title,
+            path: `/s/${slug}/c/${String(section.chapter.order + 1)}/${String(section.order + 1)}`,
+          },
+        ]),
+      )
+
+      return {
+        credits: credits.map((credit) => ({
+          ...credit,
+          place: credit.sectionLineage ? (placeOf.get(credit.sectionLineage) ?? null) : null,
+        })),
+        contributors: [...byContributor.values()],
+      }
     }),
 })

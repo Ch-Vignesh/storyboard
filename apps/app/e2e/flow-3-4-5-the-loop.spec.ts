@@ -161,8 +161,25 @@ test('flow 4 — the author compares, accepts, and the credit appears', async ({
 
   // FR-9.2 — the credit is on the storyboard's contributors page.
   await page.goto(`${storyboardUrl}/contributors`)
-  await expect(page.getByText(helper.username)).toBeVisible()
-  await expect(page.getByText(/wrote a passage/i)).toBeVisible()
+  // `.first()` because FR-9.6's front-matter block below repeats every name and
+  // role as plain text, so each now appears twice on this page by design.
+  await expect(page.getByText(helper.username).first()).toBeVisible()
+  await expect(page.getByText(/wrote a passage/i).first()).toBeVisible()
+
+  /*
+   * FR-9.6 — and the same credit as plain text, for a manuscript's front
+   * matter: name, role, chapter, date and the permanent address.
+   *
+   * The address is the part worth asserting. A credit records a *lineage*, not
+   * a section id, so turning one into a URL means resolving where that lineage
+   * currently sits in the main draft — and a line in a printed book that points
+   * at the wrong chapter is worse than one that points nowhere.
+   */
+  const frontMatter = page.locator('pre')
+  await expect(frontMatter).toContainText(helper.username)
+  await expect(frontMatter).toContainText('wrote a passage')
+  await expect(frontMatter).toContainText(`/s/${storyboardUrl.split('/s/')[1] ?? ''}/c/1/1`)
+  await expect(page.getByRole('button', { name: /^copy$/i })).toBeVisible()
 
   // FR-9.1 — and on the contributor's own profile.
   await page.goto(`/@${helper.username}`)
