@@ -40,10 +40,12 @@ export function ReaderShell({
     enabled: activeChapterId !== null,
   })
 
-  // FR-11.5 — the margin of open requests, each tied to its section.
-  const requests = useQuery(
-    trpc.request.listForStoryboard.queryOptions({ storyboardId: storyboard.id }),
-  )
+  // FR-11.5 — the margin of open requests, each tied to its section. A
+  // finished storyboard has none, and does not ask for them either.
+  const requests = useQuery({
+    ...trpc.request.listForStoryboard.queryOptions({ storyboardId: storyboard.id }),
+    enabled: storyboard.state !== 'FINISHED',
+  })
   const requestsBySection = new Map<string, NonNullable<typeof requests.data>>()
   for (const request of requests.data ?? []) {
     const existing = requestsBySection.get(request.sectionId) ?? []
@@ -51,6 +53,9 @@ export function ReaderShell({
   }
 
   const activeIndex = chapters.findIndex((entry) => entry.id === activeChapterId)
+  // FR-14.1 — a finished storyboard is the work, not the workshop: no margin,
+  // no request cards, and the contributors linked from the foot instead.
+  const finished = storyboard.state === 'FINISHED'
   // FR-10.1 — a link out of an alternate version stays in that version.
   const versionSuffix = version.isMain ? '' : `?version=${encodeURIComponent(version.id)}`
 
@@ -70,7 +75,12 @@ export function ReaderShell({
                 <Link href={`/s/${storyboard.slug}/versions`}>Versions</Link>
               </Button>
             ) : null}
-            {permissions.canOpenRequest ? (
+            {permissions.canExport ? (
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/s/${storyboard.slug}/export`}>Take it out</Link>
+              </Button>
+            ) : null}
+            {permissions.canOpenRequest && !finished ? (
               <Button asChild variant="ghost" size="sm">
                 <Link href={`/s/${storyboard.slug}/help/new`}>Ask for help</Link>
               </Button>
@@ -198,6 +208,21 @@ export function ReaderShell({
             </p>
           ) : null}
 
+          {/* FR-14.1 — said once, at the top, and then got out of the way. */}
+          {finished ? (
+            <p className="mb-8 max-w-measure text-[12.5px] leading-relaxed text-ink-faint">
+              Finished
+              {storyboard.finishedAt
+                ? ` ${storyboard.finishedAt.toLocaleDateString('en-GB', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}`
+                : ''}
+              .
+            </p>
+          ) : null}
+
           {chapters.length === 0 ? (
             <p className="text-ink-soft">This storyboard has no chapters yet.</p>
           ) : (
@@ -305,7 +330,8 @@ export function ReaderShell({
                           >
                             History
                           </Link>
-                          {permissions.canOpenRequest &&
+                          {!finished &&
+                          permissions.canOpenRequest &&
                           (requestsBySection.get(section.id) ?? []).length === 0 ? (
                             <>
                               {' · '}
@@ -348,6 +374,20 @@ export function ReaderShell({
                   <span />
                 )}
               </nav>
+
+              {/* FR-14.1 — the contributors, linked from the foot. On a
+                  finished manuscript this is the last thing a reader sees,
+                  which is the right place for it. */}
+              {finished ? (
+                <p className="mt-12 max-w-measure border-t border-rule pt-6 text-[13px] text-ink-faint">
+                  <Link
+                    href={`/s/${storyboard.slug}/contributors`}
+                    className="text-pencil hover:underline"
+                  >
+                    Everyone who helped write this
+                  </Link>
+                </p>
+              ) : null}
             </article>
           )}
         </main>

@@ -1,0 +1,4 @@
+{
+  "extends": "@storyboard/config/tsconfig/library.json",
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@storyboard/export",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Taking a manuscript back out: .docx, .md, .pdf and .fountain, each carrying its contributors and where it came from (FR-14).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "docx": "9.7.1",
+    "pdfkit": "0.20.2"
+  },
+  "devDependencies": {
+    "@storyboard/config": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/pdfkit": "0.17.6",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

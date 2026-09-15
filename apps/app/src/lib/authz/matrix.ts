@@ -40,6 +40,7 @@ export const MATRIX_ACTIONS = [
   'suggestion:submit',
   'idea:post',
   'storyboard:spinOff',
+  'storyboard:export',
   'report:create',
 ] as const
 
@@ -61,6 +62,7 @@ export const ACTION_LABELS: Record<MatrixAction, string> = {
   'suggestion:submit': 'Submit a suggestion',
   'idea:post': 'Post an idea',
   'storyboard:spinOff': 'Spin off (own copy)',
+  'storyboard:export': 'Export the manuscript to a file',
   'report:create': 'Report a user or storyboard',
 }
 
@@ -88,6 +90,11 @@ export const MATRIX: Record<MatrixAction, Record<Role, boolean>> = {
   'suggestion:submit': { owner: true, coauthor: true, reader: true, guest: false },
   'idea:post': { owner: true, coauthor: true, reader: true, guest: false },
   'storyboard:spinOff': { owner: true, coauthor: true, reader: true, guest: false },
+  // FR-14 is an author's tool, not a reader's. A reader can already copy what
+  // they read (FR-13.6 says so plainly), but handing them a formatted download
+  // of somebody's unfinished novel is a convenience its author never asked us
+  // to provide. Spinning off is the reader's route to the words.
+  'storyboard:export': { owner: true, coauthor: true, reader: false, guest: false },
   'report:create': { owner: true, coauthor: true, reader: true, guest: false },
 }
 

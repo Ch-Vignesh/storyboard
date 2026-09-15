@@ -66,13 +66,13 @@ function resourceForCell(action: MatrixAction): StoryboardResource {
 
 describe('permission matrix (SRS 3.2)', () => {
   it('covers every capability in the SRS table', () => {
-    expect(MATRIX_ACTIONS).toHaveLength(15)
+    expect(MATRIX_ACTIONS).toHaveLength(16)
     for (const action of MATRIX_ACTIONS) {
       expect(Object.keys(MATRIX[action]).sort()).toEqual([...ROLES].sort())
     }
   })
 
-  // 15 capabilities x 4 roles = 60 cells, one test each.
+  // 16 capabilities x 4 roles = 64 cells, one test each.
   for (const action of MATRIX_ACTIONS) {
     describe(ACTION_LABELS[action], () => {
       for (const role of ROLES) {
@@ -264,6 +264,7 @@ describe('permissionsFor', () => {
       canSubmitSuggestion: true,
       canPostIdea: true,
       canSpinOff: true,
+      canExport: true,
     })
   })
 

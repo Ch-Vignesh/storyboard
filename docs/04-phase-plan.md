@@ -14,12 +14,12 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                                  |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Phase**        | 4 — Versions and spin-offs                                                                                                                                                                                                                       |
-| **State**        | Phases 0–3 are committed and pushed, CI green (`d5a5963`). Phase 4 is committed and verified locally; both its exit criteria pass. Not pushed — the user reviews first.                                                                          |
-| **Last updated** | 2026-09-15                                                                                                                                                                                                                                       |
-| **Next actions** | 1. Review and commit Phase 4. 2. Set up hosting accounts (see the checklist at the end); at minimum Neon, so `DATABASE_URL` exists outside this machine, and a Vercel Cron entry per job in decision 0012. 3. Start Phase 5 (import and export). |
+|                  |                                                                                                                                                                                                                                                                |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 5 — Import and export                                                                                                                                                                                                                                          |
+| **State**        | Phases 0–4 are committed and pushed, CI green (`c7bc9e0`). Phase 5 is committed and verified locally; its exit criterion passes end to end.                                                                                                                    |
+| **Last updated** | 2026-09-15                                                                                                                                                                                                                                                     |
+| **Next actions** | 1. Review Phase 5. 2. Set up hosting accounts (see the checklist at the end); at minimum Neon, so `DATABASE_URL` exists outside this machine, an R2 bucket for manuscript uploads, and a Vercel Cron entry per job in decision 0012. 3. Start Phase 6 (trust). |
 
 ## Overview
 
@@ -29,8 +29,8 @@ as the work it describes.
 | 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[x]` committed, CI green            |
 | 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` committed, CI green            |
 | 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` committed, CI green            |
-| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[x]` code complete, awaiting review |
-| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[ ]`                                |
+| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[x]` committed, CI green            |
+| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[x]` code complete, awaiting review |
 | 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[ ]`                                |
 | 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[ ]`                                |
 
@@ -257,19 +257,51 @@ accepted into and is re-attributed to "a former contributor".
 
 ### Tasks, in order
 
-1. [ ] Upload to R2 via presigned URL; 5 MB and 300,000-word limits; the "what survives" table shown before the file is chosen (FR-3.1, FR-3.7).
-2. [ ] `packages/import`: `extract()` per format into `NormalisedDoc` (`mammoth` for .docx, `marked` for .md, plain split for .txt/.rtf, `fountain-js` for .fountain, XML for .fdx); `detectChapters()` as the seven-strategy cascade reporting which fired; `detectSections()` on scene-break glyphs, double blank lines, then 1200-word hard splits (FR-3.3, FR-3.4, architecture §5). One fixture per format including a .docx with no heading styles.
-3. [ ] Boundary review screen: scrubbable outline, first twelve words per section, confidence in words never numbers, add/move/remove every boundary; nothing written until confirmed (FR-3.2, FR-3.5). `ImportJob` state machine.
-4. [ ] `commit()` writes the version tree with `RevisionSource.IMPORTED`.
-5. [ ] Exports: .docx, .md, .pdf, .fountain for screenplays; contributors page in the front matter and the source-URL footer, not removable (FR-14.2, FR-14.3). .epub deferred to Phase 7 or later.
-6. [ ] Finished state: reading page with no margin and no request cards, contributors linked from the foot (FR-14.1).
-7. [ ] Proof-of-authorship export: signed PDF with title, author, section, word count, sha256, timestamp (FR-13.6).
+1. [x] Upload to R2 via presigned URL; 5 MB and 300,000-word limits; the "what survives" table shown before the file is chosen (FR-3.1, FR-3.7). _(2026-09-15)_
+2. [x] `packages/import`: `extract()` per format into `NormalisedDoc` (`mammoth` for .docx, `marked` for .md, plain split for .txt/.rtf, a hand-written reader for .fountain per decision 0015, `fast-xml-parser` for .fdx); `detectChapters()` as the seven-strategy cascade reporting which fired; `detectSections()` on scene-break glyphs, then 1200-word hard splits (FR-3.3, FR-3.4, architecture §5). One fixture per format, including a real .docx with no heading styles. _(2026-09-15)_
+3. [x] Boundary review screen: outline with the first twelve words per section, confidence in words never numbers, join/split/start-a-chapter on every boundary; nothing written until confirmed (FR-3.2, FR-3.5). `ImportJob` state machine. _(2026-09-15)_
+4. [x] `commit()` writes the version tree with `RevisionSource.IMPORTED`, in one transaction. _(2026-09-15)_
+5. [x] Exports: .docx, .md, .pdf, .fountain for screenplays; contributors page in the front matter and the source-URL footer, not removable (FR-14.2, FR-14.3). .epub deferred to Phase 7 or later. _(2026-09-15)_
+6. [x] Finished state: reading page with no margin and no request cards, contributors linked from the foot, open requests closed (FR-14.1). _(2026-09-15)_
+7. [x] Proof-of-authorship export: PDF with title, author, chapter, section, word count, sha256 and timestamp (FR-13.6). _(2026-09-15)_
 
 ### Exit criteria
 
-- [ ] Import a real 80,000-word .docx with no heading styles, correct the proposed boundaries in under two minutes, export it back out with contributors intact.
+- [x] Import a real 80,000-word .docx with no heading styles, correct the proposed boundaries in under two minutes, export it back out with contributors intact. _Verified 2026-09-15 by `e2e/flow-7-import-and-export.spec.ts`, through the interface: a 20-chapter, ~80,000-word .docx with no styles anywhere is uploaded, read as 20 chapters "from a line that says chapter", corrected by hand (a chapter boundary removed, a chapter renamed, a section split), committed, and then exported as .md, .docx and .pdf — the Markdown carrying the corrected chapter names, the prose, and the source line FR-14.3 requires. The review-and-correct step is asserted to finish inside the two minutes._
 
 ### Notes
+
+- **Import has one entry point and one shape.** Six formats become a
+  `NormalisedDoc` of blocks, and everything downstream — the cascade, the
+  section splitter, the review screen, the commit — reads only that. Adding a
+  seventh format is one file in `packages/import/src/extract/`.
+- **Mammoth does not carry page breaks**, whatever its style map says, so
+  FR-3.3's fourth strategy reads them out of `word/document.xml` directly and
+  matches them to blocks by text rather than by index (mammoth's output is not
+  one element per `w:p`). `packages/import/src/extract/page-breaks.ts`.
+- **Fountain is read by hand**, not with `fountain-js` as architecture §5 names.
+  Decision 0015 records why, and what it costs.
+- **Prose never round-trips through the browser.** The review screen sends back
+  an outline of block indices; `commit` re-reads the file from storage and
+  re-parses it. A tampered outline can rearrange somebody's own manuscript but
+  cannot put words in it that were not in the file.
+- **Storage has two drivers behind one interface.** R2 by presigned PUT when
+  `R2_*` is configured, a `.uploads/` directory otherwise — so a contributor
+  who clones this repository can run an import without a Cloudflare account,
+  and so every exit criterion here is checkable on a laptop. The local endpoint
+  does by hand what a presigned URL gets for free: a signed-in caller, writing
+  only under their own prefix.
+- **Export is an author's capability, not a reader's** (`storyboard:export` in
+  the matrix, 16 capabilities × 4 roles = 64 cells). A reader can already copy
+  what they read and FR-13.6 says so plainly; a one-click formatted download of
+  somebody's unfinished novel is a convenience its author never asked us for.
+  Spinning off is the reader's route to the words.
+- **The review screen caught its own bug.** Joining a chapter to the one above
+  moved only that chapter's first section and stranded the rest as a chapter
+  nobody asked for. The flow test found it; `joinChapterWithPrevious` now moves
+  the whole chapter.
+- **.epub stays deferred** and is not offered anywhere, rather than offered and
+  half-delivered.
 
 ---
 

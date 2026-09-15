@@ -157,6 +157,7 @@ export type StoryboardPermissions = {
   canSubmitSuggestion: boolean
   canPostIdea: boolean
   canSpinOff: boolean
+  canExport: boolean
 }
 
 export function permissionsFor(actor: Actor, resource: StoryboardResource): StoryboardPermissions {
@@ -173,6 +174,7 @@ export function permissionsFor(actor: Actor, resource: StoryboardResource): Stor
     canSubmitSuggestion: can(actor, 'suggestion:submit', resource),
     canPostIdea: can(actor, 'idea:post', resource),
     canSpinOff: can(actor, 'storyboard:spinOff', resource),
+    canExport: can(actor, 'storyboard:export', resource),
   }
 }
 

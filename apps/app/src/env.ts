@@ -20,6 +20,16 @@ export const env = createEnv({
     MAIL_LOG_FILE: z.string().min(1).optional(),
     /** Authorises /api/cron/[job] (decision 0012). Without it, no job runs. */
     CRON_SECRET: z.string().min(16, 'CRON_SECRET must be at least 16 characters').optional(),
+    /**
+     * Object storage for manuscript uploads (FR-3.1). All four or none: with
+     * none, imports are written to `.uploads/` on the application server,
+     * which is how a clone of this repository runs without a Cloudflare
+     * account. See `server/storage`.
+     */
+    R2_ACCOUNT_ID: z.string().min(1).optional(),
+    R2_ACCESS_KEY_ID: z.string().min(1).optional(),
+    R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+    R2_BUCKET: z.string().min(1).optional(),
   },
   client: {
     NEXT_PUBLIC_APP_URL: z.url(),
@@ -37,6 +47,10 @@ export const env = createEnv({
     LOG_LEVEL: process.env.LOG_LEVEL,
     MAIL_LOG_FILE: process.env.MAIL_LOG_FILE,
     CRON_SECRET: process.env.CRON_SECRET,
+    R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+    R2_BUCKET: process.env.R2_BUCKET,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     NEXT_PUBLIC_MARKETING_URL: process.env.NEXT_PUBLIC_MARKETING_URL,
   },

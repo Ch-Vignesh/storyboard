@@ -57,6 +57,8 @@ minimumReleaseAgeExclude:
   - eslint-config-next@16.3.5
   - next@16.3.5
   - resend@6.28.0
+  - '@aws-sdk/client-s3@3.1132.0'
+  - '@aws-sdk/s3-request-presigner@3.1132.0'
 
 saveExact: true
 engineStrict: true

@@ -362,6 +362,66 @@ export const storyboardRouter = createTRPCRouter({
     }),
 
   /**
+   * FR-14.1 — the author says it is finished.
+   *
+   * A finished storyboard closes its open requests: leaving them open would be
+   * an invitation the author has just withdrawn, and somebody would spend an
+   * evening on a suggestion nobody can accept. Everything else stays exactly
+   * where it is — the history, the credits, the spin-offs — because finished is
+   * a statement about the draft, not about the record.
+   *
+   * Reversible, and deliberately so. A writer who marks a novel finished and
+   * then sees a typo should not have to justify themselves to a dialog box.
+   */
+  markFinished: protectedProcedure
+    .input(z.object({ storyboardId: z.string().min(1), finished: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session)
+      // The same capability as changing visibility: it is the author's
+      // statement about their own work, and a co-author does not make it.
+      const { storyboardId } = await loadStoryboard(
+        ctx.db,
+        actor,
+        { id: input.storyboardId },
+        'storyboard:setVisibility',
+      )
+
+      const updated = await ctx.db.$transaction(async (tx) => {
+        const storyboard = await tx.storyboard.update({
+          where: { id: storyboardId },
+          data: input.finished
+            ? { state: 'FINISHED', finishedAt: new Date() }
+            : { state: 'ACTIVE', finishedAt: null },
+          select: { id: true, slug: true, state: true, finishedAt: true },
+        })
+
+        if (input.finished) {
+          const open = await tx.contributionRequest.findMany({
+            where: {
+              section: { chapter: { version: { storyboardId } } },
+              state: 'OPEN',
+            },
+            select: { id: true },
+          })
+          if (open.length > 0) {
+            await tx.contributionRequest.updateMany({
+              where: { id: { in: open.map((request) => request.id) } },
+              data: { state: 'CLOSED', closedAt: new Date() },
+            })
+          }
+        }
+
+        return storyboard
+      })
+
+      log.info(
+        { event: 'storyboard.markFinished', storyboardId, finished: input.finished },
+        input.finished ? 'storyboard marked finished' : 'storyboard reopened',
+      )
+      return updated
+    }),
+
+  /**
    * FR-2.6 — soft delete with a 30-day grace. The contributors whose work is
    * affected are named by `deletionImpact` so the confirmation can list them;
    * this procedure only records the decision.

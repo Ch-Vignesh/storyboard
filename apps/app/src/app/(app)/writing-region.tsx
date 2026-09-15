@@ -14,9 +14,17 @@ export function WritingRegion() {
 
   return (
     <section className="mt-9">
-      <h2 className="text-[13px] font-medium tracking-wide text-ink-faint uppercase">
-        Storyboards you are writing
-      </h2>
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 className="text-[13px] font-medium tracking-wide text-ink-faint uppercase">
+          Storyboards you are writing
+        </h2>
+        {/* FR-3 — the other way in, for a writer who already has a manuscript. */}
+        {storyboards.length > 0 ? (
+          <Link href="/import" className="text-[12.5px] text-pencil hover:underline">
+            Bring one in from a file
+          </Link>
+        ) : null}
+      </div>
 
       {storyboards.length === 0 ? (
         // FR-1.5 — never a dead end. The one thing worth doing is offered.
@@ -26,9 +34,14 @@ export function WritingRegion() {
             A storyboard is one story. It starts with a chapter and an empty section, and you fill
             it in from there.
           </p>
-          <Button asChild variant="primary" className="mt-5">
-            <Link href="/new">Start your first storyboard</Link>
-          </Button>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+            <Button asChild variant="primary">
+              <Link href="/new">Start your first storyboard</Link>
+            </Button>
+            <Button asChild variant="default">
+              <Link href="/import">Bring one in from a file</Link>
+            </Button>
+          </div>
         </div>
       ) : (
         <ul className="mt-4 divide-y divide-rule border-y border-rule">

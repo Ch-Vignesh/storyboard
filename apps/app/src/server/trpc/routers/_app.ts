@@ -5,6 +5,7 @@ import { chapterRouter } from './chapter'
 import { compareRouter } from './compare'
 import { creditRouter } from './credit'
 import { ideaRouter } from './idea'
+import { importRouter } from './import'
 import { notificationRouter } from './notification'
 import { profileRouter } from './profile'
 import { requestRouter } from './request'
@@ -25,6 +26,7 @@ export const appRouter = createTRPCRouter({
   request: requestRouter,
   suggestion: suggestionRouter,
   idea: ideaRouter,
+  import: importRouter,
   compare: compareRouter,
   credit: creditRouter,
   browse: browseRouter,
