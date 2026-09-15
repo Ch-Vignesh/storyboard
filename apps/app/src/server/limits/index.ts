@@ -5,17 +5,24 @@ import { TRPCError } from '@trpc/server'
 
 import { logger } from '@/lib/logger'
 
+import { consumeRedis, redisConfigured, usedRedis } from './redis'
+import type { Limit, Verdict } from './types'
+
 /**
- * FR-13.3 — the global rate limits, as a sliding window over Postgres.
+ * FR-13.3 — the global rate limits, as a sliding window.
  *
- * Decision 0017 records why this is not Redis. The short version: there is no
- * Upstash account to test against, and a limiter that has never rejected a real
- * request is not a limiter. The interface here is the one a Redis driver would
- * implement, so moving is one file when there is something to move to.
+ * Two stores behind one function. Postgres by default, which is what decision
+ * 0017 chose and what has been enforcing these limits since phase 6; Redis when
+ * the two Upstash variables are set, which is decision 0017's own revisit,
+ * carried out in phase 9.
  *
- * The window is genuinely sliding: "ten in the last twenty-four hours", not
- * "ten since midnight". A fixed window lets somebody send ten at 23:59 and ten
- * more at 00:01, which is the failure mode the limit exists to prevent.
+ * Configuration decides, not `NODE_ENV` — the same reasoning as the storage
+ * driver in `server/storage`. A deployment with no Redis is a supported way to
+ * run this rather than a degraded one.
+ *
+ * The window is genuinely sliding in both: "ten in the last twenty-four hours",
+ * not "ten since midnight". A fixed window lets somebody send ten at 23:59 and
+ * ten more at 00:01, which is the failure mode the limit exists to prevent.
  */
 
 const log = logger.child({ module: 'limits' })
@@ -29,20 +36,7 @@ export const MINUTE_MS = 60 * 1000
 /** The longest window anything uses. Rows older than this are of no interest. */
 export const LONGEST_WINDOW_MS = DAY_MS
 
-export type Limit = {
-  /** How many are allowed inside the window. */
-  limit: number
-  /** How long the window is, in milliseconds. */
-  windowMs: number
-}
-
-export type Verdict = {
-  ok: boolean
-  /** How many remain after this one. Zero when refused. */
-  remaining: number
-  /** When the oldest hit in the window falls out of it, if refused. */
-  retryAt: Date | null
-}
+export type { Limit, Verdict } from './types'
 
 /**
  * Counts one action against a key, and records it if it is allowed.
@@ -52,7 +46,28 @@ export type Verdict = {
  * "ten suggestions a day" is not the kind of wrong that matters — and it is the
  * same behaviour a Redis sliding window gives, for the same reason.
  */
-export async function consume(db: Db, key: string, { limit, windowMs }: Limit): Promise<Verdict> {
+export async function consume(db: Db, key: string, limit: Limit): Promise<Verdict> {
+  // Decision 0017's revisit (phase 9). Configuration chooses the store, not
+  // `NODE_ENV` and not a build flag: a deployment with no Redis is a supported
+  // way to run this, and the Postgres window is not a fallback but the thing
+  // that has been enforcing these limits all along.
+  if (redisConfigured()) {
+    try {
+      return await consumeRedis(key, limit)
+    } catch (error) {
+      // A limiter that is briefly unreachable must not take the product with
+      // it. Falling back to Postgres keeps the limit enforced — not opening
+      // the gate, which is the other obvious thing to do here and is wrong.
+      log.error(
+        { event: 'limits.redis_failed', error: String(error) },
+        'the Redis limiter failed; falling back to Postgres for this request',
+      )
+    }
+  }
+  return consumePostgres(db, key, limit)
+}
+
+async function consumePostgres(db: Db, key: string, { limit, windowMs }: Limit): Promise<Verdict> {
   const since = new Date(Date.now() - windowMs)
 
   const hits = await db.rateLimitHit.findMany({
@@ -77,6 +92,14 @@ export async function consume(db: Db, key: string, { limit, windowMs }: Limit): 
 
 /** Reads the count without recording anything. For showing somebody where they are. */
 export async function used(db: Db, key: string, windowMs: number): Promise<number> {
+  if (redisConfigured()) {
+    try {
+      return await usedRedis(key, windowMs)
+    } catch {
+      // This one only feeds "you have three left" in the interface, so a
+      // wrong-but-plausible number beats an error page.
+    }
+  }
   return db.rateLimitHit.count({ where: { key, at: { gte: new Date(Date.now() - windowMs) } } })
 }
 

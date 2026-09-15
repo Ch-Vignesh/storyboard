@@ -55,3 +55,28 @@ one file.
 
 Related: [[0012-cron-endpoints-before-inngest]], which made the same call about
 scheduled work for the same reason.
+
+---
+
+## Revisited in phase 9
+
+The Redis driver exists now: `apps/app/src/server/limits/redis.ts`, an Upstash
+sliding window over a sorted set, reached through `fetch` rather than a client
+library — their REST API is a POST with a JSON array, and there is no connection
+to pool, which is the property that made it worth having from serverless.
+
+The claim this record made held up exactly: _"the interface here is the one a
+Redis driver would implement, so moving is one file when there is something to
+move to."_ It was one file, plus a `types.ts` so the driver and the dispatcher
+could share `Limit` and `Verdict` without importing each other.
+
+**Postgres is still the default**, and this record's revisit trigger is
+unchanged: set the two Upstash variables when a limit check shows up in a slow
+query log, and not before. Nothing is deployed yet, so there is no slow query
+log to look at.
+
+Two things worth knowing about the dispatcher. Configuration chooses the store,
+never `NODE_ENV` — the same reasoning as the storage driver. And when Redis
+fails, `consume` falls back to Postgres rather than allowing the action: a
+limiter that opens the gate when its store is unreachable is not a limiter,
+which was this record's original complaint in the first place.

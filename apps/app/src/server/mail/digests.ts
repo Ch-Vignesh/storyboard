@@ -10,6 +10,7 @@ import {
 } from '@/lib/schemas/notifications'
 import { QUIET_REQUEST_NUDGE_DAYS } from '@/lib/schemas/constants'
 import { pruneRateLimits } from '@/server/limits'
+import { purgeDeletedAccounts } from '@/server/purge/accounts'
 import { purgeDeletedStoryboards } from '@/server/purge'
 
 import { getMailer, type Mailer } from './mailer'
@@ -85,12 +86,12 @@ async function pendingOfTypes(db: Db, types: readonly NotificationType[]): Promi
       id: true,
       type: true,
       payload: true,
-      user: { select: { id: true, email: true, status: true } },
+      user: { select: { id: true, email: true, status: true, deletionRequestedAt: true } },
     },
   })
   // A suspended or deleted account is not emailed (FR-13.5).
   return rows
-    .filter((row) => row.user.status === 'ACTIVE')
+    .filter((row) => row.user.status === 'ACTIVE' && !row.user.deletionRequestedAt)
     .map((row) => ({
       id: row.id,
       type: row.type,
@@ -234,6 +235,7 @@ export async function runWeeklyDigest(
   const readers = await db.user.findMany({
     where: {
       status: 'ACTIVE',
+      deletionRequestedAt: null,
       onboardedAt: { not: null },
       pinnedGenres: { some: {} },
     },
@@ -333,7 +335,7 @@ export async function runQuietNudge(
       title: true,
       openedById: true,
       storyboard: { select: { slug: true } },
-      openedBy: { select: { email: true, status: true } },
+      openedBy: { select: { email: true, status: true, deletionRequestedAt: true } },
     },
   })
 
@@ -349,7 +351,7 @@ export async function runQuietNudge(
       },
       select: { id: true },
     })
-    if (already || request.openedBy.status !== 'ACTIVE') {
+    if (already || request.openedBy.status !== 'ACTIVE' || request.openedBy.deletionRequestedAt) {
       skipped += 1
       continue
     }
@@ -400,8 +402,23 @@ export const CRON_JOBS = {
   // Not mail, but the same runner: one scheduler is easier to reason about
   // than two, and this is the only other thing that wants a daily tick.
   prune: (db: Db) => pruneRateLimits(db as PrismaClient),
-  // FR-2.6 — the thirty days are up. Same runner, same daily tick.
-  purge: (db: Db) => purgeDeletedStoryboards(db as PrismaClient),
+  /*
+   * FR-2.6 and OD-3's second half. Storyboards whose thirty days are up, then
+   * accounts whose seven are (decision 0024).
+   *
+   * One job rather than a seventh cron entry: both are "the grace period
+   * expired, finish the job", both want a daily tick, and a scheduled entry
+   * that has to be added to a hosting account is a step somebody forgets —
+   * which on this endpoint fails silently, because it fails closed.
+   *
+   * Storyboards first. An account purge does not touch storyboards, but doing
+   * the rows-and-revisions work before the identity work means a failure in the
+   * harder half never leaves an account half-erased.
+   */
+  purge: async (db: Db) => ({
+    storyboards: await purgeDeletedStoryboards(db as PrismaClient),
+    accounts: await purgeDeletedAccounts(db as PrismaClient),
+  }),
 } as const
 
 export type CronJob = keyof typeof CRON_JOBS

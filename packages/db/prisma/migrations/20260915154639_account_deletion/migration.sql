@@ -1,0 +1,13 @@
+-- OD-3's second half (decision 0024): a person can delete their account.
+--
+-- One nullable column, and the whole design is in what it does *not* add.
+-- There is no tombstone table and no cascade. The `User` row survives deletion
+-- with every identifying column stripped, because that row is what each of this
+-- person's revisions, credits, suggestions and storyboards still points at —
+-- and those are not only theirs. Removing the row would silently take a
+-- co-author's chapter and a contributor's credit with it, which is the failure
+-- decision 0019 already caught once, in spin-offs.
+--
+-- Set: the account is frozen immediately (signing in, writing, email all stop).
+-- After ACCOUNT_DELETION_GRACE_DAYS the daily purge strips the identity.
+ALTER TABLE "User" ADD COLUMN "deletionRequestedAt" TIMESTAMP(3);

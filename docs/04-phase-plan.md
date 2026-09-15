@@ -14,12 +14,12 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase**        | 8 — Into the world (every part that is code is done; the rest needs accounts)                                                                                                                                                                                                   |
-| **State**        | Everything phase 8 can do without an account is done and verified: the deployment configuration, the startup preflight, the restore drill, the automated accessibility pass, and the seeded-excerpt check — which found thirteen misquotations and a wrong citation, all fixed. |
-| **Last updated** | 2026-09-15                                                                                                                                                                                                                                                                      |
-| **Next actions** | 1. Open the five accounts (Neon, Cloudflare R2, two Vercel projects, Resend) and follow `docs/05-deployment.md`. 2. Run the restore drill and the screen-reader pass, and record both dates here. Nothing else in the plan can move until the accounts exist.                   |
+|                  |                                                                                                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 9 — The gaps we left. All five items done; phase 8's accounts are still outstanding.                                                                                                                                                  |
+| **State**        | Phase 9 is complete: account deletion, `.epub`, Upstash, the Content-Security-Policy and Google sign-in. The age gate was removed on the way (decision 0026), which reopens OD-7. Uncommitted.                                        |
+| **Last updated** | 2026-09-15                                                                                                                                                                                                                            |
+| **Next actions** | 1. Review and commit phase 9. 2. Open phase 8's five accounts and follow `docs/05-deployment.md` — nothing deployed means no slow query log, no sign-up drop-off, and no restore drill, which is what phases 9 and 10 are waiting on. |
 
 ## Overview
 
@@ -34,7 +34,7 @@ as the work it describes.
 | 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[x]` committed, pushed               |
 | 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[x]` committed, pushed               |
 | 8     | Into the world         | NFR-8, and every blocked task from phases 0–7                                         | 1 week    | `[~]` code done, accounts outstanding |
-| 9     | The gaps we left       | FR-14.2 (.epub), FR-1.6, OD-3 (second half), decision 0017                            | 2 weeks   | `[ ]`                                 |
+| 9     | The gaps we left       | FR-14.2 (.epub), FR-1.6, OD-3 (second half), decision 0017                            | 2 weeks   | `[~]` four of five done               |
 | 10    | What writers ask for   | Driven by use, not by this plan                                                       | open      | `[ ]`                                 |
 
 Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
@@ -437,7 +437,9 @@ not the address exists.
 
 **Goal.** A stranger lands on the marketing site, reads a real stuck passage without an account, signs up, and sends a suggestion in under five minutes without asking anyone a question.
 
-**Resolved first:** OD-7 — **13+, and no private messages, ever** (decision 0020).
+**Resolved first:** OD-7 — **no private messages, ever** (decision 0020). The
+age gate that decision also introduced was removed in phase 9 (decision 0026),
+which reopens OD-7 in a narrower form.
 OD-1 — **the rename is deferred**, with the full list of what it will touch
 written down (decision 0021).
 
@@ -562,17 +564,28 @@ lists what the rename touches; it gets more expensive with every external link.
 
 ### Tasks, in order
 
-1. [ ] **Account deletion** (OD-3's second half). Phase 6 built erasure of a single contribution; deleting an account is the same machinery pointed at a person, and it is a legal obligation rather than a feature. The hard part is not the deletion — it is deciding what happens to storyboards they own that other people have contributed to, and that needs a decision record before any code.
-2. [ ] **`.epub` export** (FR-14.2), deferred twice. `packages/export` already has the `Manuscript` shape and three formats built on it; epub is a fourth, and a zip.
-3. [ ] **Upstash**, per decision 0017's own revisit trigger. The interface is `consume(key, limit, windowMs)` and a Redis driver is one file. Do this when a limit check shows up in a slow query log, not before.
-4. [ ] **OAuth** (FR-1.6), which the SRS defers explicitly and says not to build the abstraction for early. One provider, and only if sign-up drop-off says people want it.
-5. [ ] **The rename** (OD-1), if decided. Decision 0021 is the checklist.
-6. [ ] **Revisit the marketing site's weight** (see OD-9 below). It ships about 560 KB of JavaScript that no part of the page uses, because it is a Next.js application containing one static page.
+Scope was chosen deliberately rather than by working down the deferred list:
+account deletion and `.epub` are the exit criteria, and the other three were
+picked by the product owner. Two of those three — OAuth and Upstash — the SRS
+and decision 0017 both say to wait on until real use says otherwise. They are
+built anyway, behind their existing interfaces, so they cost nothing while they
+are unused and are ready when the data arrives.
+
+1. [x] **Account deletion** (OD-3's second half, decision 0024). The person is erased; the writing stays, shown as "a former member". The `User` row survives with every identifying column destroyed — it is the anchor every revision, credit and storyboard points at, and deleting it would take other people's work with it, which is exactly the spin-off failure decision 0019 caught. Seven days' grace, during which the account is frozen but can still sign in to stop it, because an account somebody else got into can be destroyed in one click.
+2. [x] **`.epub` export** (FR-14.2), deferred twice. A zip of XHTML with a manifest; the awkward parts are all in the container — `mimetype` first and stored uncompressed, or a strict validator rejects what most software opens.
+   - Finding: `formatsFor` was a hand-written list, so `.epub` existed, worked, passed every test, and no writer could have asked for it. It is derived from `EXPORT_FORMATS` now, with a test that keeps it derived.
+3. [x] **Upstash** (decision 0017's own revisit). An Upstash sliding window over a sorted set, through `fetch` rather than a client library. Postgres is still the default and the revisit trigger is unchanged: set the variables when a limit check shows up in a slow query log. When Redis fails, `consume` falls back to Postgres rather than allowing the action.
+4. [x] **A Content-Security-Policy** (OD-10, decision 0025). Enforcing, with a per-request nonce and `strict-dynamic`. `style-src` allows `'unsafe-inline'` deliberately and the record says why: CSP governs style _attributes_, a nonce cannot authorise one, and the contents editor sets a transform that changes every frame.
+   - The proxy's matcher had to become every document, so the route list it used to be moved into `lib/protected-routes.ts` with a test asserting both directions — that the reader is still open to guests, and that `/newsletter` is not `/new`.
+5. [x] **Google sign-in** (FR-1.6, decision 0027). One provider, no abstraction, inert until configured. Linking is by _verified_ email only — matching an OAuth identity to an account on an unverified address is an account-takeover vector, and Auth.js will happily do it if you set the option whose name says not to. It chooses no username: a Google display name is not a permanent public identity somebody picked.
+6. [x] **The age gate removed** (decision 0026). Not planned; asked for mid-phase. The checkbox was client-side only — never sent, never stored — so nothing on the server changed. OD-7 is open again in a narrower form, and the half of decision 0020 that does the protecting (no private messages, ever) stands.
+7. [ ] **The rename** (OD-1) — deferred again, deliberately.
+8. [ ] **The marketing site's weight** (OD-9) — not in scope for this phase.
 
 ### Exit criteria
 
-- [ ] A person can delete their account, and what happens to the work they leave behind is written down somewhere a stranger could read and agree with.
-- [ ] Every format FR-14.2 names is available, or the SRS says plainly that it is not.
+- [x] A person can delete their account, and what happens to the work they leave behind is written down somewhere a stranger could read and agree with — decision 0024, and the deletion screen says it before the button.
+- [x] Every format FR-14.2 names is available. `.epub` was the last one, and the SRS no longer says it is missing.
 
 ---
 
@@ -611,18 +624,18 @@ beside it.
 
 ## Open decisions
 
-| OD    | Question                                                 | Blocks                 | Status   | Decision                                                                                                                                                                                                                                                                                                                                             |
-| ----- | -------------------------------------------------------- | ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OD-1  | The name (domain taken; crowded in film)                 | Phase 7                | deferred | Decision 0021 — phase 7 ships as Storyboard; the rename is a find-and-replace whenever the name is chosen, and what it touches is written down.                                                                                                                                                                                                      |
-| OD-2  | Helping under a pen name separate from the account       | Phase 3                | open     | —                                                                                                                                                                                                                                                                                                                                                    |
-| OD-3  | Contributor's right to delete their credit record (GDPR) | Phase 4                | open     | —                                                                                                                                                                                                                                                                                                                                                    |
-| OD-4  | Hide history written while private after going public?   | Phase 1                | open     | Schema carries `publicFrom` for "hide"; drop it if the answer is "expose everything".                                                                                                                                                                                                                                                                |
-| OD-5  | One "helped" idea per request, or unlimited              | Phase 2                | open     | —                                                                                                                                                                                                                                                                                                                                                    |
-| OD-6  | Co-author quota exemption across storyboards             | Phase 6                | closed   | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3.                                                                                                                                                                                                                                                              |
-| OD-7  | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | closed   | Decision 0020 — 13+, one checkbox, no date of birth stored, and no private messages anywhere in the product, ever.                                                                                                                                                                                                                                   |
-| OD-8  | What is searchable in an unpublished manuscript          | Phase 10               | open     | Full-text search is in the deferred table for a privacy reason, not a technical one. Somebody has to say what a stranger may search inside work nobody has published.                                                                                                                                                                                |
-| OD-9  | Whether the marketing site should be a Next.js app       | Phase 9                | open     | One static page currently ships ~560 KB of framework JavaScript it never uses. Plain HTML, or a static-site generator, would be a fraction of that — against the cost of a second toolchain.                                                                                                                                                         |
-| OD-10 | A Content-Security-Policy, and what it costs             | Phase 9                | open     | The application renders prose that strangers wrote and has no CSP. A strict one needs a nonce threaded from the proxy through the layout, which is a real change with a real chance of breaking a screen quietly — so it wants its own deliberate pass rather than being bolted onto a deployment phase. HSTS and the other headers are already set. |
+| OD    | Question                                                 | Blocks                 | Status      | Decision                                                                                                                                                                                                                                                                                                                                             |
+| ----- | -------------------------------------------------------- | ---------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OD-1  | The name (domain taken; crowded in film)                 | Phase 7                | deferred    | Decision 0021 — phase 7 ships as Storyboard; the rename is a find-and-replace whenever the name is chosen, and what it touches is written down.                                                                                                                                                                                                      |
+| OD-2  | Helping under a pen name separate from the account       | Phase 3                | closed      | Decision 0011 — one public name, no pen names in v1. A credit that cannot be traced to a person is not a credit.                                                                                                                                                                                                                                     |
+| OD-3  | Contributor's right to delete their credit record (GDPR) | Phase 4                | part closed | Decision 0013 closes the half that blocked phase 4: a contributor may erase their record, the revision stays and is re-attributed. The other half — deleting a whole account — is phase 9 task 1 and still needs a decision.                                                                                                                         |
+| OD-4  | Hide history written while private after going public?   | Phase 1                | closed      | Decision 0007 — history written while private stays private. Implemented: `publicFrom` on the storyboard, `historyVisibleFrom` in the reader.                                                                                                                                                                                                        |
+| OD-5  | One "helped" idea per request, or unlimited              | Phase 2                | closed      | Decision 0010 — one credited idea per request, enforced by the `one_helpful_idea_per_request` partial unique index.                                                                                                                                                                                                                                  |
+| OD-6  | Co-author quota exemption across storyboards             | Phase 6                | closed      | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3.                                                                                                                                                                                                                                                              |
+| OD-7  | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | open again  | Decision 0020 closed it with two halves; decision 0026 withdrew the age gate, so it is open with a narrower question: is having no private surface at all sufficient on its own? Phase 10, from what the report queue fills up with. The no-private-messages half still holds.                                                                       |
+| OD-8  | What is searchable in an unpublished manuscript          | Phase 10               | open        | Full-text search is in the deferred table for a privacy reason, not a technical one. Somebody has to say what a stranger may search inside work nobody has published.                                                                                                                                                                                |
+| OD-9  | Whether the marketing site should be a Next.js app       | Phase 9                | open        | One static page currently ships ~560 KB of framework JavaScript it never uses. Plain HTML, or a static-site generator, would be a fraction of that — against the cost of a second toolchain.                                                                                                                                                         |
+| OD-10 | A Content-Security-Policy, and what it costs             | Phase 9                | open        | The application renders prose that strangers wrote and has no CSP. A strict one needs a nonce threaded from the proxy through the layout, which is a real change with a real chance of breaking a screen quietly — so it wants its own deliberate pass rather than being bolted onto a deployment phase. HSTS and the other headers are already set. |
 
 ## Hosting and services checklist
 

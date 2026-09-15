@@ -68,7 +68,7 @@ export default async function ExportPage({ params }: Params) {
         <p className="mt-3 text-[12.5px] leading-relaxed text-ink-faint">
           {isScreenplay
             ? 'Fountain opens in any screenwriting software, and in any text editor.'
-            : 'EPUB is not here yet.'}{' '}
+            : 'EPUB opens in a reading app; Word and PDF are what an agent or a printer will ask for.'}{' '}
           The contributors page and the source line are part of every file and cannot be turned off
           here.
         </p>

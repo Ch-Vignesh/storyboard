@@ -12,9 +12,6 @@ import { useTRPC } from '@/trpc/client'
 export function SignUpForm() {
   const trpc = useTRPC()
   const [email, setEmail] = useState('')
-  // OD-7 (decision 0020). Held in the form and never sent: the server has no
-  // age column, because an age nobody verifies is not worth storing.
-  const [oldEnough, setOldEnough] = useState(false)
   const signUp = useMutation(trpc.auth.signUp.mutationOptions())
 
   if (signUp.isSuccess) {
@@ -52,25 +49,7 @@ export function SignUpForm() {
           {signUp.error.message}
         </p>
       ) : null}
-      {/* OD-7, decision 0020 — thirteen and over, asked once and not stored.
-          A date picker would imply a verification this product does not do. */}
-      <label className="flex items-start gap-2.5 text-[13px] leading-relaxed text-ink-soft">
-        <input
-          type="checkbox"
-          required
-          checked={oldEnough}
-          onChange={(event) => setOldEnough(event.target.checked)}
-          className="mt-0.5"
-        />
-        <span>I am 13 or older.</span>
-      </label>
-
-      <Button
-        type="submit"
-        variant="primary"
-        className="w-full"
-        disabled={signUp.isPending || !oldEnough}
-      >
+      <Button type="submit" variant="primary" className="w-full" disabled={signUp.isPending}>
         {signUp.isPending ? 'Sending' : 'Email me a link'}
       </Button>
       {/* FR-13.4 — the rules, once, where somebody joining will see them. */}

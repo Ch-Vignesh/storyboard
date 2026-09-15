@@ -67,10 +67,28 @@ describe('how procedures are built', () => {
   /** The three a person reaches before they have an account at all (FR-1.4). */
   const BEFORE_YOU_HAVE_A_SESSION = new Set(['signUp', 'resendVerification', 'setPassword'])
 
+  /**
+   * The one mutation that must be reachable by an account this rule freezes.
+   *
+   * `activeProcedure` refuses an account inside its deletion grace period
+   * (decision 0024), which is the correct answer for all fifty-odd other
+   * mutations and exactly the wrong one for the undo. Naming it here rather
+   * than loosening the rule keeps the exception visible and countable.
+   */
+  const MUST_WORK_WHILE_FROZEN = new Set(['cancelDeletion'])
+
+  it('has exactly one deliberate exception, and it is the one named here', () => {
+    // If somebody adds a second, this fails and they have to come and argue
+    // for it in this file rather than in a router nobody re-reads.
+    expect([...MUST_WORK_WHILE_FROZEN]).toEqual(['cancelDeletion'])
+    expect(all.some((procedure) => procedure.name === 'cancelDeletion')).toBe(true)
+  })
+
   it('never lets a suspended account reach a mutation (FR-13.5, decision 0018)', () => {
     const wrong = all
       .filter((procedure) => procedure.kind === 'mutation')
       .filter((procedure) => !BEFORE_YOU_HAVE_A_SESSION.has(procedure.name))
+      .filter((procedure) => !MUST_WORK_WHILE_FROZEN.has(procedure.name))
       .filter(
         (procedure) =>
           procedure.builder !== 'activeProcedure' && procedure.builder !== 'adminProcedure',

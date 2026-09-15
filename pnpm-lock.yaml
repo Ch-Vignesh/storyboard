@@ -576,6 +576,9 @@ importers:
       docx:
         specifier: 9.7.1
         version: 9.7.1
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       pdfkit:
         specifier: 0.20.2
         version: 0.20.2

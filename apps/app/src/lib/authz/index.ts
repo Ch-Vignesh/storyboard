@@ -34,6 +34,12 @@ export type Action = MatrixAction | 'storyboard:read'
 export type Actor = {
   id: string
   status?: 'ACTIVE' | 'SUSPENDED' | 'DELETED'
+  /**
+   * Set while an account is inside its deletion grace period (decision 0024).
+   * They can still sign in — they have to, to change their mind — and they
+   * write nothing in the meantime, exactly like a suspended account.
+   */
+  deletionRequestedAt?: Date | null
 } | null
 
 /**
@@ -111,8 +117,13 @@ export function can(actor: Actor, action: Action, resource: StoryboardResource):
   //    decision 0018 freezes the person, not the work, and a suspended person
   //    reading a public storyboard is doing what any stranger may do. A deleted
   //    account is inert entirely.
+  //    An account inside its deletion grace period is treated the same way:
+  //    it can read, because it can still sign in to change its mind, and it
+  //    writes nothing, because seven days of new work would be seven days of
+  //    new work to decide the fate of (decision 0024).
   if (actor?.status === 'DELETED') return false
   if (actor?.status === 'SUSPENDED' && WRITE_ACTIONS.has(matrixAction)) return false
+  if (actor?.deletionRequestedAt && WRITE_ACTIONS.has(matrixAction)) return false
 
   // 2. Soft-deleted: authors only, and read-only even for them.
   if (resource.deletedAt !== null) {

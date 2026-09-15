@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { signIn } from '@/auth'
+import { ContinueWithGoogle } from '../continue-with-google'
 import { safeNext } from '@/lib/safe-next'
 
 export const metadata: Metadata = { title: 'Sign in' }
@@ -64,6 +65,9 @@ export default async function SignInPage({ searchParams }: Props) {
           Sign in
         </Button>
       </form>
+
+      <ContinueWithGoogle next={next} />
+
       <p className="mt-8 text-[13.5px] text-ink-soft">
         New here? <Link href="/signup">Create an account</Link>
       </p>

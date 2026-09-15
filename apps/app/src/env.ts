@@ -32,6 +32,20 @@ export const env = createEnv({
     R2_ACCESS_KEY_ID: z.string().min(1).optional(),
     R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
     R2_BUCKET: z.string().min(1).optional(),
+    /**
+     * FR-13.3 rate limits in Redis instead of Postgres (decision 0017, phase
+     * 9). Both or neither: with neither, the Postgres sliding window runs,
+     * which is what has been enforcing these limits since phase 6.
+     */
+    /**
+     * FR-1.6 — signing in with Google. Both or neither: with neither, the
+     * provider is not registered and the button is not rendered, so a clone of
+     * this repository runs without a Google project.
+     */
+    AUTH_GOOGLE_ID: z.string().min(1).optional(),
+    AUTH_GOOGLE_SECRET: z.string().min(1).optional(),
+    UPSTASH_REDIS_REST_URL: z.url().optional(),
+    UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
   },
   client: {
     NEXT_PUBLIC_APP_URL: z.url(),
@@ -53,6 +67,10 @@ export const env = createEnv({
     R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
     R2_BUCKET: process.env.R2_BUCKET,
+    AUTH_GOOGLE_ID: process.env.AUTH_GOOGLE_ID,
+    AUTH_GOOGLE_SECRET: process.env.AUTH_GOOGLE_SECRET,
+    UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
+    UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     NEXT_PUBLIC_MARKETING_URL: process.env.NEXT_PUBLIC_MARKETING_URL,
   },

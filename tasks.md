@@ -11,11 +11,11 @@ something that is not code.
 
 ## Now
 
-| What                        | State                    | Note                                                                     |
-| --------------------------- | ------------------------ | ------------------------------------------------------------------------ |
-| Phase 8 — the code half     | done                     | Deployment config, startup preflight, restore drill, a11y pass, excerpts |
-| Phase 8 — the accounts half | blocked, and not on code | Five accounts. Follow `docs/05-deployment.md` in order                   |
-| Phases 9–10                 | drafted                  | See `docs/04-phase-plan.md`. Nothing started                             |
+| What                        | State                    | Note                                                                   |
+| --------------------------- | ------------------------ | ---------------------------------------------------------------------- |
+| Phase 9                     | done, uncommitted        | Deletion, `.epub`, Upstash, the CSP, Google sign-in, the age gate gone |
+| Phase 8 — the accounts half | blocked, and not on code | Five accounts. Follow `docs/05-deployment.md` in order                 |
+| Phase 10                    | deliberately unplanned   | Drawn from real use, when there is some                                |
 
 ## Blocked, and not on code
 
@@ -55,7 +55,8 @@ committed; commit hashes are in `docs/04-phase-plan.md`.
 | Audit after 6              | A read of the whole codebase: six real bugs found and fixed, each with a test that fails without the fix                                    | pushed           |
 | 7 — Launch                 | 25 seeded public-domain works with 56 hand-written stuck points, the marketing page, the age policy, the community rules                    | pushed           |
 | Marketing page             | Seven sections, dark theme, a CSS-only example switcher, scroll-linked motion with no libraries                                             | committed        |
-| 8 — Into the world         | Everything below, plus phases 9–10 drafted                                                                                                  | uncommitted      |
+| 8 — Into the world         | Everything below, plus phases 9–10 drafted                                                                                                  | pushed           |
+| 9 — The gaps we left       | Account deletion, `.epub`, Upstash, a Content-Security-Policy, Google sign-in, and the age gate removed                                     | uncommitted      |
 
 ### What phase 8 found
 
@@ -160,5 +161,5 @@ pnpm check-excerpts          # after editing the seed library. Hits the network
 pnpm db:drill "<url>"        # against a restored backup, before launch and quarterly
 ```
 
-**Current:** 357 unit and database tests, 26 Playwright flows (22 journeys plus
-4 accessibility scans), all passing.
+**Current:** 423 unit and database tests, 33 Playwright flows (24 journeys, 5
+CSP checks and 4 accessibility scans), all passing.

@@ -108,12 +108,8 @@ export default function RulesPage() {
 
       <section className="mt-9">
         <h2 className="font-manuscript text-[21px] font-medium text-ink">
-          6. Thirteen and over, and nothing private
+          6. Nothing here is private
         </h2>
-        <p className="mt-2 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
-          You need to be at least 13 to have an account here. We ask once and we do not store your
-          age — a date of birth we cannot check is data we would be holding for no reason.
-        </p>
         <p className="mt-2 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
           There is no private messaging on this site and there is not going to be. Every way one
           person can reach another — a request, a suggestion, an idea, a reply — is attached to a

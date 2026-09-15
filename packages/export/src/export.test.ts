@@ -6,13 +6,14 @@
  * within the product" means each format has to carry them without being asked.
  * So every format gets the same question put to it.
  */
+import { strFromU8, unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 
 import { exportManuscript, formatsFor } from './index'
 import { toFountain } from './fountain'
 import { toMarkdown } from './markdown'
 import { exportAuthorshipProof } from './index'
-import type { Doc, Manuscript } from './types'
+import { EXPORT_FORMATS, FORMAT_LABELS, MEDIA_TYPES, type Doc, type Manuscript } from './types'
 
 const prose: Doc = {
   type: 'doc',
@@ -149,8 +150,28 @@ describe('fountain', () => {
   it('is offered for screenplays only', () => {
     expect(formatsFor(true)).toContain('fountain')
     expect(formatsFor(false)).not.toContain('fountain')
-    // .epub is deferred; it should not appear as an option at all.
-    expect(formatsFor(true)).not.toContain('epub')
+  })
+})
+
+describe('what a writer is offered (FR-14.2)', () => {
+  /**
+   * `formatsFor` used to be a hand-written list, and `.epub` arrived in phase 9
+   * fully working and completely unreachable because nobody edited it. It is
+   * derived now, and this is the test that keeps it derived.
+   */
+  it('offers every format that exists, minus the ones withheld on purpose', () => {
+    const offered = formatsFor(false)
+    for (const format of EXPORT_FORMATS) {
+      if (format === 'fountain') continue
+      expect(offered, format).toContain(format)
+    }
+  })
+
+  it('has a label and a media type for every format', () => {
+    for (const format of EXPORT_FORMATS) {
+      expect(FORMAT_LABELS[format], format).toBeTruthy()
+      expect(MEDIA_TYPES[format], format).toBeTruthy()
+    }
   })
 })
 
@@ -183,5 +204,102 @@ describe('file names', () => {
   it('never come out empty', async () => {
     const file = await exportManuscript(manuscript({ title: '???' }), 'md')
     expect(file.fileName).toBe('manuscript.md')
+  })
+})
+
+describe('epub (FR-14.2)', () => {
+  /** Reads the archive's own directory rather than trusting the writer. */
+  function entries(body: Buffer): Record<string, string> {
+    const files = unzipSync(new Uint8Array(body))
+    return Object.fromEntries(
+      Object.entries(files).map(([name, bytes]) => [name, strFromU8(bytes)]),
+    )
+  }
+
+  it('puts mimetype first and stores it uncompressed', async () => {
+    const { body } = await exportManuscript(manuscript(), 'epub')
+
+    // The specification is about bytes, not about entries: a reader identifies
+    // the file by looking at a fixed offset. Compress this one entry or move it
+    // and most software still opens the book while a validator refuses it —
+    // which is exactly the kind of breakage that ships.
+    expect(body.subarray(30, 38).toString('ascii')).toBe('mimetype')
+    expect(body.subarray(38, 58).toString('ascii')).toBe('application/epub+zip')
+
+    // Compression method 0 = stored, at the usual offset in a local file header.
+    expect(body.readUInt16LE(8)).toBe(0)
+  })
+
+  it('is a zip holding the files a reader needs to find its way', async () => {
+    const { body } = await exportManuscript(manuscript(), 'epub')
+    const files = entries(body)
+
+    expect(Object.keys(files)).toEqual(
+      expect.arrayContaining([
+        'mimetype',
+        'META-INF/container.xml',
+        'OEBPS/content.opf',
+        'OEBPS/nav.xhtml',
+        'OEBPS/title.xhtml',
+        'OEBPS/chapter-1.xhtml',
+        'OEBPS/chapter-2.xhtml',
+      ]),
+    )
+    expect(files['META-INF/container.xml']).toContain('OEBPS/content.opf')
+  })
+
+  it('declares every chapter in the manifest and the spine', async () => {
+    const { body } = await exportManuscript(manuscript(), 'epub')
+    const opf = entries(body)['OEBPS/content.opf'] ?? ''
+
+    // A spine entry with no manifest item is the most common way to build an
+    // epub that opens on one device and not another.
+    for (const id of ['title', 'chapter-1', 'chapter-2']) {
+      expect(opf, id).toContain(`id="${id}"`)
+      expect(opf, id).toContain(`idref="${id}"`)
+    }
+    expect(opf).toContain('properties="nav"')
+  })
+
+  it('carries the contributors and the source line, like every other format', async () => {
+    const { body } = await exportManuscript(manuscript(), 'epub')
+    const files = entries(body)
+
+    expect(files['OEBPS/title.xhtml']).toContain('Margaret Okonjo')
+    expect(files['OEBPS/title.xhtml']).toContain(
+      'https://storyboard.example/s/the-ship-never-lands-abc123',
+    )
+    // FR-14.3 again, in the metadata this time, where a library will read it.
+    expect(files['OEBPS/content.opf']).toContain('<dc:contributor>Margaret Okonjo</dc:contributor>')
+    expect(files['OEBPS/content.opf']).toContain('<dc:rights>Ask before reprinting.</dc:rights>')
+  })
+
+  it('escapes the characters XML cannot carry, in titles and in metadata', async () => {
+    const { body } = await exportManuscript(
+      manuscript({
+        title: 'Ampersands & <angles>',
+        author: `O'Brien`,
+        chapters: [{ title: 'Chapter & one', sections: [{ title: null, doc: prose }] }],
+      }),
+      'epub',
+    )
+    const files = entries(body)
+
+    expect(files['OEBPS/content.opf']).toContain('Ampersands &amp; &lt;angles&gt;')
+    expect(files['OEBPS/content.opf']).toContain('O&apos;Brien')
+    expect(files['OEBPS/chapter-1.xhtml']).toContain('Chapter &amp; one')
+    // The one that bites: escaping in the wrong order turns & into &amp;amp;.
+    expect(files['OEBPS/content.opf']).not.toContain('&amp;amp;')
+  })
+
+  it('marks up a scene break so a screen reader does not read three asterisks', async () => {
+    const { body } = await exportManuscript(manuscript(), 'epub')
+    expect(entries(body)['OEBPS/chapter-1.xhtml']).toContain('role="separator"')
+  })
+
+  it('names the file after the manuscript', async () => {
+    const file = await exportManuscript(manuscript(), 'epub')
+    expect(file.fileName).toBe('the-ship-never-lands.epub')
+    expect(file.mediaType).toBe('application/epub+zip')
   })
 })

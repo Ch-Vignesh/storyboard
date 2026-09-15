@@ -179,6 +179,12 @@ model User {
   suspendedById   String?
   suspendedBy     User?      @relation("UserSuspender", fields: [suspendedById], references: [id])
   suspendedUsers  User[]     @relation("UserSuspender")
+  /// OD-3 second half, decision 0024 — when this person asked to be deleted.
+  /// The account is frozen from that moment and the row is stripped of every
+  /// identifying column once the grace period passes. The row itself stays: it
+  /// is what every revision, credit and storyboard they touched still points
+  /// at, and deleting it would take other people's work with it.
+  deletionRequestedAt DateTime?
   /// FR-13.4 — the community rules are shown once, at sign-up. This records
   /// that they were, so nobody is shown them twice or misses them once.
   rulesSeenAt     DateTime?

@@ -34,10 +34,15 @@ export const profileRouter = createTRPCRouter({
           avatarUrl: true,
           createdAt: true,
           status: true,
+          deletionRequestedAt: true,
           showPassedWork: true,
         },
       })
-      if (!user || user.status === 'DELETED') {
+      // A deleted account has no profile, and neither has one on its way out
+      // (decision 0024): the freeze is immediate, so the seven days before the
+      // purge are not seven days of the profile still being there. Their
+      // *work* stays throughout — this hides the person, not the writing.
+      if (!user || user.status === 'DELETED' || user.deletionRequestedAt) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'No such profile.' })
       }
 

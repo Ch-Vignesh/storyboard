@@ -79,6 +79,15 @@ export const PINNED_GENRES_MIN = 3
 /** FR-2.6 */
 export const SOFT_DELETE_GRACE_DAYS = 30
 
+/**
+ * OD-3, second half (decision 0024). Shorter than a storyboard's thirty days,
+ * and deliberately: a storyboard is a thing somebody may want back, an account
+ * is a person asking to be gone. Seven days is long enough to undo a click made
+ * in anger, or to catch an account somebody else got into and tried to destroy,
+ * and short enough to still read as prompt erasure.
+ */
+export const ACCOUNT_DELETION_GRACE_DAYS = 7
+
 /** FR-3.1 */
 export const IMPORT_LIMITS = { maxBytes: 5 * 1024 * 1024, maxWords: 300_000 } as const
 

@@ -175,6 +175,10 @@ them; the marketing site needs only the two public URLs.
 | `R2_ACCESS_KEY_ID`          |  ●  |     |                                                   |
 | `R2_SECRET_ACCESS_KEY`      |  ●  |     |                                                   |
 | `R2_BUCKET`                 |  ●  |     |                                                   |
+| `AUTH_GOOGLE_ID`            |  ○  |     | Both or neither; no button without them           |
+| `AUTH_GOOGLE_SECRET`        |  ○  |     |                                                   |
+| `UPSTASH_REDIS_REST_URL`    |  ○  |     | Both or neither; limits run on Postgres without   |
+| `UPSTASH_REDIS_REST_TOKEN`  |  ○  |     |                                                   |
 | `NEXT_PUBLIC_APP_URL`       |  ●  |  ●  | `https://app.your-domain`                         |
 | `NEXT_PUBLIC_MARKETING_URL` |  ●  |  ●  | `https://your-domain`                             |
 | `LOG_LEVEL`                 |  ○  |  ○  | `info` is the default                             |

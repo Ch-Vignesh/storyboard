@@ -234,6 +234,30 @@ describe('account status (FR-13.5)', () => {
   it('treats an absent status as active', () => {
     expect(can({ id: OWNER }, 'storyboard:edit', storyboard())).toBe(true)
   })
+
+  /**
+   * Decision 0024. An account inside its deletion grace period is frozen the
+   * way a suspended one is — and for a different reason. Suspension is
+   * "pending review"; this is "you asked to go". Both come out the same: read,
+   * because they can still sign in and change their mind, and write nothing,
+   * because seven days of new work is seven days of new work to decide the
+   * fate of.
+   */
+  it('freezes writing for an account that has asked to be deleted', () => {
+    const leaving: Actor = { id: OWNER, status: 'ACTIVE', deletionRequestedAt: new Date() }
+    expect(can(leaving, 'storyboard:edit', storyboard())).toBe(false)
+    expect(can(leaving, 'request:open', storyboard())).toBe(false)
+  })
+
+  it('still lets them read, because the undo is behind a sign-in', () => {
+    const leaving: Actor = { id: OWNER, status: 'ACTIVE', deletionRequestedAt: new Date() }
+    expect(can(leaving, 'storyboard:read', storyboard())).toBe(true)
+  })
+
+  it('unfreezes the moment the request is withdrawn', () => {
+    const stayed: Actor = { id: OWNER, status: 'ACTIVE', deletionRequestedAt: null }
+    expect(can(stayed, 'storyboard:edit', storyboard())).toBe(true)
+  })
 })
 
 describe('soft deletion (FR-2.6)', () => {

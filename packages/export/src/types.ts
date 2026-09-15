@@ -6,13 +6,14 @@
  * shape once and hands it to whichever format was asked for.
  */
 
-export const EXPORT_FORMATS = ['docx', 'md', 'pdf', 'fountain'] as const
+export const EXPORT_FORMATS = ['docx', 'md', 'pdf', 'epub', 'fountain'] as const
 export type ExportFormat = (typeof EXPORT_FORMATS)[number]
 
 export const FORMAT_LABELS: Record<ExportFormat, string> = {
   docx: 'Word (.docx)',
   md: 'Markdown (.md)',
   pdf: 'PDF (.pdf)',
+  epub: 'EPUB (.epub)',
   fountain: 'Fountain (.fountain)',
 }
 
@@ -20,6 +21,7 @@ export const MEDIA_TYPES: Record<ExportFormat, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   md: 'text/markdown; charset=utf-8',
   pdf: 'application/pdf',
+  epub: 'application/epub+zip',
   fountain: 'text/plain; charset=utf-8',
 }
 

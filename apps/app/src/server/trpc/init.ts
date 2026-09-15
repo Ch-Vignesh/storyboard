@@ -19,7 +19,7 @@ export async function createTRPCContext(opts: { headers: Headers }) {
   const account = session?.user
     ? await prisma.user.findUnique({
         where: { id: session.user.id },
-        select: { status: true, isAdmin: true },
+        select: { status: true, isAdmin: true, deletionRequestedAt: true },
       })
     : null
 
@@ -52,10 +52,19 @@ const t = initTRPC.context<Context>().create({
  */
 export function actorFrom(
   session: Session | null,
-  account?: { status: 'ACTIVE' | 'SUSPENDED' | 'DELETED' } | null,
+  account?: {
+    status: 'ACTIVE' | 'SUSPENDED' | 'DELETED'
+    deletionRequestedAt?: Date | null
+  } | null,
 ): Actor {
   if (!session?.user) return null
-  return account ? { id: session.user.id, status: account.status } : { id: session.user.id }
+  return account
+    ? {
+        id: session.user.id,
+        status: account.status,
+        deletionRequestedAt: account.deletionRequestedAt ?? null,
+      }
+    : { id: session.user.id }
 }
 
 /**
@@ -74,6 +83,15 @@ export const activeProcedure = t.procedure.use(({ ctx, next }) => {
       code: 'FORBIDDEN',
       message:
         'This account is suspended while some reports about it are reviewed. Your work stays where it is.',
+    })
+  }
+  // Inside the deletion grace period (decision 0024). Not an error to apologise
+  // for: they asked for this, and the message says how to undo it.
+  if (ctx.account?.deletionRequestedAt) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message:
+        'This account is being deleted, so it cannot write anything. You can stop the deletion in settings.',
     })
   }
   return next({ ctx: { ...ctx, session: { ...ctx.session, user: ctx.session.user } } })

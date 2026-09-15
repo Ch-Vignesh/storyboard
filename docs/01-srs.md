@@ -302,7 +302,7 @@ User
 ### FR-14 — Publishing and export
 
 - **FR-14.1** An author can mark a storyboard _finished_. A finished storyboard gets a reading page with no margin, no request cards, and a contributors page linked from the foot.
-- **FR-14.2** Export formats: `.docx`, `.md`, `.pdf`, `.epub` (deferred to phase 7), `.fountain` for screenplays.
+- **FR-14.2** Export formats: `.docx`, `.md`, `.pdf`, `.epub`, `.fountain` for screenplays. All delivered; `.epub` arrived in phase 9.
 - **FR-14.3** Every export embeds a contributors page in the front matter, and a footer line with the source URL. This is not removable from within the product.
 - **FR-14.4** Publishing outside the platform is explicitly permitted and unencumbered. The product makes no legal claim on the work. The community rules ask, without enforcing, that contributors be credited wherever it goes.
 - **FR-14.5** Licensing is **deferred entirely**. v1 stores an optional free-text rights note on the storyboard, displayed as the author wrote it, with no verification and no implied endorsement. Do not build a licence picker that looks authoritative.
@@ -381,4 +381,4 @@ These need your call before the phase that touches them.
 - **OD-4 — Private history on going public.** FR-2.7 hides pre-switch revisions. The alternative — expose everything — is simpler and more honest to the "everything is traceable" principle. Pick one. (Blocks phase 1.)
 - **OD-5 — Idea credit.** FR-6.9 lets an author mark one idea as helping. Is one enough, or should it be unlimited with no cap? One creates a decision the author may not want to make. (Blocks phase 2.)
 - **OD-6 — Quota shared across co-authored storyboards.** If Maya co-authors with Sam, does Sam's quota apply on storyboards Maya owns? Currently exempt. Exploitable if co-authorship is easy to get. (Blocks phase 6.)
-- **OD-7 — Age policy.** Young writers are a large part of this audience. Under-16 handling, and whether an adult stranger should be able to message them, needs a policy before launch, not after. (Blocks phase 7 — this one is not optional.)
+- **OD-7 — Age policy.** Young writers are a large part of this audience. Under-16 handling, and whether an adult stranger should be able to message them, needs a policy before launch, not after. (Blocks phase 7 — this one is not optional.) — _Answered in two halves by decision 0020, and one half withdrawn by decision 0026. There is no age gate: no age is asked and none is stored. The half that stands is that there are no private messages anywhere in the product and never will be, so there is no surface on which an adult stranger can write to a child unobserved. Open again in the narrower form: is that sufficient on its own?_

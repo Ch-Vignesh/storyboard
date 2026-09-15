@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import { pinGenresSchema } from '@/lib/schemas/onboarding'
 import { NOTIFICATION_TYPES } from '@/lib/schemas/notifications'
+import { ACCOUNT_DELETION_GRACE_DAYS } from '@/lib/schemas/constants'
 
 import { activeProcedure, createTRPCRouter, protectedProcedure } from '../init'
 
@@ -28,6 +29,7 @@ export const settingsRouter = createTRPCRouter({
           showPassedWork: true,
           readingTypeScale: true,
           readingLineHeight: true,
+          deletionRequestedAt: true,
         },
       }),
       ctx.db.userGenre.findMany({
@@ -135,4 +137,51 @@ export const settingsRouter = createTRPCRouter({
       )
       return { ok: true }
     }),
+
+  /**
+   * OD-3's second half — delete this account (decision 0024).
+   *
+   * Sets a date; erases nothing. The account freezes immediately — no writing,
+   * no email, no profile — and the daily purge finishes it after
+   * `ACCOUNT_DELETION_GRACE_DAYS`. The seven days are not a cooling-off
+   * courtesy: an account somebody else has got into can be destroyed in one
+   * click, and a window in which the real owner can sign in and stop it is what
+   * makes that recoverable.
+   *
+   * What it does not ask: which storyboards to keep. All of them stay, and the
+   * dialog says so before this is called. A storyboard is rarely only its
+   * owner's — somebody else's accepted suggestion is in it, somebody else's
+   * credit is on it — so "delete my work too" is not the account holder's alone
+   * to choose.
+   */
+  requestDeletion: activeProcedure.mutation(async ({ ctx }) => {
+    const requestedAt = new Date()
+    await ctx.db.user.update({
+      where: { id: ctx.session.user.id },
+      data: { deletionRequestedAt: requestedAt },
+    })
+    const finishesAt = new Date(
+      requestedAt.getTime() + ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000,
+    )
+    return { requestedAt, finishesAt }
+  }),
+
+  /**
+   * Change your mind, inside the grace period.
+   *
+   * `protectedProcedure`, not `activeProcedure`, and that is the whole reason
+   * this comment exists: `activeProcedure` refuses an account with a pending
+   * deletion, so building this the usual way would make the undo unreachable by
+   * exactly the people who need it. The structural test in `procedures.test.ts`
+   * names this procedure as the one deliberate exception.
+   */
+  cancelDeletion: protectedProcedure.mutation(async ({ ctx }) => {
+    // Only from inside the grace period. Once the purge has run there is no
+    // password to sign in with and nothing left to restore.
+    await ctx.db.user.updateMany({
+      where: { id: ctx.session.user.id, status: 'ACTIVE', deletionRequestedAt: { not: null } },
+      data: { deletionRequestedAt: null },
+    })
+    return { ok: true }
+  }),
 })

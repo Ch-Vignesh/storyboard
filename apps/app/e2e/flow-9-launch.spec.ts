@@ -100,24 +100,23 @@ test('the community rules are one click from signing up (FR-13.4)', async ({ pag
   await page.goto('/signup')
   await expect(page.getByRole('link', { name: /how this place works/i })).toBeVisible()
 
-  // OD-7, decision 0020 — the age is asked once, and the reason it is enough
-  // is on the same screen.
-  await expect(page.getByLabel(/i am 13 or older/i)).toBeVisible()
+  // Decision 0026 dropped the age gate; the half of 0020 that does the actual
+  // protecting is this one, and it is still said before anybody joins.
   await expect(page.getByText(/no private messages here and there never will be/i)).toBeVisible()
 
   await page.getByRole('link', { name: /how this place works/i }).click()
   await expect(page).toHaveURL(/\/rules$/)
   await expect(page.getByRole('heading', { name: /how this place works/i })).toBeVisible()
-  await expect(page.getByText(/thirteen and over, and nothing private/i)).toBeVisible()
+  await expect(page.getByText(/nothing here is private/i)).toBeVisible()
 })
 
-test('a visitor cannot sign up without saying they are old enough', async ({ page }) => {
+test('signing up asks for an address and nothing else (decision 0026)', async ({ page }) => {
   await page.goto('/signup')
-  await page.getByLabel('Email').fill('too-young@storyboard.invalid')
 
-  // The button is disabled until the box is ticked — FR-1.3's first step does
-  // not begin without it.
-  await expect(page.getByRole('button', { name: /email me a link/i })).toBeDisabled()
-  await page.getByLabel(/i am 13 or older/i).check()
+  // The age checkbox is gone. Asserted rather than merely deleted, because a
+  // gate that quietly reappears is the kind of thing nobody notices.
+  await expect(page.getByLabel(/13 or older/i)).toHaveCount(0)
+
+  await page.getByLabel('Email').fill('someone@storyboard.invalid')
   await expect(page.getByRole('button', { name: /email me a link/i })).toBeEnabled()
 })

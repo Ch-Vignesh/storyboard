@@ -11,6 +11,8 @@ import { PINNED_GENRES_MIN, READING_LINE_HEIGHT, READING_TYPE_SCALE } from '@/li
 import { NOTIFICATIONS, NOTIFICATION_TYPES } from '@/lib/schemas/notifications'
 import { useTRPC } from '@/trpc/client'
 
+import { DeleteAccount } from './delete-account'
+
 export function SettingsForm() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -294,6 +296,13 @@ export function SettingsForm() {
           })}
         </ul>
       </section>
+
+      {/* OD-3's second half, decision 0024. Last on the page, because it is the
+          one thing here that cannot be undone after a week. */}
+      <DeleteAccount
+        username={settings.user.username}
+        deletionRequestedAt={settings.user.deletionRequestedAt}
+      />
     </div>
   )
 }

@@ -318,9 +318,7 @@ export default function HomePage() {
                   <Button asChild variant="primary" size="lg">
                     <a href={`${appUrl}/signup`}>Create an account</a>
                   </Button>
-                  <span className="text-[12.5px] text-ink-faint">
-                    Free while it is small. You need to be 13 or older.
-                  </span>
+                  <span className="text-[12.5px] text-ink-faint">Free while it is small.</span>
                 </div>
               </div>
             </section>
@@ -353,7 +351,9 @@ export default function HomePage() {
           >
             Source
           </a>
-          <span className="ml-auto">You need to be 13 or older to have an account.</span>
+          <span className="ml-auto">
+            Everything anyone writes here is visible to whoever can read the work.
+          </span>
         </footer>
       </div>
     </>

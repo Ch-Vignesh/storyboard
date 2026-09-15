@@ -1,7 +1,9 @@
 # 0020 — Thirteen and over, and no private messages
 
 **Date:** 2026-09-15
-**Status:** accepted
+**Status:** accepted, then **half superseded by decision 0026** — the age gate
+was removed. Everything below about private messages still holds; everything
+about thirteen does not.
 **Resolves:** OD-7 (age policy), which the SRS calls not optional before launch
 
 ## The question
