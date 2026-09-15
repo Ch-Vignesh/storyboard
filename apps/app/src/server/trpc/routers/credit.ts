@@ -54,39 +54,4 @@ export const creditRouter = createTRPCRouter({
 
       return { credits, contributors: [...byContributor.values()] }
     }),
-
-  /** Everything this person has been credited for (FR-9.3, the feed). */
-  forUser: publicProcedure
-    .input(z.object({ username: z.string().min(1) }))
-    .query(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findUnique({
-        where: { username: input.username },
-        select: { id: true, username: true, displayName: true, bio: true, createdAt: true },
-      })
-      if (!user) return null
-
-      const credits = await ctx.db.credit.findMany({
-        where: { contributorId: user.id },
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          type: true,
-          isLive: true,
-          createdAt: true,
-          storyboard: {
-            select: {
-              slug: true,
-              title: true,
-              visibility: true,
-              owner: { select: { username: true, displayName: true } },
-            },
-          },
-        },
-      })
-
-      // A private storyboard's title is not public, even in a credit line.
-      const visible = credits.filter((credit) => credit.storyboard.visibility === 'PUBLIC')
-
-      return { user, credits: visible }
-    }),
 })

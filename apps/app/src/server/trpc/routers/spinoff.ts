@@ -9,8 +9,8 @@ import { DAILY_LIMITS } from '@/lib/schemas/constants'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { titleSchema } from '@/lib/schemas/storyboard'
 
-import { copyTree } from './version'
-import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
+import { copyTree } from '@/server/tree'
+import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
 
 const log = logger.child({ router: 'spinoff' })
 
@@ -30,7 +30,7 @@ const LINEAGE_SHOWN = 3
  * answer, where live tracking is deferred indefinitely.
  */
 export const spinOffRouter = createTRPCRouter({
-  create: protectedProcedure
+  create: activeProcedure
     .input(
       z.object({
         storyboardId: z.string().min(1),
@@ -134,7 +134,10 @@ export const spinOffRouter = createTRPCRouter({
           select: { id: true },
         })
 
-        await copyTree(tx, source.id, version.id)
+        // Decision 0019 — a spin-off owns its prose. Sharing revision rows
+        // across an ownership boundary made the original's deletion empty this
+        // storyboard thirty days later.
+        const remapped = await copyTree(tx, source.id, version.id, { copyRevisions: true })
 
         // FR-9.5 — credits survive a spin-off. Each is copied with
         // `inheritedFromId` pointing at the credit it came from, so the
@@ -164,7 +167,11 @@ export const spinOffRouter = createTRPCRouter({
               erasedAt: credit.erasedAt,
               type: credit.type,
               sectionLineage: credit.sectionLineage,
-              revisionId: credit.revisionId,
+              // Points at this storyboard's copy of the revision, not the
+              // original's, so the credit survives the original being deleted
+              // (decision 0019). A credit whose revision is no longer the head
+              // of anything keeps its null, as it always did.
+              revisionId: credit.revisionId ? (remapped.get(credit.revisionId) ?? null) : null,
               suggestionId: credit.suggestionId,
               ideaId: credit.ideaId,
               isLive: credit.isLive,

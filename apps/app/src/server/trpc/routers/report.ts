@@ -29,15 +29,6 @@ export const reportRouter = createTRPCRouter({
   create: activeProcedure.input(createReportSchema).mutation(async ({ ctx, input }) => {
     const reporterId = ctx.session.user.id
 
-    // FR-13.3 — not in the requirement's list, but a reporting endpoint with no
-    // ceiling is a harassment tool: the queue is a person's time.
-    await enforce(
-      ctx.db,
-      key.reportsMade(reporterId),
-      { limit: DAILY_LIMITS.reportsMade, windowMs: DAY_MS },
-      (retryAt) => `You have reported a lot today. Try again ${whenToRetry(retryAt)}.`,
-    )
-
     const target = await resolveTarget(ctx.db, reporterId, input.targetType, input.targetId)
     if (!target) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'That does not exist.' })
@@ -48,6 +39,17 @@ export const reportRouter = createTRPCRouter({
         message: 'You cannot report your own work.',
       })
     }
+
+    // FR-13.3 — not in the requirement's list, but a reporting endpoint with no
+    // ceiling is a harassment tool: the queue is a person's time. Counted after
+    // the target is known to exist, so probing for things that do not exist
+    // cannot burn somebody's allowance.
+    await enforce(
+      ctx.db,
+      key.reportsMade(reporterId),
+      { limit: DAILY_LIMITS.reportsMade, windowMs: DAY_MS },
+      (retryAt) => `You have reported a lot today. Try again ${whenToRetry(retryAt)}.`,
+    )
 
     const existing = await ctx.db.report.findUnique({
       where: {

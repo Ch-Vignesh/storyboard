@@ -1,11 +1,12 @@
-import type { Prisma, PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadStoryboard, loadVersion } from '@/lib/authz/guard'
 import { logger } from '@/lib/logger'
 
-import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
+import { copyTree } from '@/server/tree'
+
+import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
 
 const log = logger.child({ router: 'version' })
 
@@ -80,7 +81,7 @@ export const versionRouter = createTRPCRouter({
    * next to the simplicity it buys (architecture section 2.1): a 120,000-word
    * novel is about 700 KB of JSON, and none of that JSON is copied here anyway.
    */
-  create: protectedProcedure
+  create: activeProcedure
     .input(z.object({ baseVersionId: z.string().min(1), name: nameSchema }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -114,7 +115,7 @@ export const versionRouter = createTRPCRouter({
       return created
     }),
 
-  rename: protectedProcedure
+  rename: activeProcedure
     .input(z.object({ versionId: z.string().min(1), name: nameSchema }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -134,7 +135,7 @@ export const versionRouter = createTRPCRouter({
    * cannot both hold `isMain = true` even for an instant, so the old main is
    * demoted first, inside the same transaction.
    */
-  promoteToMain: protectedProcedure
+  promoteToMain: activeProcedure
     .input(z.object({ versionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -188,7 +189,7 @@ export const versionRouter = createTRPCRouter({
    *
    * A tombstone, like every other structural delete (decision 0008).
    */
-  delete: protectedProcedure
+  delete: activeProcedure
     .input(z.object({ versionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -227,66 +228,4 @@ export const versionRouter = createTRPCRouter({
     }),
 })
 
-/**
- * Copies a version's chapters and sections into another version.
- *
- * Revisions are shared rather than copied — they are immutable, so two
- * sections pointing at the same revision is not a hazard, it is the whole
- * design (architecture section 2.2). `lineageId` comes across unchanged, which
- * is what makes the copy recognisable as the same section later.
- */
-export async function copyTree(
-  tx: Prisma.TransactionClient | PrismaClient,
-  fromVersionId: string,
-  toVersionId: string,
-): Promise<void> {
-  const chapters = await tx.chapter.findMany({
-    where: { versionId: fromVersionId, deletedAt: null },
-    orderBy: { order: 'asc' },
-    select: {
-      lineageId: true,
-      order: true,
-      title: true,
-      sections: {
-        where: { deletedAt: null, mergedIntoId: null },
-        orderBy: { order: 'asc' },
-        select: {
-          lineageId: true,
-          order: true,
-          title: true,
-          wordCount: true,
-          currentRevisionId: true,
-        },
-      },
-    },
-  })
-
-  for (const chapter of chapters) {
-    const copy = await tx.chapter.create({
-      data: {
-        versionId: toVersionId,
-        lineageId: chapter.lineageId,
-        order: chapter.order,
-        title: chapter.title,
-      },
-      select: { id: true },
-    })
-
-    for (const section of chapter.sections) {
-      await tx.section.create({
-        data: {
-          chapterId: copy.id,
-          lineageId: section.lineageId,
-          order: section.order,
-          title: section.title,
-          wordCount: section.wordCount,
-          // The same revision, not a copy of it (architecture section 2.2,
-          // decision 0014). Both sections walk back through one `parentId`
-          // chain, which is what makes their shared history real.
-          currentRevisionId: section.currentRevisionId,
-        },
-        select: { id: true },
-      })
-    }
-  }
-}
+export { copyTree } from '@/server/tree'

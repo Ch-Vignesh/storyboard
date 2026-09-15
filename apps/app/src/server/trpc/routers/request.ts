@@ -9,7 +9,13 @@ import { logger } from '@/lib/logger'
 import { CONTINUE_TARGET_MAX_WORDS, REWRITE_TARGET_MIN_WORDS } from '@/lib/schemas/constants'
 import { createRequestSchema, passChipSchema, PROSE_KINDS } from '@/lib/schemas/help'
 
-import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
+import {
+  activeProcedure,
+  actorFrom,
+  createTRPCRouter,
+  protectedProcedure,
+  publicProcedure,
+} from '../init'
 
 const log = logger.child({ router: 'request' })
 
@@ -56,7 +62,7 @@ export const requestRouter = createTRPCRouter({
    * FR-5.7 — a rewrite needs something to rewrite, a continue needs somewhere
    * to continue into. Both enforced here with a plain-language error.
    */
-  create: protectedProcedure.input(createRequestSchema).mutation(async ({ ctx, input }) => {
+  create: activeProcedure.input(createRequestSchema).mutation(async ({ ctx, input }) => {
     const actor = actorFrom(ctx.session, ctx.account)
     const { sectionId, storyboardId, wordCount } = await loadSection(
       ctx.db,
@@ -348,7 +354,7 @@ export const requestRouter = createTRPCRouter({
   }),
 
   /** FR-5.10 — closing does not delete the suggestions; they stay readable. */
-  close: protectedProcedure
+  close: activeProcedure
     .input(z.object({ requestId: z.string().min(1), reason: passChipSchema.optional() }))
     .mutation(async ({ ctx, input }) => {
       const { request } = await requireAuthorOfRequest(ctx, input.requestId)
@@ -363,7 +369,7 @@ export const requestRouter = createTRPCRouter({
     }),
 
   /** FR-5.9 — reopening notifies everyone who has ever submitted to it. */
-  reopen: protectedProcedure
+  reopen: activeProcedure
     .input(z.object({ requestId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const { request } = await requireAuthorOfRequest(ctx, input.requestId)

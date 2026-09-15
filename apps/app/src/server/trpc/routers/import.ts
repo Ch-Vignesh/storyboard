@@ -30,7 +30,7 @@ import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { createStoryboardSchema } from '@/lib/schemas/storyboard'
 import { createUploadTarget, deleteObject, getObject, uploadKey } from '@/server/storage'
 
-import { createTRPCRouter, protectedProcedure } from '../init'
+import { activeProcedure, createTRPCRouter, protectedProcedure } from '../init'
 
 const log = logger.child({ router: 'import' })
 
@@ -51,7 +51,7 @@ const log = logger.child({ router: 'import' })
  */
 export const importRouter = createTRPCRouter({
   /** FR-3.1 — a place to put the file. */
-  createUpload: protectedProcedure
+  createUpload: activeProcedure
     .input(
       z.object({
         fileName: z.string().trim().min(1).max(255),
@@ -102,7 +102,7 @@ export const importRouter = createTRPCRouter({
    * review screen can say what went wrong with *this file* instead of showing
    * an empty outline and leaving the writer to guess.
    */
-  analyse: protectedProcedure
+  analyse: activeProcedure
     .input(z.object({ jobId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const job = await load(ctx.db, ctx.session.user.id, input.jobId)
@@ -186,7 +186,7 @@ export const importRouter = createTRPCRouter({
    * One transaction. A manuscript half-imported would be worse than one not
    * imported at all, and the writer would have no way to tell which half.
    */
-  commit: protectedProcedure
+  commit: activeProcedure
     .input(
       createStoryboardSchema.extend({
         jobId: z.string().min(1),

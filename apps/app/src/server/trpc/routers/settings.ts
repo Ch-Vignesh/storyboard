@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { pinGenresSchema } from '@/lib/schemas/onboarding'
 import { NOTIFICATION_TYPES } from '@/lib/schemas/notifications'
 
-import { createTRPCRouter, protectedProcedure } from '../init'
+import { activeProcedure, createTRPCRouter, protectedProcedure } from '../init'
 
 /**
  * Screen 16 — account, genres, notifications and reading preferences.
@@ -63,7 +63,7 @@ export const settingsRouter = createTRPCRouter({
    * what the interface shows (decision 0011), so it is the one a writer can
    * change, and changing it changes every credit line at once.
    */
-  updateProfile: protectedProcedure
+  updateProfile: activeProcedure
     .input(
       z.object({
         displayName: z
@@ -83,7 +83,7 @@ export const settingsRouter = createTRPCRouter({
     ),
 
   /** FR-11.2 — pinned genres are editable, and drive the dashboard only. */
-  updateGenres: protectedProcedure.input(pinGenresSchema).mutation(async ({ ctx, input }) => {
+  updateGenres: activeProcedure.input(pinGenresSchema).mutation(async ({ ctx, input }) => {
     const userId = ctx.session.user.id
     const found = await ctx.db.genre.findMany({
       where: { id: { in: input.genreIds } },
@@ -107,7 +107,7 @@ export const settingsRouter = createTRPCRouter({
    * In-app cannot be disabled, so there is no switch for it and no procedure
    * that could turn one off.
    */
-  setEmailPreference: protectedProcedure
+  setEmailPreference: activeProcedure
     .input(z.object({ type: z.enum(NOTIFICATION_TYPES), email: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id
@@ -120,7 +120,7 @@ export const settingsRouter = createTRPCRouter({
     }),
 
   /** Turn every email off, or back on, without twelve clicks. */
-  setAllEmail: protectedProcedure
+  setAllEmail: activeProcedure
     .input(z.object({ email: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id

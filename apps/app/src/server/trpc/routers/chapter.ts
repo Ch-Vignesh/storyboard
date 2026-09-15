@@ -7,7 +7,7 @@ import { loadChapter, loadVersion } from '@/lib/authz/guard'
 import { emptyDoc, flavourForStoryType } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
 
-import { actorFrom, createTRPCRouter, protectedProcedure } from '../init'
+import { activeProcedure, actorFrom, createTRPCRouter } from '../init'
 
 const titleSchema = z
   .string()
@@ -17,7 +17,7 @@ const titleSchema = z
 
 export const chapterRouter = createTRPCRouter({
   /** FR-2.3 — a new chapter goes to the end and arrives with one empty section. */
-  create: protectedProcedure
+  create: activeProcedure
     .input(z.object({ versionId: z.string().min(1), title: titleSchema }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -78,7 +78,7 @@ export const chapterRouter = createTRPCRouter({
       })
     }),
 
-  rename: protectedProcedure
+  rename: activeProcedure
     .input(z.object({ chapterId: z.string().min(1), title: titleSchema }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -100,7 +100,7 @@ export const chapterRouter = createTRPCRouter({
    * so there is never a moment where two chapters share a position or a gap
    * appears in the sequence.
    */
-  reorder: protectedProcedure
+  reorder: activeProcedure
     .input(
       z.object({ versionId: z.string().min(1), chapterIds: z.array(z.string().min(1)).min(1) }),
     )
@@ -151,7 +151,7 @@ export const chapterRouter = createTRPCRouter({
    * The last chapter of a version cannot go: FR-2.2 promises a writer is never
    * shown a storyboard with no structure.
    */
-  delete: protectedProcedure
+  delete: activeProcedure
     .input(z.object({ chapterId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)

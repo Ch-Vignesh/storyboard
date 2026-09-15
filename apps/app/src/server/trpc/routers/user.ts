@@ -6,7 +6,7 @@ import { usernameSchema } from '@/lib/schemas/auth'
 import { READING_LINE_HEIGHT, READING_TYPE_SCALE } from '@/lib/schemas/constants'
 import { pinGenresSchema } from '@/lib/schemas/onboarding'
 
-import { createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
+import { activeProcedure, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
 
 /** What onboarding still wants from this user (FR-1.3). */
 function nextOnboardingStep(user: {
@@ -51,7 +51,7 @@ export const userRouter = createTRPCRouter({
    * credit line forever, so this refuses to overwrite one that is already set
    * rather than quietly updating it.
    */
-  chooseUsername: protectedProcedure
+  chooseUsername: activeProcedure
     .input(z.object({ username: usernameSchema }))
     .mutation(async ({ ctx, input }) => {
       const current = await ctx.db.user.findUniqueOrThrow({
@@ -105,7 +105,7 @@ export const userRouter = createTRPCRouter({
    * is what the proxy and `onboardingStep` read. Replacing the set wholesale
    * keeps `order` honest when the user re-ranks their genres later (FR-11.2).
    */
-  pinGenres: protectedProcedure.input(pinGenresSchema).mutation(async ({ ctx, input }) => {
+  pinGenres: activeProcedure.input(pinGenresSchema).mutation(async ({ ctx, input }) => {
     const found = await ctx.db.genre.findMany({
       where: { id: { in: input.genreIds } },
       select: { id: true },
@@ -156,7 +156,7 @@ export const userRouter = createTRPCRouter({
     return user
   }),
 
-  setReadingPreferences: protectedProcedure
+  setReadingPreferences: activeProcedure
     .input(
       z.object({
         typeScale: z

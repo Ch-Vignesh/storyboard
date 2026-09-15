@@ -16,7 +16,13 @@ import {
 } from '@/lib/schemas/storyboard'
 import { logger } from '@/lib/logger'
 
-import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
+import {
+  activeProcedure,
+  actorFrom,
+  createTRPCRouter,
+  protectedProcedure,
+  publicProcedure,
+} from '../init'
 
 const log = logger.child({ router: 'storyboard' })
 
@@ -26,17 +32,8 @@ export const storyboardRouter = createTRPCRouter({
    * the main draft, one chapter and one empty section, all in a single
    * transaction so a failure cannot leave a storyboard with no tree.
    */
-  create: protectedProcedure.input(createStoryboardSchema).mutation(async ({ ctx, input }) => {
+  create: activeProcedure.input(createStoryboardSchema).mutation(async ({ ctx, input }) => {
     const userId = ctx.session.user.id
-
-    // FR-13.3 — five in any twenty-four hours (decision 0017).
-    await enforce(
-      ctx.db,
-      key.storyboardsCreated(userId),
-      { limit: DAILY_LIMITS.storyboardsCreated, windowMs: DAY_MS },
-      (retryAt) =>
-        `You can start ${String(DAILY_LIMITS.storyboardsCreated)} storyboards a day. Try again ${whenToRetry(retryAt)}.`,
-    )
 
     const genres = await ctx.db.genre.findMany({
       where: { id: { in: input.genreIds } },
@@ -45,6 +42,17 @@ export const storyboardRouter = createTRPCRouter({
     if (genres.length !== input.genreIds.length) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown genre.' })
     }
+
+    // FR-13.3 — five in any twenty-four hours (decision 0017). After the input
+    // is known to be good: a limit should count the storyboards somebody
+    // started, not the times they mistyped a genre.
+    await enforce(
+      ctx.db,
+      key.storyboardsCreated(userId),
+      { limit: DAILY_LIMITS.storyboardsCreated, windowMs: DAY_MS },
+      (retryAt) =>
+        `You can start ${String(DAILY_LIMITS.storyboardsCreated)} storyboards a day. Try again ${whenToRetry(retryAt)}.`,
+    )
 
     const id = publicId()
     const slug = `${slugify(input.title)}-${id}`
@@ -282,7 +290,7 @@ export const storyboardRouter = createTRPCRouter({
   }),
 
   /** Title, logline, genres and the rights note (FR-2.1, FR-14.5). */
-  update: protectedProcedure.input(updateStoryboardSchema).mutation(async ({ ctx, input }) => {
+  update: activeProcedure.input(updateStoryboardSchema).mutation(async ({ ctx, input }) => {
     const actor = actorFrom(ctx.session, ctx.account)
     const { storyboardId } = await loadStoryboard(
       ctx.db,
@@ -328,7 +336,7 @@ export const storyboardRouter = createTRPCRouter({
    * Closing open requests on the way to private is phase 2's job; there are no
    * requests yet, and the hook is marked below rather than half-built.
    */
-  setVisibility: protectedProcedure
+  setVisibility: activeProcedure
     .input(z.object({ storyboardId: z.string().min(1), visibility: visibilitySchema }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -370,7 +378,7 @@ export const storyboardRouter = createTRPCRouter({
    * Reversible, and deliberately so. A writer who marks a novel finished and
    * then sees a typo should not have to justify themselves to a dialog box.
    */
-  markFinished: protectedProcedure
+  markFinished: activeProcedure
     .input(z.object({ storyboardId: z.string().min(1), finished: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -423,7 +431,7 @@ export const storyboardRouter = createTRPCRouter({
    * affected are named by `deletionImpact` so the confirmation can list them;
    * this procedure only records the decision.
    */
-  delete: protectedProcedure
+  delete: activeProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -445,7 +453,7 @@ export const storyboardRouter = createTRPCRouter({
     }),
 
   /** Undo a soft delete inside the grace period. */
-  restore: protectedProcedure
+  restore: activeProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id

@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { logger } from '@/lib/logger'
 import { activityCalendar } from '@/server/activity'
 
-import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
+import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
 
 /**
  * Profiles (FR-9.3, FR-9.4, FR-9.6).
@@ -155,7 +155,7 @@ export const profileRouter = createTRPCRouter({
     }),
 
   /** FR-9.4 — the author's own choice about their unused work. */
-  setPassedWorkVisible: protectedProcedure
+  setPassedWorkVisible: activeProcedure
     .input(z.object({ visible: z.boolean() }))
     .mutation(({ ctx, input }) =>
       ctx.db.user.update({
@@ -176,7 +176,7 @@ export const profileRouter = createTRPCRouter({
    *
    * One-way, and the interface says so before it is done.
    */
-  eraseContribution: protectedProcedure
+  eraseContribution: activeProcedure
     .input(z.object({ creditId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id

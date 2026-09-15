@@ -14,12 +14,12 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase**        | 6 — Trust                                                                                                                                                                                                                                                                                                        |
-| **State**        | Phases 0–5 are committed and pushed, CI green (`f26d4c5`). Phase 6 is code complete and verified locally; all three exit criteria pass. Not committed — the user reviews first.                                                                                                                                  |
-| **Last updated** | 2026-09-15                                                                                                                                                                                                                                                                                                       |
-| **Next actions** | 1. Review and commit Phase 6. 2. Resolve **OD-7** (age policy), which blocks Phase 7 and is not optional. 3. Set up hosting accounts (see the checklist at the end); at minimum Neon, an R2 bucket for manuscript uploads, and a Vercel Cron entry per job in decision 0012 — now including `prune` and `purge`. |
+|                  |                                                                                                                                                                                                                                         |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 6 — Trust                                                                                                                                                                                                                               |
+| **State**        | Phases 0–6 are committed and pushed. A read-through of the whole codebase after phase 6 found six things, all fixed and covered by tests — see the audit notes under Phase 6.                                                           |
+| **Last updated** | 2026-09-15                                                                                                                                                                                                                              |
+| **Next actions** | 1. Resolve **OD-7** (age policy), which blocks Phase 7 and the SRS calls not optional. 2. Set up hosting accounts; at minimum Neon, an R2 bucket, and a Vercel Cron entry per job in decision 0012 — now including `prune` and `purge`. |
 
 ## Overview
 
@@ -362,6 +362,66 @@ accepted into and is re-attributed to "a former contributor".
   control characters**, which turns the file binary. The control-character rule
   now has exactly one home, in `lib/schemas/help.ts`, and the report schema
   imports it.
+
+### Audit, after phase 6
+
+A read-through of the whole codebase, looking for leaks, holes and bugs rather
+than for the next feature. Six findings, all fixed, each with a test that fails
+without the fix.
+
+1. **The purge job never ran.** `purgeDeletedStoryboards` nulled
+   `Revision.parentId` by hand before deleting, and the NFR-3 trigger refuses
+   _every_ UPDATE on `Revision` — the hard-delete hatch permits DELETE only. Every
+   storyboard failed, the per-row `catch` logged it, and the job returned
+   `{ purged: 0 }` looking like a quiet day. The unhooking was never needed:
+   `parentId` and `restoredFromId` are already `ON DELETE SET NULL`. This was
+   shipped in phase 6 with no test; it has four now.
+
+2. **Purging a storyboard emptied its spin-offs** (decision 0019). `copyTree`
+   shares revision rows, which is right inside a storyboard and wrong across
+   two: a spin-off's sections pointed at the _original's_ revisions, and
+   `Section.currentRevisionId` is `ON DELETE SET NULL`. So thirty days after an
+   author deleted their storyboard, a cron job would silently empty every
+   spin-off of it — to somebody who did nothing, with no record of why. FR-10.6
+   says an author cannot delete somebody else's spin-off; this let them do worse.
+   Spin-offs now copy revisions and remap their inherited credits.
+
+3. **A suspended account could still write** through nineteen mutations. `can()`
+   refuses a suspended actor, but a mutation that never loads a storyboard never
+   reaches `can()` — creating a storyboard, committing an import, editing a
+   profile. Every mutation is now `activeProcedure`, and
+   `server/trpc/procedures.test.ts` reads the routers and fails if one is not.
+
+4. **The sign-in page threw away where you were going.** `proxy.ts` puts the
+   page a signed-out visitor wanted in `?next=`, and the sign-in action
+   hard-coded `redirectTo: '/'`. FR-1.2's sixty seconds depends on not losing
+   somebody's place. Fixed through `lib/safe-next.ts`, which is mostly a list of
+   the ways a URL can point off-site — `//evil.example`, `/\\evil.example`, a
+   scheme, a control character — because a sign-in page that redirects wherever
+   it is told is an open redirect, and that is worth more to an attacker than
+   most bugs here.
+
+5. **Two rate limits counted refusals.** `storyboard.create` and `report.create`
+   consumed a slot before validating their input, so a mistyped genre cost one of
+   five storyboards a day. A limit should count what somebody did.
+
+6. **`credit.forUser` was dead code with a weaker filter than its siblings** —
+   it excluded private storyboards but not soft-deleted ones. Removed rather than
+   fixed: nothing called it, and dead code with a subtly weaker guard is exactly
+   what gets wired up later by somebody who assumes it is safe.
+
+Also done while reading: `copyTree` moved out of the version router into
+`server/tree.ts`. It is a data operation two routers need, and living in a
+router meant importing it dragged the whole tRPC and Auth.js stack behind it —
+which is why it had no test.
+
+Checked and found sound: no `dangerouslySetInnerHTML` anywhere; the three raw
+SQL statements are constants with no interpolation; the cron endpoint compares
+its secret in constant time and fails closed; the weekly digest filters to
+public, undeleted storyboards; `compare.revisions` enforces decision 0007's
+pre-public history rule; and the sign-in error says the same thing whether or
+not the address exists.
+
 - Two things are deliberately not here: **account deletion** (OD-3's second
   half) needs the same purge machinery pointed at a person rather than a
   storyboard, and is better done next to OD-7's age policy in phase 7 — and

@@ -7,13 +7,17 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { signIn } from '@/auth'
+import { safeNext } from '@/lib/safe-next'
 
 export const metadata: Metadata = { title: 'Sign in' }
 
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> }
 
 export default async function SignInPage({ searchParams }: Props) {
-  const { error } = await searchParams
+  const { error, next } = await searchParams
+  // proxy.ts puts the page they were trying to reach here. Validated, because
+  // a sign-in page that redirects wherever a URL says is an open redirect.
+  const destination = safeNext(next)
 
   async function signInAction(formData: FormData) {
     'use server'
@@ -21,10 +25,14 @@ export default async function SignInPage({ searchParams }: Props) {
       await signIn('credentials', {
         email: formData.get('email'),
         password: formData.get('password'),
-        redirectTo: '/',
+        redirectTo: destination,
       })
     } catch (caught) {
-      if (caught instanceof AuthError) redirect('/signin?error=1')
+      if (caught instanceof AuthError) {
+        const back = new URLSearchParams({ error: '1' })
+        if (destination !== '/') back.set('next', destination)
+        redirect(`/signin?${back.toString()}`)
+      }
       throw caught
     }
   }

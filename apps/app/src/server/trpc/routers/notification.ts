@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { createTRPCRouter, protectedProcedure } from '../init'
+import { activeProcedure, createTRPCRouter, protectedProcedure } from '../init'
 
 /**
  * The in-app notification centre (FR-12.1). In-app cannot be disabled; email
@@ -25,7 +25,7 @@ export const notificationRouter = createTRPCRouter({
     }),
   ),
 
-  markAllRead: protectedProcedure.mutation(async ({ ctx }) => {
+  markAllRead: activeProcedure.mutation(async ({ ctx }) => {
     await ctx.db.notification.updateMany({
       where: { userId: ctx.session.user.id, readAt: null },
       data: { readAt: new Date() },

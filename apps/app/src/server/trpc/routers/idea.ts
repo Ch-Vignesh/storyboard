@@ -9,7 +9,7 @@ import { DAILY_LIMITS } from '@/lib/schemas/constants'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { ideaBodySchema } from '@/lib/schemas/help'
 
-import { actorFrom, createTRPCRouter, protectedProcedure } from '../init'
+import { activeProcedure, actorFrom, createTRPCRouter } from '../init'
 
 const log = logger.child({ router: 'idea' })
 
@@ -19,7 +19,7 @@ const log = logger.child({ router: 'idea' })
  * as having helped — one per request (OD-5, decision 0010).
  */
 export const ideaRouter = createTRPCRouter({
-  post: protectedProcedure
+  post: activeProcedure
     .input(
       z.object({
         requestId: z.string().min(1),
@@ -118,7 +118,7 @@ export const ideaRouter = createTRPCRouter({
    * The partial unique index in the migration is the real guard; this check
    * turns the constraint into a sentence.
    */
-  markHelpful: protectedProcedure
+  markHelpful: activeProcedure
     .input(z.object({ ideaId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)

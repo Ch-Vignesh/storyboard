@@ -13,7 +13,13 @@ import { DAILY_LIMITS } from '@/lib/schemas/constants'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { passChipSchema, suggestionNoteSchema } from '@/lib/schemas/help'
 
-import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
+import {
+  activeProcedure,
+  actorFrom,
+  createTRPCRouter,
+  protectedProcedure,
+  publicProcedure,
+} from '../init'
 
 const log = logger.child({ router: 'suggestion' })
 
@@ -50,7 +56,7 @@ export const suggestionRouter = createTRPCRouter({
    * current section text for a rewrite and empty for a continue. Nothing is
    * visible to anyone until it is sent.
    */
-  startDraft: protectedProcedure
+  startDraft: activeProcedure
     .input(z.object({ requestId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -108,7 +114,7 @@ export const suggestionRouter = createTRPCRouter({
     }),
 
   /** Autosave for the composer. A draft is private to its author (FR-6.1). */
-  saveDraft: protectedProcedure
+  saveDraft: activeProcedure
     .input(z.object({ suggestionId: z.string().min(1), contentJson: z.unknown() }))
     .mutation(async ({ ctx, input }) => {
       const suggestion = await requireOwnDraft(ctx, input.suggestionId)
@@ -135,7 +141,7 @@ export const suggestionRouter = createTRPCRouter({
    * transaction as the state change, because two tabs submitting at once would
    * both pass a check made outside one.
    */
-  submit: protectedProcedure
+  submit: activeProcedure
     .input(
       z.object({
         suggestionId: z.string().min(1),
@@ -220,7 +226,7 @@ export const suggestionRouter = createTRPCRouter({
     }),
 
   /** FR-6.5 — withdraw before a decision. Frees a quota slot. */
-  withdraw: protectedProcedure
+  withdraw: activeProcedure
     .input(z.object({ suggestionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id
@@ -316,7 +322,7 @@ export const suggestionRouter = createTRPCRouter({
    *
    * Notifications go after the transaction, never inside it.
    */
-  accept: protectedProcedure
+  accept: activeProcedure
     .input(
       z.object({
         suggestionId: z.string().min(1),
@@ -485,7 +491,7 @@ export const suggestionRouter = createTRPCRouter({
    * FR-6.10 — passing needs no written reason. An optional chip from a fixed
    * set, chosen in one click, and no free-text field anywhere.
    */
-  pass: protectedProcedure
+  pass: activeProcedure
     .input(
       z.object({
         suggestionId: z.string().min(1),
@@ -564,7 +570,7 @@ export const suggestionRouter = createTRPCRouter({
    * again without consuming additional quota. Re-anchoring is the whole of it:
    * the suggestion goes back to being a draft, pointed at the current head.
    */
-  rebase: protectedProcedure
+  rebase: activeProcedure
     .input(z.object({ suggestionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id

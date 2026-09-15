@@ -13,11 +13,11 @@ import { SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
  * NFR-3 immutability trigger's one escape hatch, inside a single transaction
  * that sets `storyboard.hard_delete = on`.
  *
- * The order below is the whole of the difficulty. Revisions are referenced by
- * sections (`currentRevisionId`), by other revisions (`parentId`,
- * `restoredFromId`) and by credits, and Postgres will refuse a delete that
- * leaves any of those pointing at nothing. So: unhook, then delete leaves,
- * then delete the tree.
+ * The order below is the whole of the difficulty. Most references to a
+ * revision are ON DELETE SET NULL and look after themselves;
+ * `Suggestion.baseRevisionId` is RESTRICT, so suggestions must go first. The
+ * one thing this must not do is unhook by hand: NFR-3's hatch permits a DELETE
+ * on `Revision` and refuses every UPDATE, hatch or no hatch.
  *
  * What is *not* deleted: credits. A credit is somebody else's record of what
  * they did (principle 1.3.3), and an author deleting their storyboard does not
@@ -78,14 +78,10 @@ async function purgeOne(db: PrismaClient, storyboardId: string): Promise<void> {
         where: { id: { in: sectionIds } },
         data: { currentRevisionId: null },
       })
-      await tx.credit.updateMany({
-        where: { revision: { sectionId: { in: sectionIds } } },
-        data: { revisionId: null },
-      })
-      await tx.revision.updateMany({
-        where: { sectionId: { in: sectionIds } },
-        data: { parentId: null, restoredFromId: null },
-      })
+      // `Credit.revisionId`, `Revision.parentId` and `Revision.restoredFromId`
+      // are all ON DELETE SET NULL, so the database unhooks them as the rows
+      // go. Doing it by hand here is not only redundant, it is refused: the
+      // NFR-3 hatch permits a DELETE on Revision, never an UPDATE.
 
       await tx.sectionDraft.deleteMany({ where: { sectionId: { in: sectionIds } } })
       await tx.suggestion.deleteMany({

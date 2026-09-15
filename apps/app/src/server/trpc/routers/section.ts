@@ -17,7 +17,7 @@ import {
 import { derive } from '@/lib/doc/text'
 import { logger } from '@/lib/logger'
 
-import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
+import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
 
 const log = logger.child({ router: 'section' })
 
@@ -103,7 +103,7 @@ export const sectionRouter = createTRPCRouter({
     }),
 
   /** FR-2.3 — a new section, at the end of its chapter or after a given one. */
-  create: protectedProcedure
+  create: activeProcedure
     .input(
       z.object({
         chapterId: z.string().min(1),
@@ -174,7 +174,7 @@ export const sectionRouter = createTRPCRouter({
       })
     }),
 
-  rename: protectedProcedure
+  rename: activeProcedure
     .input(z.object({ sectionId: z.string().min(1), title: titleSchema }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -192,7 +192,7 @@ export const sectionRouter = createTRPCRouter({
     }),
 
   /** FR-2.3 — one transaction rewrites every sibling's `order`. */
-  reorder: protectedProcedure
+  reorder: activeProcedure
     .input(
       z.object({
         chapterId: z.string().min(1),
@@ -234,7 +234,7 @@ export const sectionRouter = createTRPCRouter({
     }),
 
   /** A tombstone (decision 0008). A chapter keeps at least one section. */
-  delete: protectedProcedure
+  delete: activeProcedure
     .input(z.object({ sectionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -279,7 +279,7 @@ export const sectionRouter = createTRPCRouter({
    * Both halves get a fresh revision. The original keeps its lineage and its
    * history, so "what did this section say last week" still answers.
    */
-  split: protectedProcedure
+  split: activeProcedure
     .input(z.object({ sectionId: z.string().min(1), atBlockIndex: z.number().int().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -390,7 +390,7 @@ export const sectionRouter = createTRPCRouter({
    *
    * Never called "merge" in the interface; see the vocabulary table (SRS 2).
    */
-  joinWithPrevious: protectedProcedure
+  joinWithPrevious: activeProcedure
     .input(z.object({ sectionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -481,7 +481,7 @@ export const sectionRouter = createTRPCRouter({
    * (section, user), so that privacy is structural rather than a filter someone
    * can forget.
    */
-  saveDraft: protectedProcedure
+  saveDraft: activeProcedure
     .input(z.object({ sectionId: z.string().min(1), contentJson: docInput }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -512,7 +512,7 @@ export const sectionRouter = createTRPCRouter({
       return draft
     }),
 
-  discardDraft: protectedProcedure
+  discardDraft: activeProcedure
     .input(z.object({ sectionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -531,7 +531,7 @@ export const sectionRouter = createTRPCRouter({
    * moved since, the write is refused rather than silently overwriting a
    * co-author — the same conflict shape FR-6.6 uses for suggestions.
    */
-  commitRevision: protectedProcedure
+  commitRevision: activeProcedure
     .input(
       z.object({
         sectionId: z.string().min(1),
@@ -662,7 +662,7 @@ export const sectionRouter = createTRPCRouter({
    * rather than deleted (principle 1.3.3: removing the writing does not remove
    * the record of the contribution).
    */
-  restoreRevision: protectedProcedure
+  restoreRevision: activeProcedure
     .input(z.object({ sectionId: z.string().min(1), revisionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
