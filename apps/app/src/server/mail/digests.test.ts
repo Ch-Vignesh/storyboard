@@ -38,12 +38,21 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
   let db: PrismaClient
   const run = randomUUID().replaceAll('-', '').slice(0, 10)
   let userId = ''
+  const email = `digests-${run}@example.test`
+
+  /**
+   * A digest run emails everybody with something waiting — that is what a cron
+   * job is for. These tests share a database with the flow tests, which leave
+   * real notifications behind, so every assertion here is about the messages
+   * addressed to this test's own person.
+   */
+  const mineIn = (mailer: { sent: Mail[] }) => mailer.sent.filter((mail) => mail.to === email)
 
   beforeAll(async () => {
     db = createPrismaClient({ log: [] })
     const user = await db.user.create({
       data: {
-        email: `digests-${run}@example.test`,
+        email,
         username: `dig_${run}`,
         displayName: 'Digest Test',
         emailVerifiedAt: new Date(),
@@ -93,18 +102,19 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
   it('emails every immediate type, one message each (FR-12.3)', async () => {
     await seedOneOfEach()
     const mailer = recordingMailer()
-    const result = await runImmediate(db, { mailer })
+    await runImmediate(db, { mailer })
 
-    expect(result.sent).toBe(IMMEDIATE_TYPES.length)
+    const mine = mineIn(mailer)
+    expect(mine).toHaveLength(IMMEDIATE_TYPES.length)
     // Every immediate type produced a message with its own subject.
     for (const type of IMMEDIATE_TYPES) {
       expect(
-        mailer.sent.some((mail) => mail.subject.includes(NOTIFICATIONS[type].label)),
+        mine.some((mail) => mail.subject.includes(NOTIFICATIONS[type].label)),
         `${type} should have been emailed`,
       ).toBe(true)
     }
     // FR-12.5 — plain text alongside the HTML, and a canonical link.
-    for (const mail of mailer.sent) {
+    for (const mail of mine) {
       expect(mail.text.length).toBeGreaterThan(0)
       expect(mail.text).toContain('http')
       expect(mail.html).not.toContain('<img')
@@ -116,10 +126,12 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     await runImmediate(db, { mailer: recordingMailer() })
 
     const mailer = recordingMailer()
-    const result = await runHourlyDigest(db, { mailer })
+    await runHourlyDigest(db, { mailer })
 
-    expect(result.sent).toBe(1)
-    const digest = mailer.sent[0]!
+    const mine = mineIn(mailer)
+    // FR-12.3 — one message, however many notifications went into it.
+    expect(mine).toHaveLength(1)
+    const digest = mine[0]!
     for (const type of HOURLY_TYPES) {
       expect(digest.text, `${type} should be in the digest`).toContain(NOTIFICATIONS[type].label)
     }
@@ -130,9 +142,8 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     await runImmediate(db, { mailer: recordingMailer() })
 
     const second = recordingMailer()
-    const result = await runImmediate(db, { mailer: second })
-    expect(result.sent).toBe(0)
-    expect(second.sent).toHaveLength(0)
+    await runImmediate(db, { mailer: second })
+    expect(mineIn(second)).toHaveLength(0)
   })
 
   it('respects a per-type email switch, but still marks the row (FR-12.1)', async () => {
@@ -148,7 +159,7 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     await runImmediate(db, { mailer })
 
     expect(
-      mailer.sent.some((mail) => mail.subject.includes(NOTIFICATIONS[type].label)),
+      mineIn(mailer).some((mail) => mail.subject.includes(NOTIFICATIONS[type].label)),
       'a disabled type must not be emailed',
     ).toBe(false)
 
@@ -165,9 +176,8 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     await db.user.update({ where: { id: userId }, data: { status: 'SUSPENDED' } })
 
     const mailer = recordingMailer()
-    const result = await runImmediate(db, { mailer })
-    expect(result.considered).toBe(0)
-    expect(mailer.sent).toHaveLength(0)
+    await runImmediate(db, { mailer })
+    expect(mineIn(mailer)).toHaveLength(0)
 
     await db.user.update({ where: { id: userId }, data: { status: 'ACTIVE' } })
   })
@@ -177,7 +187,7 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     // empty week is not worth an email.
     const mailer = recordingMailer()
     await runWeeklyDigest(db, new Date(), { mailer })
-    expect(mailer.sent.every((mail) => mail.to !== `digests-${run}@example.test`)).toBe(true)
+    expect(mineIn(mailer)).toHaveLength(0)
   })
 
   it('the quiet nudge offers two actions and never says the request failed (FR-12.4)', async () => {

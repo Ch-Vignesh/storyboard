@@ -6,8 +6,11 @@ import Link from 'next/link'
 import { useState } from 'react'
 
 import { Manuscript } from '@/components/manuscript'
+
+import { LineageBanner } from './lineage-banner'
 import { ReadingControls } from '@/components/reading-controls'
 import { flavourForStoryType } from '@/lib/doc/schema'
+import { nameOf } from '@/lib/people'
 import { useTRPC } from '@/trpc/client'
 import type { AppRouter } from '@/server/trpc/routers/_app'
 import type { inferRouterOutputs } from '@trpc/server'
@@ -24,7 +27,7 @@ export function ReaderShell({
   header: React.ReactNode
 }) {
   const trpc = useTRPC()
-  const { storyboard, chapters, permissions, historyVisibleFrom } = data
+  const { storyboard, chapters, permissions, historyVisibleFrom, version } = data
   const [activeChapterId, setActiveChapterId] = useState(chapters[0]?.id ?? null)
   // FR-11.5 — clicking a margin card scrolls to its section and highlights it.
   const [highlighted, setHighlighted] = useState<string | null>(null)
@@ -48,6 +51,8 @@ export function ReaderShell({
   }
 
   const activeIndex = chapters.findIndex((entry) => entry.id === activeChapterId)
+  // FR-10.1 — a link out of an alternate version stays in that version.
+  const versionSuffix = version.isMain ? '' : `?version=${encodeURIComponent(version.id)}`
 
   return (
     <div className="min-h-screen">
@@ -59,6 +64,12 @@ export function ReaderShell({
             <Button asChild variant="ghost" size="sm">
               <Link href={`/s/${storyboard.slug}/contributors`}>Contributors</Link>
             </Button>
+            {/* FR-10.1 — an author has drafts; a reader has none to see. */}
+            {permissions.canCreateVersion ? (
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/s/${storyboard.slug}/versions`}>Versions</Link>
+              </Button>
+            ) : null}
             {permissions.canOpenRequest ? (
               <Button asChild variant="ghost" size="sm">
                 <Link href={`/s/${storyboard.slug}/help/new`}>Ask for help</Link>
@@ -139,10 +150,10 @@ export function ReaderShell({
                   href={`/@${storyboard.owner.username}`}
                   className="text-pencil hover:underline"
                 >
-                  {storyboard.owner.displayName ?? storyboard.owner.username}
+                  {nameOf(storyboard.owner)}
                 </Link>
               ) : (
-                (storyboard.owner.displayName ?? 'Unknown')
+                nameOf(storyboard.owner)
               )}
               {storyboard.genres.length > 0
                 ? ` · ${storyboard.genres.map((genre) => genre.name).join(', ')}`
@@ -159,6 +170,20 @@ export function ReaderShell({
               </p>
             ) : null}
           </header>
+
+          {/* FR-10.1 — reading an alternate is never a surprise. */}
+          {!version.isMain ? (
+            <p className="mb-8 max-w-measure border-l-2 border-ochre/50 bg-ochre-wash/40 py-1.5 pl-4 text-[12.5px] leading-relaxed text-ink-soft">
+              You are reading {version.name}, an alternate version.{' '}
+              <Link href={`/s/${storyboard.slug}`} className="text-pencil hover:underline">
+                Read the main draft
+              </Link>
+              .
+            </p>
+          ) : null}
+
+          {/* FR-10.4 to FR-10.6 — where this came from, and who took it on. */}
+          <LineageBanner storyboardId={storyboard.id} slug={storyboard.slug} />
 
           {/* Decision 0007 — say so rather than letting history look incomplete. */}
           {historyVisibleFrom ? (
@@ -268,14 +293,14 @@ export function ReaderShell({
                       {permissions.canEdit ? (
                         <p className="not-prose mb-8 text-[12.5px]">
                           <Link
-                            href={`/s/${storyboard.slug}/c/${activeIndex + 1}/${section.order + 1}/edit`}
+                            href={`/s/${storyboard.slug}/c/${activeIndex + 1}/${section.order + 1}/edit${versionSuffix}`}
                             className="text-pencil hover:underline"
                           >
                             Edit
                           </Link>
                           {' · '}
                           <Link
-                            href={`/s/${storyboard.slug}/c/${activeIndex + 1}/${section.order + 1}/history`}
+                            href={`/s/${storyboard.slug}/c/${activeIndex + 1}/${section.order + 1}/history${versionSuffix}`}
                             className="text-ink-faint hover:text-ink hover:underline"
                           >
                             History

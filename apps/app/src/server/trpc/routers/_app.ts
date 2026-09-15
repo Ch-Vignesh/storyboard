@@ -10,8 +10,10 @@ import { profileRouter } from './profile'
 import { requestRouter } from './request'
 import { sectionRouter } from './section'
 import { settingsRouter } from './settings'
+import { spinOffRouter } from './spinoff'
 import { storyboardRouter } from './storyboard'
 import { suggestionRouter } from './suggestion'
+import { versionRouter } from './version'
 import { userRouter } from './user'
 
 export const appRouter = createTRPCRouter({
@@ -28,6 +30,8 @@ export const appRouter = createTRPCRouter({
   browse: browseRouter,
   profile: profileRouter,
   settings: settingsRouter,
+  version: versionRouter,
+  spinOff: spinOffRouter,
   notification: notificationRouter,
 })
 

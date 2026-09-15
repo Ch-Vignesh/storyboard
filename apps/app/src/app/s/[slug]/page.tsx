@@ -8,11 +8,14 @@ import { caller } from '@/trpc/server'
 
 import { ReaderShell } from './reader-shell'
 
-type Params = { params: Promise<{ slug: string }> }
+type Params = {
+  params: Promise<{ slug: string }>
+  searchParams?: Promise<{ version?: string }>
+}
 
-async function load(slug: string) {
+async function load(slug: string, versionId?: string) {
   try {
-    return await caller.storyboard.get({ slug })
+    return await caller.storyboard.get({ slug, versionId })
   } catch (error) {
     // A private storyboard is a 404 to anyone who may not read it, at every
     // route including this one (phase 1 exit criterion).
@@ -39,9 +42,12 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * measure, the rail and the leader-rule gutter are laid out now so that adding
  * them is a component, not a rewrite.
  */
-export default async function StoryboardPage({ params }: Params) {
+export default async function StoryboardPage({ params, searchParams }: Params) {
   const { slug } = await params
-  const data = await load(slug)
+  // FR-10.1 — an alternate version is read at the same address, named. An id
+  // from another storyboard is a 404: `storyboard.get` checks that it belongs.
+  const { version } = (await searchParams) ?? {}
+  const data = await load(slug, version)
   const session = await auth()
 
   return (

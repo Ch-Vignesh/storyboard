@@ -744,9 +744,15 @@ export const sectionRouter = createTRPCRouter({
       })
 
       // After the transaction, never inside it.
-      if (unlinked.length > 0) {
+      // Decision 0013 — an erased contributor has no account to notify, and
+      // notifying them would be the opposite of what they asked for.
+      const toNotify = unlinked.filter(
+        (credit): credit is typeof credit & { contributorId: string } =>
+          credit.contributorId !== null,
+      )
+      if (toNotify.length > 0) {
         await ctx.db.notification.createMany({
-          data: unlinked.map((credit) => ({
+          data: toNotify.map((credit) => ({
             userId: credit.contributorId,
             type: 'CONTRIBUTION_REMOVED' as const,
             payload: { sectionId, revisionId, creditId: credit.id },

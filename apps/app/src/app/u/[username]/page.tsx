@@ -7,6 +7,7 @@ import { ContributionCalendar } from '@/components/contribution-calendar'
 import { STORY_TYPE_LABELS } from '@/lib/schemas/storyboard'
 import { caller } from '@/trpc/server'
 
+import { EraseCredit } from './erase-credit'
 import { PassedWork } from './passed-work'
 
 type Params = { params: Promise<{ username: string }> }
@@ -178,6 +179,10 @@ export default async function ProfilePage({ params }: Params) {
                   <p className="mt-1.5 text-[12.5px] text-ink-faint">
                     This writing is no longer in the main draft. The contribution stands.
                   </p>
+                ) : null}
+                {/* Decision 0013 — offered only to the person it belongs to. */}
+                {data.isSelf ? (
+                  <EraseCredit creditId={credit.id} storyboardTitle={credit.storyboard.title} />
                 ) : null}
               </li>
             ))}

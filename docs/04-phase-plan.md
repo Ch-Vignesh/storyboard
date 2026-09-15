@@ -16,10 +16,10 @@ as the work it describes.
 
 |                  |                                                                                                                                                                                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Phase**        | 3 — Findable and durable                                                                                                                                                                                                                         |
-| **State**        | Phases 1 and 2 are committed (`9f17ace`) and pushed, CI green. Phase 3 is code complete and verified locally; both its exit criteria pass. Not committed — the user reviews first.                                                               |
-| **Last updated** | 2026-09-14                                                                                                                                                                                                                                       |
-| **Next actions** | 1. Review and commit Phase 3. 2. Set up hosting accounts (see the checklist at the end); at minimum Neon, so `DATABASE_URL` exists outside this machine, and a Vercel Cron entry per job in decision 0012. 3. Decide OD-3, which blocks Phase 4. |
+| **Phase**        | 4 — Versions and spin-offs                                                                                                                                                                                                                       |
+| **State**        | Phases 0–3 are committed and pushed, CI green (`d5a5963`). Phase 4 is committed and verified locally; both its exit criteria pass. Not pushed — the user reviews first.                                                                          |
+| **Last updated** | 2026-09-15                                                                                                                                                                                                                                       |
+| **Next actions** | 1. Review and commit Phase 4. 2. Set up hosting accounts (see the checklist at the end); at minimum Neon, so `DATABASE_URL` exists outside this machine, and a Vercel Cron entry per job in decision 0012. 3. Start Phase 5 (import and export). |
 
 ## Overview
 
@@ -28,8 +28,8 @@ as the work it describes.
 | 0     | Foundations            | FR-1.3 (steps 1–2), FR-1.4, FR-1.6, NFR-3, NFR-8, NFR-9                               | 1 week    | `[x]` complete, CI green 2026-09-14  |
 | 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[x]` committed, CI green            |
 | 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` committed, CI green            |
-| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` code complete, awaiting review |
-| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[ ]`                                |
+| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` committed, CI green            |
+| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[x]` code complete, awaiting review |
 | 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[ ]`                                |
 | 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[ ]`                                |
 | 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[ ]`                                |
@@ -202,24 +202,52 @@ Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 
 **Goal.** Alternate versions inside a storyboard and spin-offs across storyboards, with credits that survive both.
 
-**Resolve first:** OD-3 (a contributor's right to delete their credit record). It changes what `Credit` deletion means and it is a legal question.
+**Resolved first:** OD-3 — **erase on request, keep the revision** (decision 0013). A
+contributor may erase their record; the prose stays in the manuscript it was
+accepted into and is re-attributed to "a former contributor".
 
 ### Tasks, in order
 
-1. [ ] `version.create` copies the chapter/section tree at the current head, sharing revisions; rename; delete non-main (FR-10.1, architecture §2.2).
-2. [ ] Promote to main: two-row update in one transaction; record the swap; previous main retained (FR-10.2).
-3. [ ] Cross-version comparison: outer-join sections on `lineageId`, diff head pairs, added and removed sections shown (FR-7.5, architecture §2.3). Versions screen.
-4. [ ] Spin-off: new storyboard owned by the spinner with `forkedFromId`, `forkedFromVersionId`, `forkedAt`, `forkedRevisionMap`; original author notified, not asked; not possible on private storyboards (FR-10.3, FR-10.7).
-5. [ ] Lineage banner "spun off from … on … — that story has continued since"; chain truncated to three ancestors with a full-lineage link; spin-off count and list on the original (FR-10.4–10.6).
-6. [ ] Credit inheritance: copy credit rows into the spin-off with `inheritedFromId`; credits page shows origin and inherited credits above new ones (FR-9.5).
-7. [ ] Rate limit groundwork: one spin-off of a given storyboard per user per day (FR-13.3, enforced fully in Phase 6).
+1. [x] `version.create` copies the chapter/section tree at the current head, sharing revisions; rename; delete non-main (FR-10.1, architecture §2.2). _(2026-09-15)_
+2. [x] Promote to main: two-row update in one transaction; record the swap; previous main retained (FR-10.2). _(2026-09-15)_
+3. [x] Cross-version comparison: outer-join sections on `lineageId`, compare head pairs, added and removed sections shown (FR-7.5, architecture §2.3). Versions screen and comparison screen. _(2026-09-15)_
+4. [x] Spin-off: new storyboard owned by the spinner with `forkedFromId`, `forkedFromVersionId`, `forkedAt`, `forkedRevisionMap`; original author notified, not asked; not possible on private storyboards (FR-10.3, FR-10.7). _(2026-09-15)_
+5. [x] Lineage banner "spun off from … on … — that story has continued since"; chain truncated to three ancestors with a full-lineage link; spin-off count and list on the original (FR-10.4–10.6). _(2026-09-15)_
+6. [x] Credit inheritance: copy credit rows into the spin-off with `inheritedFromId`; credits page shows origin and inherited credits above new ones (FR-9.5). _(2026-09-15)_
+7. [x] Rate limit groundwork: one spin-off of a given storyboard per user per day (FR-13.3, enforced fully in Phase 6). _(2026-09-15)_
+8. [x] OD-3: `Revision.authorId` and `Credit.contributorId` made nullable, `Credit.erasedAt` added, the NFR-3 trigger given one narrow hatch, and `profile.eraseContribution` with its confirmation on the writer's own profile (decision 0013). _(2026-09-15)_
 
 ### Exit criteria
 
-- [ ] Spin off a storyboard, write three chapters on it; the original shows the spin-off with correct inherited credits; the spin-off shows the "has continued since" banner.
-- [ ] Promoting an alternate to main loses nothing.
+- [x] Spin off a storyboard, write three chapters on it; the original shows the spin-off with correct inherited credits; the spin-off shows the "has continued since" banner. _Verified 2026-09-15 by `e2e/flow-6-versions-and-spin-offs.spec.ts`, entirely through the interface: a reader spins off a public storyboard, the prose and the credits arrive with it, the banner names the original and its author, the lineage page shows the chain, three sections are written, and the original's lineage page counts the spin-off without naming it (it is private) and offers the author no way to remove it._
+- [x] Promoting an alternate to main loses nothing. _Verified 2026-09-15 in the same file: an alternate is started from the main draft at 11 words (the head revision is shared, not copied), rewritten, compared, and promoted; the draft it replaced is still listed and still readable at its own address, and the manuscript at `/s/{slug}` is the promoted one._
 
 ### Notes
+
+- **Two schema bugs surfaced, both from phase 0, both recorded.** `Section.currentRevisionId`
+  was `@unique`, which made a copied section unable to share its base's head
+  revision — the exact thing architecture §2.2 says versions do (decision 0014).
+  And the NFR-3 trigger refused every `UPDATE` on `Revision`, which OD-3's answer
+  requires exactly once (decision 0013). Neither was reachable before this phase.
+- **The trigger's hatch is narrow by construction.** It permits an update only
+  when a transaction-scoped flag is set, only when authorship is being cleared,
+  and only when every other column — `contentHash` included — is unchanged. Seven
+  tests in `packages/db/src/__tests__/erasure.test.ts` are about what it still
+  refuses, including that the flag does not leak across transactions.
+- **The section routes were version-blind, and the flow test caught it.** `/s/{slug}/c/{n}/{m}`
+  resolved positions against the main draft regardless of which version was
+  being read, so reading an alternate and clicking Edit wrote into the main
+  draft. `locate()` now takes a version, and every link out of a version carries
+  it. This is the kind of defect a unit test cannot see and a flow test cannot
+  miss.
+- **The banner only claims what it can check.** FR-10.4's wording asserts the
+  original "has continued since"; `spinOff.lineage` counts revisions written
+  after `forkedAt` and the sentence ends early when there are none.
+- **A promoted alternate leaves a version still named "Main draft".** The name is
+  the author's, and renaming somebody's draft to tidy up an adjective would be
+  worse than the momentary oddity. The badge says which one is current.
+- Live spin-off tracking stays deferred (SRS section 8): the banner is the cheap
+  honest answer, as the requirement itself says.
 
 ---
 

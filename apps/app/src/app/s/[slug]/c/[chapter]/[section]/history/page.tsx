@@ -6,7 +6,10 @@ import { caller } from '@/trpc/server'
 import { locate } from '../locate'
 import { HistoryPanel } from './history-panel'
 
-type Params = { params: Promise<{ slug: string; chapter: string; section: string }> }
+type Params = {
+  params: Promise<{ slug: string; chapter: string; section: string }>
+  searchParams?: Promise<{ version?: string }>
+}
 
 export const metadata: Metadata = { title: 'History' }
 
@@ -14,15 +17,19 @@ export const metadata: Metadata = { title: 'History' }
  * Screen 11 — FR-8.3. Every revision, with who wrote it, when, and where it
  * came from. Restoring one (FR-8.4) appends; it never rewinds.
  */
-export default async function SectionHistoryPage({ params }: Params) {
+export default async function SectionHistoryPage({ params, searchParams }: Params) {
   const { slug, chapter: chapterNo, section: sectionNo } = await params
-  const located = await locate(slug, chapterNo, sectionNo)
+  const { version } = (await searchParams) ?? {}
+  const located = await locate(slug, chapterNo, sectionNo, version)
+
+  // Back to the draft this history belongs to, not to the main one.
+  const suffix = located.version.isMain ? '' : `?version=${encodeURIComponent(located.version.id)}`
   const history = await caller.section.history({ sectionId: located.section.id })
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
       <nav className="mb-6 text-[12.5px] text-ink-faint">
-        <Link href={`/s/${slug}`} className="hover:text-ink hover:underline">
+        <Link href={`/s/${slug}${suffix}`} className="hover:text-ink hover:underline">
           {located.storyboard.title}
         </Link>
         <span aria-hidden> / </span>
@@ -42,7 +49,7 @@ export default async function SectionHistoryPage({ params }: Params) {
         sectionId={located.section.id}
         initial={history}
         canRestore={located.permissions.canRestore}
-        backHref={`/s/${slug}`}
+        backHref={`/s/${slug}${suffix}`}
       />
     </main>
   )

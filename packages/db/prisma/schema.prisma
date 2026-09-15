@@ -374,7 +374,10 @@ model Section {
   lineageId         String
   order             Int
   title             String?   @db.VarChar(200)
-  currentRevisionId String?   @unique
+  /// Not unique: a version copy shares its head revision with the section it
+  /// was copied from (architecture §2.2). Revisions are immutable, so two
+  /// sections pointing at one is the design, not a hazard. Decision 0014.
+  currentRevisionId String?
   currentRevision   Revision? @relation("SectionHead", fields: [currentRevisionId], references: [id])
   wordCount         Int       @default(0)
   /// FR-2.4 — set when merged into the section above; history stays addressable.
@@ -411,9 +414,11 @@ model Revision {
   /// sha256 of contentText — the timestamped proof of authorship (FR-13.6).
   contentHash    String
   source         RevisionSource
-  /// Who wrote the words.
-  authorId       String
-  author         User           @relation("RevisionAuthor", fields: [authorId], references: [id])
+  /// Who wrote the words. Null once that person has erased their record
+  /// (decision 0013): the prose stays, the name goes, and the interface shows
+  /// "a former contributor".
+  authorId       String?
+  author         User?          @relation("RevisionAuthor", fields: [authorId], references: [id])
   /// Who let them in (FR-8.1). Null unless source = ACCEPTED.
   acceptedById   String?
   acceptedBy     User?          @relation("RevisionAcceptor", fields: [acceptedById], references: [id])
@@ -425,7 +430,8 @@ model Revision {
   restoredTo     Revision[]     @relation("RevisionRestore")
   createdAt      DateTime       @default(now())
 
-  headOf             Section?     @relation("SectionHead")
+  /// Every section whose head this is — one per version that shares it.
+  headOf             Section[]    @relation("SectionHead")
   credits            Credit[]
   suggestionsBasedOn Suggestion[] @relation("SuggestionBase")
 
@@ -552,8 +558,10 @@ model Credit {
   id              String      @id @default(cuid())
   storyboardId    String
   storyboard      Storyboard  @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
-  contributorId   String
-  contributor     User        @relation(fields: [contributorId], references: [id])
+  /// Null once erased (decision 0013). The row stays so the contribution is
+  /// still counted and an author's history gains no silent gap.
+  contributorId   String?
+  contributor     User?       @relation(fields: [contributorId], references: [id])
   type            CreditType
   sectionLineage  String?
   revisionId      String?
@@ -564,6 +572,9 @@ model Credit {
   idea            Idea?       @relation(fields: [ideaId], references: [id])
   /// False once the contributed text is no longer in the main draft (FR-8.5).
   isLive          Boolean     @default(true)
+  /// Decision 0013 — when the contributor asked to be unnamed. The row and its
+  /// place in the count survive; the person does not.
+  erasedAt        DateTime?
   /// FR-9.5 — set on credits copied into a spin-off.
   inheritedFromId String?
   inheritedFrom   Credit?     @relation("CreditInheritance", fields: [inheritedFromId], references: [id])

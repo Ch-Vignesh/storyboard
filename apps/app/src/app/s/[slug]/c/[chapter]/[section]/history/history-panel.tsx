@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import { nameOf } from '@/lib/people'
 import { useTRPC } from '@/trpc/client'
 import type { AppRouter } from '@/server/trpc/routers/_app'
 import type { inferRouterOutputs } from '@trpc/server'
@@ -87,12 +88,10 @@ export function HistoryPanel({
                     ) : null}
                   </p>
                   <p className="mt-1 text-[12.5px] text-ink-faint">
-                    {revision.author.displayName ?? revision.author.username ?? 'Unknown'}
+                    {nameOf(revision.author)}
                     {' · '}
                     {SOURCE_LABELS[revision.source]}
-                    {revision.acceptedBy
-                      ? `, accepted by ${revision.acceptedBy.displayName ?? revision.acceptedBy.username}`
-                      : ''}
+                    {revision.acceptedBy ? `, accepted by ${nameOf(revision.acceptedBy)}` : ''}
                     {' · '}
                     <span className="tabular-nums">
                       {revision.wordCount.toLocaleString('en-GB')} words

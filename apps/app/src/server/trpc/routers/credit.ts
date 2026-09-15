@@ -26,6 +26,7 @@ export const creditRouter = createTRPCRouter({
           isLive: true,
           createdAt: true,
           sectionLineage: true,
+          inheritedFromId: true,
           contributor: {
             select: { id: true, username: true, displayName: true, avatarUrl: true },
           },
@@ -33,20 +34,22 @@ export const creditRouter = createTRPCRouter({
       })
 
       // Group by contributor for the strip, keeping the full list for the
-      // credits page (FR-9.2).
+      // credits page (FR-9.2). Erased contributors (decision 0013) are counted
+      // together rather than dropped: the contributions happened.
       const byContributor = new Map<
         string,
         { contributor: (typeof credits)[number]['contributor']; count: number; live: number }
       >()
       for (const credit of credits) {
-        const entry = byContributor.get(credit.contributor.id) ?? {
+        const key = credit.contributor?.id ?? 'erased'
+        const entry = byContributor.get(key) ?? {
           contributor: credit.contributor,
           count: 0,
           live: 0,
         }
         entry.count += 1
         if (credit.isLive) entry.live += 1
-        byContributor.set(credit.contributor.id, entry)
+        byContributor.set(key, entry)
       }
 
       return { credits, contributors: [...byContributor.values()] }

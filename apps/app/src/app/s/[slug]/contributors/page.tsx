@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
+import { hasProfile, nameOf } from '@/lib/people'
 import { caller } from '@/trpc/server'
 
 type Params = { params: Promise<{ slug: string }> }
@@ -16,7 +17,47 @@ const TYPE_LABELS = {
   COAUTHOR: 'co-author',
 } as const
 
-/** Screen 14 — everyone who helped, with what and when (FR-9.2). */
+type Credit = Awaited<ReturnType<typeof caller.credit.forStoryboard>>['credits'][number]
+
+/** One line of the list: who, what, when. Erased people keep their line. */
+function CreditRow({ credit }: { credit: Credit }) {
+  return (
+    <li className="flex items-baseline justify-between gap-4 py-3.5">
+      <div className="min-w-0">
+        <p className="text-[14.5px] text-ink">
+          {hasProfile(credit.contributor) ? (
+            <Link href={`/@${credit.contributor.username}`} className="text-pencil hover:underline">
+              {nameOf(credit.contributor)}
+            </Link>
+          ) : (
+            // Decision 0013 — erased, but still counted. The row stays
+            // so an author's history gains no silent gap.
+            <span className="text-ink-soft italic">{nameOf(credit.contributor)}</span>
+          )}
+          <span className="text-ink-faint"> — {TYPE_LABELS[credit.type]}</span>
+        </p>
+        {/* FR-8.5 / principle 1.3.3 — the record survives the text. */}
+        {!credit.isLive ? (
+          <p className="mt-0.5 text-[12.5px] text-ink-faint">
+            This writing is no longer in the main draft. The contribution stands.
+          </p>
+        ) : null}
+      </div>
+      <time
+        dateTime={credit.createdAt.toISOString()}
+        className="shrink-0 text-[12.5px] text-ink-faint tabular-nums"
+      >
+        {credit.createdAt.toLocaleDateString('en-GB', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        })}
+      </time>
+    </li>
+  )
+}
+
+/** Screen 14 — everyone who helped, with what and when (FR-9.2, FR-9.5). */
 export default async function ContributorsPage({ params }: Params) {
   const { slug } = await params
 
@@ -28,9 +69,15 @@ export default async function ContributorsPage({ params }: Params) {
     throw error
   }
 
-  const { credits, contributors } = await caller.credit.forStoryboard({
-    storyboardId: storyboard.storyboard.id,
-  })
+  const [{ credits, contributors }, lineage] = await Promise.all([
+    caller.credit.forStoryboard({ storyboardId: storyboard.storyboard.id }),
+    caller.spinOff.lineage({ storyboardId: storyboard.storyboard.id }),
+  ])
+
+  // FR-9.5 — what came with the spin-off, above what has been earned since.
+  const inherited = credits.filter((credit) => credit.inheritedFromId !== null)
+  const earned = credits.filter((credit) => credit.inheritedFromId === null)
+  const origin = lineage.ancestors[0]
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
@@ -56,43 +103,67 @@ export default async function ContributorsPage({ params }: Params) {
             contributed to {storyboard.storyboard.title}.
           </p>
 
-          <ul className="mt-8 divide-y divide-rule border-y border-rule">
-            {credits.map((credit) => (
-              <li key={credit.id} className="flex items-baseline justify-between gap-4 py-3.5">
-                <div className="min-w-0">
-                  <p className="text-[14.5px] text-ink">
-                    {credit.contributor.username ? (
-                      <Link
-                        href={`/@${credit.contributor.username}`}
-                        className="text-pencil hover:underline"
-                      >
-                        {credit.contributor.displayName ?? credit.contributor.username}
-                      </Link>
-                    ) : (
-                      (credit.contributor.displayName ?? 'a writer')
-                    )}
-                    <span className="text-ink-faint"> — {TYPE_LABELS[credit.type]}</span>
-                  </p>
-                  {/* FR-8.5 / principle 1.3.3 — the record survives the text. */}
-                  {!credit.isLive ? (
-                    <p className="mt-0.5 text-[12.5px] text-ink-faint">
-                      This writing is no longer in the main draft. The contribution stands.
-                    </p>
-                  ) : null}
-                </div>
-                <time
-                  dateTime={credit.createdAt.toISOString()}
-                  className="shrink-0 text-[12.5px] text-ink-faint tabular-nums"
-                >
-                  {credit.createdAt.toLocaleDateString('en-GB', {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                  })}
-                </time>
-              </li>
-            ))}
-          </ul>
+          {/* FR-9.5 — a spin-off names the storyboard it came from, and its author. */}
+          {inherited.length > 0 && origin ? (
+            <section className="mt-9">
+              <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
+                Inherited from{' '}
+                {origin.hidden || !origin.slug ? (
+                  <span className="normal-case italic">{origin.title}</span>
+                ) : (
+                  <>
+                    <Link
+                      href={`/s/${origin.slug}`}
+                      className="text-pencil normal-case hover:underline"
+                    >
+                      {origin.title}
+                    </Link>{' '}
+                    by {nameOf(origin.owner)}
+                  </>
+                )}
+              </h2>
+              <p className="mt-2 text-[13px] leading-relaxed text-ink-faint">
+                These people wrote before this story was spun off
+                {origin.forkedAt
+                  ? ` on ${origin.forkedAt.toLocaleDateString('en-GB', {
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}`
+                  : ''}
+                . Their credit came with it and cannot be removed here.
+              </p>
+              <ul className="mt-4 divide-y divide-rule border-y border-rule">
+                {inherited.map((credit) => (
+                  <CreditRow key={credit.id} credit={credit} />
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          <section className={inherited.length > 0 && origin ? 'mt-10' : 'mt-8'}>
+            {inherited.length > 0 && origin ? (
+              <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
+                Since then
+              </h2>
+            ) : null}
+
+            {earned.length === 0 ? (
+              <p className="mt-2 text-[13px] leading-relaxed text-ink-faint">
+                Nobody has contributed to this version yet.
+              </p>
+            ) : (
+              <ul
+                className={`divide-y divide-rule border-y border-rule ${
+                  inherited.length > 0 && origin ? 'mt-4' : ''
+                }`}
+              >
+                {earned.map((credit) => (
+                  <CreditRow key={credit.id} credit={credit} />
+                ))}
+              </ul>
+            )}
+          </section>
         </>
       )}
     </main>

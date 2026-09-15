@@ -3,7 +3,7 @@ import type { PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
-import { loadSection, loadStoryboard } from '@/lib/authz/guard'
+import { loadSection, loadStoryboard, loadVersion } from '@/lib/authz/guard'
 import { canReadRevisionAt } from '@/lib/authz'
 
 import { actorFrom, createTRPCRouter, publicProcedure } from '../init'
@@ -89,6 +89,108 @@ export const compareRouter = createTRPCRouter({
         .catch(() => undefined)
 
       return { ...result, cached: false }
+    }),
+
+  /**
+   * FR-7.5's third case: an alternate version against the main draft.
+   *
+   * Architecture section 2.3: outer-join the sections on `lineageId`, then diff
+   * each pair's head revisions. A lineage present on one side only is a section
+   * that was added or removed, not one that changed — which is why the join is
+   * outer and why the result distinguishes them.
+   */
+  versions: publicProcedure
+    .input(z.object({ baseVersionId: z.string().min(1), targetVersionId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session)
+      const base = await loadVersion(ctx.db, actor, input.baseVersionId)
+      const target = await loadVersion(ctx.db, actor, input.targetVersionId)
+
+      if (base.storyboardId !== target.storyboardId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Those versions belong to different storyboards.',
+        })
+      }
+
+      const sectionsOf = (versionId: string) =>
+        ctx.db.section.findMany({
+          where: {
+            chapter: { versionId, deletedAt: null },
+            deletedAt: null,
+            mergedIntoId: null,
+          },
+          orderBy: [{ chapter: { order: 'asc' } }, { order: 'asc' }],
+          select: {
+            id: true,
+            lineageId: true,
+            title: true,
+            wordCount: true,
+            chapter: { select: { title: true, order: true } },
+            currentRevision: { select: { id: true, contentText: true } },
+          },
+        })
+
+      const [left, right] = await Promise.all([
+        sectionsOf(base.versionId),
+        sectionsOf(target.versionId),
+      ])
+
+      const rightByLineage = new Map(right.map((section) => [section.lineageId, section]))
+      const seen = new Set<string>()
+
+      const sections = left.map((leftSection) => {
+        const rightSection = rightByLineage.get(leftSection.lineageId)
+        if (rightSection) seen.add(leftSection.lineageId)
+
+        const identical =
+          rightSection?.currentRevision?.id !== undefined &&
+          rightSection.currentRevision.id === leftSection.currentRevision?.id
+
+        return {
+          lineageId: leftSection.lineageId,
+          title: leftSection.title ?? leftSection.chapter.title,
+          chapterOrder: leftSection.chapter.order,
+          // `identical` is cheap and exact: the two versions share one revision
+          // until somebody edits one of them (decision 0014).
+          state: rightSection
+            ? identical
+              ? ('same' as const)
+              : ('changed' as const)
+            : ('removed' as const),
+          baseRevisionId: leftSection.currentRevision?.id ?? null,
+          targetRevisionId: rightSection?.currentRevision?.id ?? null,
+          baseWords: leftSection.wordCount,
+          targetWords: rightSection?.wordCount ?? 0,
+        }
+      })
+
+      const added = right
+        .filter((section) => !seen.has(section.lineageId))
+        .map((section) => ({
+          lineageId: section.lineageId,
+          title: section.title ?? section.chapter.title,
+          chapterOrder: section.chapter.order,
+          state: 'added' as const,
+          baseRevisionId: null,
+          targetRevisionId: section.currentRevision?.id ?? null,
+          baseWords: 0,
+          targetWords: section.wordCount,
+        }))
+
+      const rows = [...sections, ...added].sort((a, b) => a.chapterOrder - b.chapterOrder)
+
+      return {
+        base: { id: base.versionId, isMain: base.isMain },
+        target: { id: target.versionId, isMain: target.isMain },
+        rows,
+        stats: {
+          same: rows.filter((row) => row.state === 'same').length,
+          changed: rows.filter((row) => row.state === 'changed').length,
+          added: rows.filter((row) => row.state === 'added').length,
+          removed: rows.filter((row) => row.state === 'removed').length,
+        },
+      }
     }),
 
   /**

@@ -46,7 +46,9 @@ export default async function StoryboardSettingsPage({ params }: Params) {
         rightsNote={data.storyboard.rightsNote}
         visibility={data.storyboard.visibility}
         publicFrom={data.storyboard.publicFrom}
-        contributors={impact.contributors}
+        // An erased contributor has no name to show in the confirmation, so
+        // they are not listed — but they are still counted by the credits page.
+        contributors={impact.contributors.filter((person) => person !== null)}
       />
     </main>
   )

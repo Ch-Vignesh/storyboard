@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
+import { logger } from '@/lib/logger'
 import { activityCalendar } from '@/server/activity'
 
 import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
@@ -17,6 +18,8 @@ import { actorFrom, createTRPCRouter, protectedProcedure, publicProcedure } from
  * public would make being passed on feel punitive, which is the opposite of
  * what FR-6.10's "information, not a verdict" is trying to achieve.
  */
+const log = logger.child({ router: 'profile' })
+
 export const profileRouter = createTRPCRouter({
   byUsername: publicProcedure
     .input(z.object({ username: z.string().min(1).max(30) }))
@@ -161,6 +164,68 @@ export const profileRouter = createTRPCRouter({
         select: { showPassedWork: true },
       }),
     ),
+
+  /**
+   * Decision 0013 (OD-3) — erase a contribution record.
+   *
+   * The person goes; the writing stays. The prose was accepted into somebody
+   * else's manuscript and is theirs now (FR-8.1 records both halves of that),
+   * so removing it would let one person silently alter another's draft months
+   * later. What is erased is the personal data: the name, the link, and the
+   * entry on this profile.
+   *
+   * One-way, and the interface says so before it is done.
+   */
+  eraseContribution: protectedProcedure
+    .input(z.object({ creditId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id
+
+      const credit = await ctx.db.credit.findUnique({
+        where: { id: input.creditId },
+        select: { id: true, contributorId: true, revisionId: true, erasedAt: true },
+      })
+      if (credit?.contributorId !== userId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'That contribution does not exist.' })
+      }
+      if (credit.erasedAt) return { creditId: credit.id, alreadyErased: true }
+
+      // Inherited copies in spin-offs are the same contribution (FR-9.5), so
+      // they are erased together. Anything else would leave the name standing
+      // in a copy of the storyboard the person has never seen.
+      const inherited = await ctx.db.credit.findMany({
+        where: { inheritedFromId: credit.id },
+        select: { id: true, revisionId: true },
+      })
+      const creditIds = [credit.id, ...inherited.map((entry) => entry.id)]
+      const revisionIds = [credit.revisionId, ...inherited.map((entry) => entry.revisionId)].filter(
+        (id): id is string => id !== null,
+      )
+
+      const now = new Date()
+      await ctx.db.$transaction(async (tx) => {
+        await tx.credit.updateMany({
+          where: { id: { in: creditIds } },
+          data: { contributorId: null, erasedAt: now },
+        })
+
+        if (revisionIds.length > 0) {
+          // NFR-3 permits exactly this and nothing else; the trigger checks
+          // every other column itself (decision 0013).
+          await tx.$executeRawUnsafe("select set_config('storyboard.erase_authorship', 'on', true)")
+          await tx.revision.updateMany({
+            where: { id: { in: revisionIds }, authorId: userId },
+            data: { authorId: null },
+          })
+        }
+      })
+
+      log.info(
+        { event: 'credit.erased', creditId: credit.id, copies: inherited.length },
+        'contribution record erased',
+      )
+      return { creditId: credit.id, alreadyErased: false }
+    }),
 
   /**
    * FR-9.6 — a credit line as plain text, for a manuscript's front matter.

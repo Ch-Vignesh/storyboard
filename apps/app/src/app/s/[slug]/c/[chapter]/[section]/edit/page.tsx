@@ -8,7 +8,10 @@ import { caller } from '@/trpc/server'
 
 import { locate } from '../locate'
 
-type Params = { params: Promise<{ slug: string; chapter: string; section: string }> }
+type Params = {
+  params: Promise<{ slug: string; chapter: string; section: string }>
+  searchParams?: Promise<{ version?: string }>
+}
 
 export const metadata: Metadata = { title: 'Editing' }
 
@@ -16,14 +19,19 @@ export const metadata: Metadata = { title: 'Editing' }
  * Screen 6 — the section editor. Distraction-free: no application chrome, the
  * manuscript measure, and the four-item toolbar FR-4.6 allows.
  */
-export default async function EditSectionPage({ params }: Params) {
+export default async function EditSectionPage({ params, searchParams }: Params) {
   const { slug, chapter: chapterNo, section: sectionNo } = await params
-  const located = await locate(slug, chapterNo, sectionNo)
+  const { version } = (await searchParams) ?? {}
+  const located = await locate(slug, chapterNo, sectionNo, version)
+
+  // Carried on every link out of here, so a writer stays in the draft they
+  // opened rather than being returned to the main one.
+  const suffix = located.version.isMain ? '' : `?version=${encodeURIComponent(located.version.id)}`
 
   const detail = await caller.section.get({ sectionId: located.section.id })
   if (!detail.permissions.canEdit && !detail.permissions.canSubmitSuggestion) notFound()
 
-  const returnHref = `/s/${slug}`
+  const returnHref = `/s/${slug}${suffix}`
   // FR-4.4 — a draft outranks the saved text: it is what this person was last
   // writing, and losing it on reload is the failure autosave exists to prevent.
   const initialContent = detail.draft?.contentJson ?? detail.section.currentRevision?.contentJson
@@ -42,7 +50,7 @@ export default async function EditSectionPage({ params }: Params) {
         <span>{located.section.title ?? `Section ${located.sectionNumber}`}</span>
         <span aria-hidden> · </span>
         <Link
-          href={`/s/${slug}/c/${chapterNo}/${sectionNo}/history`}
+          href={`/s/${slug}/c/${chapterNo}/${sectionNo}/history${suffix}`}
           className="hover:text-ink hover:underline"
         >
           History
