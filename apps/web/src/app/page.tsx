@@ -16,6 +16,7 @@ import {
   Stitch,
   Transpose,
 } from './marks'
+import { Motion } from './motion'
 import { Specimen } from './specimen'
 
 /**
@@ -40,6 +41,10 @@ export default function HomePage() {
 
   return (
     <>
+      {/* Renders nothing. Drives the scroll effects only where the browser
+          cannot do them in CSS — see motion.tsx. */}
+      <Motion />
+
       {/* A pencil rule drawn across the top as the page is read. */}
       <div className="progress pointer-events-none fixed inset-x-0 top-0 z-20 h-0.5 origin-left scale-x-0 bg-pencil" />
 

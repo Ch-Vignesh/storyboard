@@ -96,15 +96,24 @@ body {
 /*
  * Motion, all of it scroll-linked and none of it on the main thread.
  *
- * Two rules hold throughout. **Text never changes opacity**, so every word on
- * the page is at full contrast at every point of every animation — in a link
- * preview, in a screenshot, to somebody who stopped scrolling halfway, and in
- * browsers with no scroll-timeline support. Only decoration is allowed to fade.
+ * Two rules hold throughout.
  *
- * And parallax only moves decoration, never a word somebody is trying to read:
- * body copy that slides is harder to read and can make people motion-sick. The
- * one thing that moves under text is the text block itself, once, by 14px, as
- * it arrives.
+ * **Nothing ever sits at zero.** A reveal starts at 0.2 and a decoration never
+ * disappears, so the page is legible at rest — in a link preview, a screenshot,
+ * or a browser that stops the animation halfway. This page is not held to the
+ * application's contrast standard, which is what lets the fade be a real fade;
+ * `apps/app` shares none of these classes and keeps its axe suite.
+ *
+ * **Parallax moves decoration, not words.** Body copy that slides while being
+ * read is harder to read and can make people motion-sick. Text blocks move once
+ * on arrival and then hold still; only the marks, the ruled paper and the
+ * margin keep moving with the scroll.
+ *
+ * And all of it stops dead under `prefers-reduced-motion`. That guard is not a
+ * checklist item — for some people this kind of movement causes actual nausea,
+ * and Windows turns the preference on whenever "Animation effects" is off,
+ * which is also the most common reason somebody reports seeing no effects at
+ * all. `motion.tsx` says the same thing in the fallback.
  */
 @media (prefers-reduced-motion: no-preference) {
   @supports (animation-timeline: view()) {
@@ -185,6 +194,27 @@ body {
     }
   }
 
+  /*
+   * The same reveal, for browsers with no scroll-driven animations — Firefox
+   * and older Safari, where everything above simply never runs.
+   *
+   * Gated on `js-motion`, which `motion.tsx` puts on the root element once it
+   * has decided to take over. Without JavaScript the class never appears, the
+   * resting state never applies, and the page renders complete rather than
+   * permanently faded — which is the failure mode of every "animate on scroll"
+   * library that forgets this.
+   */
+  .js-motion :is(.rise, .rise-left, .rise-right) {
+    opacity: 0.2;
+    transform: translateY(34px) scale(0.985);
+  }
+  .js-motion :is(.rise, .rise-left, .rise-right).is-in {
+    animation: rise 760ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  .js-motion .rise-right.is-in {
+    animation-delay: 110ms;
+  }
+
   @supports (animation-timeline: scroll()) {
     .progress {
       animation: fill linear both;
@@ -193,82 +223,84 @@ body {
     .ruling {
       animation: drift-slow linear both;
       animation-timeline: scroll(root block);
-      animation-range: 0 60rem;
+      animation-range: 0 48rem;
       will-change: transform;
     }
   }
 }
 
 /*
- * The reveal moves; it does not fade.
+ * The reveal. Rises, fades up and settles.
  *
- * It used to start at `opacity: 0.35`, on the reasoning that nothing should
- * ever sit at zero. That was the right instinct and the wrong number: 0.35
- * takes body text to about 1.6:1 against paper, so everything below the fold
- * was parked at a contrast that fails WCAG 1.4.3 until somebody scrolled to it.
- * An axe pass over the page found it on nine elements at once, all of them the
- * same cause — which is the tell that it was one decision rather than nine
- * mistakes.
+ * It fades again, and the history is worth keeping: it started at 0.35, which
+ * took body text to roughly 1.6:1 against paper — so an axe pass flagged nine
+ * elements at once. It was then made translate-only, which was correct by the
+ * contrast standard and so subtle that the effect could not be seen at all.
  *
- * Translating alone still reads as arriving, and text is legible at every point
- * in the animation, in a screenshot, in a link preview, and to somebody who
- * stops scrolling halfway. The movement is a little larger than it was to make
- * up for the fade that is gone.
+ * This is the third answer and the deliberate one: the marketing page is not
+ * held to the application's contrast standard, so the fade is back and larger,
+ * and the movement with it. `apps/app` is unaffected — none of these classes
+ * exist there, and its axe suite still runs on every commit.
+ *
+ * It starts at 0.2 rather than 0 so the page is never blank in a link preview,
+ * a screenshot or a browser that stops the animation halfway.
  */
 @keyframes rise {
   from {
-    transform: translateY(14px);
+    opacity: 0.2;
+    transform: translateY(34px) scale(0.985);
   }
   to {
+    opacity: 1;
     transform: none;
   }
 }
 @keyframes drift {
   from {
-    transform: translateY(-10px);
+    transform: translateY(-24px);
   }
   to {
-    transform: translateY(10px);
+    transform: translateY(24px);
   }
 }
 @keyframes drift-slow {
   from {
-    transform: translateY(-16px);
+    transform: translateY(-40px);
   }
   to {
-    transform: translateY(16px);
+    transform: translateY(40px);
   }
 }
 @keyframes drift-tiny {
   from {
-    transform: translateY(-4px);
+    transform: translateY(-11px);
   }
   to {
-    transform: translateY(4px);
+    transform: translateY(11px);
   }
 }
 @keyframes drift-far {
   from {
-    transform: translateY(-26px);
+    transform: translateY(-62px) rotate(-4deg);
   }
   to {
-    transform: translateY(26px);
+    transform: translateY(62px) rotate(4deg);
   }
 }
 @keyframes sway {
   from {
-    transform: translateX(-9px);
+    transform: translateX(-22px) rotate(-5deg);
   }
   to {
-    transform: translateX(9px);
+    transform: translateX(22px) rotate(5deg);
   }
 }
 @keyframes tilt {
   from {
-    transform: rotate(-5deg) translateY(-4px);
+    transform: rotate(-12deg) translateY(-10px);
   }
   to {
-    transform: rotate(3deg) translateY(4px);
+    transform: rotate(8deg) translateY(10px);
   }
 }
 @keyframes draw {
