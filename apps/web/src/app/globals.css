@@ -96,11 +96,15 @@ body {
 /*
  * Motion, all of it scroll-linked and none of it on the main thread.
  *
- * Two rules hold throughout. Nothing ever sits at opacity 0 — a reveal starts
- * at 0.35 — so the page is readable at rest, in a link preview, and in browsers
- * with no scroll-timeline support. And parallax only moves decoration, never a
- * word somebody is trying to read: body copy that slides is harder to read and
- * can make people motion-sick.
+ * Two rules hold throughout. **Text never changes opacity**, so every word on
+ * the page is at full contrast at every point of every animation — in a link
+ * preview, in a screenshot, to somebody who stopped scrolling halfway, and in
+ * browsers with no scroll-timeline support. Only decoration is allowed to fade.
+ *
+ * And parallax only moves decoration, never a word somebody is trying to read:
+ * body copy that slides is harder to read and can make people motion-sick. The
+ * one thing that moves under text is the text block itself, once, by 14px, as
+ * it arrives.
  */
 @media (prefers-reduced-motion: no-preference) {
   @supports (animation-timeline: view()) {
@@ -134,6 +138,51 @@ body {
       animation-timeline: view();
       animation-range: cover;
     }
+
+    /*
+     * The far layer. Parallax is only parallax when things move at different
+     * rates, so the decoration furthest from the text moves most — and it is
+     * the only layer allowed to, because it is the only one nobody is reading.
+     */
+    .drift-far {
+      animation: drift-far linear both;
+      animation-timeline: view();
+      animation-range: cover;
+      will-change: transform;
+    }
+
+    /* Sideways, for the marks that sit in a margin rather than behind text. */
+    .sway {
+      animation: sway linear both;
+      animation-timeline: view();
+      animation-range: cover;
+    }
+
+    /*
+     * A page corner turning. The only motion here that changes a shape rather
+     * than moving one, so it is used exactly once.
+     */
+    .tilt {
+      animation: tilt linear both;
+      animation-timeline: view();
+      animation-range: cover;
+      transform-origin: 100% 0%;
+    }
+
+    /*
+     * A proof mark writing itself as it comes into view.
+     *
+     * The dash length is larger than any path in `marks.tsx`, so one value
+     * covers all of them and no path needs a `pathLength`. Circles are left
+     * alone deliberately: the stet dots should already be there, because in the
+     * notation the dots are the instruction and the line is what they act on.
+     */
+    .draw path {
+      stroke-dasharray: 240;
+      animation: draw linear both;
+      animation-timeline: view();
+      animation-range: entry 8% cover 38%;
+    }
   }
 
   @supports (animation-timeline: scroll()) {
@@ -150,13 +199,27 @@ body {
   }
 }
 
+/*
+ * The reveal moves; it does not fade.
+ *
+ * It used to start at `opacity: 0.35`, on the reasoning that nothing should
+ * ever sit at zero. That was the right instinct and the wrong number: 0.35
+ * takes body text to about 1.6:1 against paper, so everything below the fold
+ * was parked at a contrast that fails WCAG 1.4.3 until somebody scrolled to it.
+ * An axe pass over the page found it on nine elements at once, all of them the
+ * same cause — which is the tell that it was one decision rather than nine
+ * mistakes.
+ *
+ * Translating alone still reads as arriving, and text is legible at every point
+ * in the animation, in a screenshot, in a link preview, and to somebody who
+ * stops scrolling halfway. The movement is a little larger than it was to make
+ * up for the fade that is gone.
+ */
 @keyframes rise {
   from {
-    opacity: 0.35;
-    transform: translateY(10px);
+    transform: translateY(14px);
   }
   to {
-    opacity: 1;
     transform: none;
   }
 }
@@ -182,6 +245,38 @@ body {
   }
   to {
     transform: translateY(4px);
+  }
+}
+@keyframes drift-far {
+  from {
+    transform: translateY(-26px);
+  }
+  to {
+    transform: translateY(26px);
+  }
+}
+@keyframes sway {
+  from {
+    transform: translateX(-9px);
+  }
+  to {
+    transform: translateX(9px);
+  }
+}
+@keyframes tilt {
+  from {
+    transform: rotate(-5deg) translateY(-4px);
+  }
+  to {
+    transform: rotate(3deg) translateY(4px);
+  }
+}
+@keyframes draw {
+  from {
+    stroke-dashoffset: 240;
+  }
+  to {
+    stroke-dashoffset: 0;
   }
 }
 @keyframes fill {

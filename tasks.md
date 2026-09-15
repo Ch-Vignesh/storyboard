@@ -13,8 +13,9 @@ something that is not code.
 
 | What                        | State                    | Note                                                                   |
 | --------------------------- | ------------------------ | ---------------------------------------------------------------------- |
-| Phase 9                     | done, uncommitted        | Deletion, `.epub`, Upstash, the CSP, Google sign-in, the age gate gone |
+| Phase 9                     | committed, not pushed    | Deletion, `.epub`, Upstash, the CSP, Google sign-in, the age gate gone |
 | Phase 8 — the accounts half | blocked, and not on code | Five accounts. Follow `docs/05-deployment.md` in order                 |
+| Promotion page              | done, uncommitted        | Proof-mark clip art, parallax layers, an axe pass over apps/web        |
 | Phase 10                    | deliberately unplanned   | Drawn from real use, when there is some                                |
 
 ## Blocked, and not on code

@@ -2,6 +2,20 @@ import { Button } from '@storyboard/ui/components/button'
 
 import { ContentsRail } from './contents-rail'
 import { EXAMPLES, EXAMPLE_STORYBOARDS } from './example'
+import {
+  Caret,
+  CoffeeRing,
+  Delete,
+  Nib,
+  PageCorner,
+  Paperclip,
+  Pilcrow,
+  PunchHoles,
+  Ribbon,
+  Stet,
+  Stitch,
+  Transpose,
+} from './marks'
 import { Specimen } from './specimen'
 
 /**
@@ -29,7 +43,26 @@ export default function HomePage() {
       {/* A pencil rule drawn across the top as the page is read. */}
       <div className="progress pointer-events-none fixed inset-x-0 top-0 z-20 h-0.5 origin-left scale-x-0 bg-pencil" />
 
-      <div className="mx-auto max-w-[68rem] px-5">
+      {/* The corner of the sheet, turning slowly as the page is read. Fixed to
+          the viewport rather than the document so it stays a property of the
+          paper rather than of the scroll position. */}
+      <PageCorner className="tilt pointer-events-none fixed top-0 right-0 z-0 hidden size-14 text-ink-faint/60 md:block" />
+
+      {/*
+        `overflow-x: clip`, not `hidden`.
+        The ruled backdrop behind the hero deliberately runs past the measure on
+        both sides, which on a phone put 12px of the page outside the viewport
+        and gave the whole document a sideways scroll. `clip` trims it without
+        creating a scroll container — which `overflow: hidden` would, and that
+        would silently break the `sticky` contents rail and margin notes inside.
+      */}
+      <div className="relative mx-auto max-w-[68rem] overflow-x-clip px-5">
+        {/* Punched holes down the outside edge of the sheet, where a loose-leaf
+            draft has them. Outside the measure entirely and only where there is
+            real room for them, because at the rail's edge they read as specks
+            of dirt rather than as holes. */}
+        <PunchHoles className="drift pointer-events-none absolute top-44 -left-9 hidden w-4 text-ink-faint/35 2xl:block" />
+
         <header className="flex items-baseline justify-between gap-6 pt-6">
           <span className="font-manuscript text-[20px] font-medium tracking-tight text-ink">
             Storyboard
@@ -59,12 +92,24 @@ export default function HomePage() {
                 aria-hidden
                 className="ruling pointer-events-none absolute -inset-x-8 -top-12 z-0 h-88"
               />
+              {/* The red rule down the left of every exercise book ever ruled.
+                  Ochre here, because ochre is what a stuck point is coloured
+                  everywhere else in the product. */}
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -top-12 -left-8 z-0 hidden h-88 w-px bg-ochre/25 sm:block"
+              />
 
               <div className="relative z-1">
                 <h1 className="max-w-[15ch] font-manuscript text-[clamp(2.4rem,6.6vw,3.7rem)] leading-[1.05] font-medium tracking-[-0.015em] text-balance text-ink">
                   Stuck on chapter four? Ask a writer.
                 </h1>
-                <p className="mt-5 max-w-[42ch] text-[17px] leading-relaxed text-ink-soft">
+                {/* The insert mark, under the headline, drawing itself as the
+                    page is read. It is the product's own notation: a caret is
+                    where something is missing and prose has to go. */}
+                <Caret className="draw mt-4 w-7 text-ochre" />
+
+                <p className="mt-3 max-w-[42ch] text-[17px] leading-relaxed text-ink-soft">
                   Post the passage you cannot get past. Other writers propose prose for exactly that
                   spot. You accept the one that fits — and their name stays on it for good.
                 </p>
@@ -78,12 +123,24 @@ export default function HomePage() {
                   </Button>
                 </div>
 
-                <Specimen examples={EXAMPLES} />
+                {/* Clipped to the page. The one small lie that the thing below
+                    is a sheet rather than a division of a document. */}
+                <div className="relative">
+                  <Paperclip className="pointer-events-none absolute -top-3 right-6 z-2 hidden w-6 -rotate-12 text-ink-faint/70 sm:block" />
+                  <Specimen examples={EXAMPLES} />
+                </div>
               </div>
             </section>
 
+            <Stitch className="h-2 w-full text-rule" />
+
             {/* ── 1 */}
-            <Section id="what" number="One" eyebrow="what it is">
+            <Section
+              id="what"
+              number="One"
+              eyebrow="what it is"
+              mark={<Pilcrow className="draw w-4" />}
+            >
               <h2 className="font-manuscript text-[clamp(1.55rem,3.4vw,2.05rem)] leading-tight font-medium text-balance text-ink">
                 A workshop for one passage at a time
               </h2>
@@ -101,7 +158,12 @@ export default function HomePage() {
             </Section>
 
             {/* ── 2 */}
-            <Section id="how" number="Two" eyebrow="how you use it">
+            <Section
+              id="how"
+              number="Two"
+              eyebrow="how you use it"
+              mark={<Caret className="draw w-6" />}
+            >
               <h2 className="font-manuscript text-[clamp(1.55rem,3.4vw,2.05rem)] leading-tight font-medium text-balance text-ink">
                 Four steps, and you can stop after any of them
               </h2>
@@ -185,7 +247,12 @@ export default function HomePage() {
             </Section>
 
             {/* ── 5 */}
-            <Section id="credit" number="Five" eyebrow="about credit">
+            <Section
+              id="credit"
+              number="Five"
+              eyebrow="about credit"
+              mark={<Stet className="w-9" />}
+            >
               <h2 className="font-manuscript text-[clamp(1.55rem,3.4vw,2.05rem)] leading-tight font-medium text-balance text-ink">
                 Credit is permanent, and it travels
               </h2>
@@ -223,7 +290,12 @@ export default function HomePage() {
             </Section>
 
             {/* ── 6 */}
-            <Section id="inout" number="Six" eyebrow="in and out">
+            <Section
+              id="inout"
+              number="Six"
+              eyebrow="in and out"
+              mark={<Transpose className="draw w-9" />}
+            >
               <h2 className="font-manuscript text-[clamp(1.55rem,3.4vw,2.05rem)] leading-tight font-medium text-balance text-ink">
                 It is your manuscript, arriving and leaving
               </h2>
@@ -255,7 +327,16 @@ export default function HomePage() {
             </Section>
 
             {/* ── 7 */}
-            <Section id="honest" number="Seven" eyebrow="the honest part">
+            <Section
+              id="honest"
+              number="Seven"
+              eyebrow="the honest part"
+              mark={<Delete className="draw w-11" />}
+            >
+              {/* Cold coffee. Behind the one section that admits what the
+                  product cannot do, because that is the section somebody wrote
+                  at two in the morning. */}
+              <CoffeeRing className="drift-far pointer-events-none absolute -top-2 right-2 -z-1 w-40 text-ochre/25" />
               <h2 className="font-manuscript text-[clamp(1.55rem,3.4vw,2.05rem)] leading-tight font-medium text-balance text-ink">
                 What we cannot do
               </h2>
@@ -305,7 +386,13 @@ export default function HomePage() {
               </ul>
             </Section>
 
-            <section id="start" className="rise border-t border-rule py-14 lg:py-20">
+            <section id="start" className="rise relative border-t border-rule py-14 lg:py-20">
+              {/* The marker ribbon, where a reader would leave one: at the end
+                  of what they have read so far. */}
+              <Ribbon className="pointer-events-none absolute -top-px right-8 hidden w-4 text-pencil sm:block" />
+              {/* And a nib put down beside the last thing on the page, which is
+                  the only place on it where somebody is being asked to write. */}
+              <Nib className="sway pointer-events-none absolute top-24 -left-16 hidden w-5 rotate-12 text-ink-faint/50 xl:block" />
               <div className="flex flex-col gap-4">
                 <h2 className="font-manuscript text-[clamp(1.55rem,3.4vw,2.05rem)] leading-tight font-medium text-balance text-ink">
                   Bring the chapter you are stuck on
@@ -325,7 +412,10 @@ export default function HomePage() {
           </main>
 
           {/* ── The margin. Decorative drift only; the text never moves. */}
-          <aside aria-label="Notes" className="mt-6 lg:sticky lg:top-10 lg:mt-0">
+          <aside aria-label="Notes" className="relative mt-6 lg:sticky lg:top-10 lg:mt-0">
+            {/* A transpose mark loose in the margin, at the angle a hand makes
+                rather than the angle a grid does. */}
+            <Transpose className="sway pointer-events-none absolute -top-8 right-2 hidden w-8 -rotate-6 text-ink-faint/40 lg:block" />
             <div className="drift">
               <Note title="In the margin">
                 This is where open requests sit when you read somebody&rsquo;s manuscript — beside
@@ -375,15 +465,32 @@ function Section({
   id,
   number,
   eyebrow,
+  mark,
   children,
 }: {
   id: string
   number: string
   eyebrow: string
+  /**
+   * The proof mark for this section, chosen for what the mark *means* rather
+   * than for variety: a pilcrow where a new thing begins, a caret where prose
+   * is inserted, stet where an author declines one, transpose where work moves
+   * in and out. A reader who knows the notation gets a second reading of the
+   * page; one who does not sees marginalia, which is the right first reading.
+   */
+  mark?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
-    <section id={id} className="rise border-t border-rule py-14 lg:py-20">
+    <section id={id} className="rise relative border-t border-rule py-14 lg:py-20">
+      {mark ? (
+        <div
+          aria-hidden
+          className="sway pointer-events-none absolute top-12 -left-14 hidden text-ink-faint/60 xl:block"
+        >
+          {mark}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-4">
         <p className="text-[10.5px] tracking-[0.09em] text-ink-faint uppercase">
           {number ? `${number} — ` : ''}
