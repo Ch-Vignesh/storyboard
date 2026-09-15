@@ -1,1 +1,269 @@
 @import '@storyboard/ui/globals.css';
+
+/*
+ * Marketing-only additions.
+ *
+ * Two things live here rather than in `packages/ui`, and deliberately:
+ *
+ * 1. **A dark theme.** The application is paper-and-ink and has no dark mode —
+ *    the paper surface is the product's identity (see the note at the top of
+ *    the shared theme). The marketing site is read once, often at night, often
+ *    on a phone, by somebody who has not decided to care about us yet, and a
+ *    page that ignores their system setting reads as careless. So the dark
+ *    palette is scoped to this app. It is not an inversion: the ground moves to
+ *    a blue-black that shares the ink's hue, and every working colour is
+ *    re-mixed so it keeps its meaning — pencil still reads as a link, ochre
+ *    still reads as a stuck point, moss still reads as accepted.
+ *
+ * 2. **Scroll-linked motion**, which no other surface in the product uses.
+ *
+ * Nothing here is imported by `apps/app`.
+ */
+
+@theme {
+  --color-surface: var(--color-white);
+  --color-rule-soft: #ebece6;
+  --color-pencil-fg: var(--color-white);
+  --color-ochre-edge: rgb(168 87 27 / 0.45);
+  --color-moss-edge: rgb(46 107 79 / 0.5);
+  --color-grain: rgb(17 32 43 / 0.022);
+}
+
+/*
+ * The three states a viewer can be in, not two: an explicit choice stamps the
+ * root element, and the default system setting stamps nothing — so the media
+ * query has to carry the un-stamped case, guarded so an explicit light choice
+ * still beats a dark operating system.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-paper: #0f171d;
+    --color-paper-sunk: #151f27;
+    --color-surface: #15202a;
+    --color-ink: #e9ebe6;
+    --color-ink-soft: #a4b1ba;
+    --color-ink-faint: #6f7e89;
+    --color-rule: #26343f;
+    --color-rule-soft: #1d2933;
+    --color-pencil: #86aee4;
+    --color-pencil-deep: #a3c3ee;
+    --color-pencil-wash: #16283c;
+    --color-pencil-fg: #0b1219;
+    --color-ochre: #dd9558;
+    --color-ochre-wash: #261a11;
+    --color-ochre-edge: rgb(221 149 88 / 0.5);
+    --color-moss: #74bb98;
+    --color-moss-wash: #12251d;
+    --color-moss-edge: rgb(116 187 152 / 0.55);
+    --color-grain: rgb(233 235 230 / 0.03);
+  }
+}
+
+:root[data-theme='dark'] {
+  --color-paper: #0f171d;
+  --color-paper-sunk: #151f27;
+  --color-surface: #15202a;
+  --color-ink: #e9ebe6;
+  --color-ink-soft: #a4b1ba;
+  --color-ink-faint: #6f7e89;
+  --color-rule: #26343f;
+  --color-rule-soft: #1d2933;
+  --color-pencil: #86aee4;
+  --color-pencil-deep: #a3c3ee;
+  --color-pencil-wash: #16283c;
+  --color-pencil-fg: #0b1219;
+  --color-ochre: #dd9558;
+  --color-ochre-wash: #261a11;
+  --color-ochre-edge: rgb(221 149 88 / 0.5);
+  --color-moss: #74bb98;
+  --color-moss-wash: #12251d;
+  --color-moss-edge: rgb(116 187 152 / 0.55);
+  --color-grain: rgb(233 235 230 / 0.03);
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  /* The faintest grain, so the ground reads as stock rather than as #fff. */
+  background-image: radial-gradient(circle at 1px 1px, var(--color-grain) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+/*
+ * Motion, all of it scroll-linked and none of it on the main thread.
+ *
+ * Two rules hold throughout. Nothing ever sits at opacity 0 — a reveal starts
+ * at 0.35 — so the page is readable at rest, in a link preview, and in browsers
+ * with no scroll-timeline support. And parallax only moves decoration, never a
+ * word somebody is trying to read: body copy that slides is harder to read and
+ * can make people motion-sick.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .rise {
+      animation: rise linear both;
+      animation-timeline: view();
+      animation-range: entry 6% cover 24%;
+    }
+
+    /* The halves of a specimen arrive a beat apart, left then right, which is
+       the order they are read in. */
+    .rise-left {
+      animation: rise linear both;
+      animation-timeline: view();
+      animation-range: entry 4% cover 20%;
+    }
+    .rise-right {
+      animation: rise linear both;
+      animation-timeline: view();
+      animation-range: entry 12% cover 30%;
+    }
+
+    .drift {
+      animation: drift linear both;
+      animation-timeline: view();
+      animation-range: cover;
+      will-change: transform;
+    }
+    .drift-tiny {
+      animation: drift-tiny linear both;
+      animation-timeline: view();
+      animation-range: cover;
+    }
+  }
+
+  @supports (animation-timeline: scroll()) {
+    .progress {
+      animation: fill linear both;
+      animation-timeline: scroll(root block);
+    }
+    .ruling {
+      animation: drift-slow linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 60rem;
+      will-change: transform;
+    }
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0.35;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes drift {
+  from {
+    transform: translateY(-10px);
+  }
+  to {
+    transform: translateY(10px);
+  }
+}
+@keyframes drift-slow {
+  from {
+    transform: translateY(-16px);
+  }
+  to {
+    transform: translateY(16px);
+  }
+}
+@keyframes drift-tiny {
+  from {
+    transform: translateY(-4px);
+  }
+  to {
+    transform: translateY(4px);
+  }
+}
+@keyframes fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 2rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .progress {
+    display: none;
+  }
+}
+
+/* The ruled lines behind the hero: a page set up to be written on. */
+.ruling {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2.35rem,
+    var(--color-rule-soft) 2.35rem,
+    var(--color-rule-soft) calc(2.35rem + 1px)
+  );
+  mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.5), transparent 78%);
+  -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.5), transparent 78%);
+}
+
+/*
+ * The example switcher, with no JavaScript.
+ *
+ * A radio group and `:has()`. The radio gives keyboard arrows, a real group
+ * role and a focus ring for free; `:has()` does the showing. The whole widget
+ * works before hydration, with scripting off, and costs the page nothing to
+ * download — which matters more on the one screen a stranger decides on than
+ * anywhere else in the product.
+ */
+.example-panel {
+  display: none;
+}
+
+.examples:has(#example-austen:checked) .example-panel[data-example='austen'],
+.examples:has(#example-conrad:checked) .example-panel[data-example='conrad'],
+.examples:has(#example-chopin:checked) .example-panel[data-example='chopin'] {
+  display: grid;
+}
+
+/* The checked tab, and a focus ring that follows the hidden input. */
+.example-tab:has(input:checked) {
+  border-color: var(--color-pencil);
+  background-color: var(--color-pencil-wash);
+  color: var(--color-ink);
+}
+
+.example-tab:has(input:focus-visible) {
+  outline: 2px solid var(--color-pencil);
+  outline-offset: 3px;
+}
+
+/*
+ * Without `:has()` every panel would be hidden and the hero would lose its
+ * point, so the first one is shown unconditionally and the rest stay hidden —
+ * one example is a worse page than three, and far better than none.
+ */
+@supports not selector(:has(*)) {
+  .example-panel[data-example='austen'] {
+    display: grid;
+  }
+}

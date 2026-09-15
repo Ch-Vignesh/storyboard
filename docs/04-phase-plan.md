@@ -14,25 +14,28 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase**        | 7 — Launch                                                                                                                                                                                                                                                                                                                                                |
-| **State**        | Phases 0–6 are pushed (`b1d1c60`, including the post-phase-6 audit). Phase 7 is code complete and verified locally; its exit criterion passes end to end. Two tasks are blocked on hosting accounts and are marked so. Not committed — the user reviews first.                                                                                            |
-| **Last updated** | 2026-09-15                                                                                                                                                                                                                                                                                                                                                |
-| **Next actions** | 1. Review and commit Phase 7. 2. Set up the hosting accounts the last two tasks need: Neon, an R2 bucket, the two Vercel projects, and a Cron entry per job in decision 0012 (`immediate`, `hourly`, `weekly`, `nudge`, `prune`, `purge`). 3. Check the seeded excerpts against their Gutenberg editions before the traffic post — see the Phase 7 notes. |
+|                  |                                                                                                                                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 8 — Into the world (nothing started; every task needs an account first)                                                                                                                                                                  |
+| **State**        | All seven phases are pushed (`97f7a47`). The marketing page has been rebuilt to seven sections with a dark theme — uncommitted. Phases 8 to 10 are drafted below. `tasks.md` at the repository root is the short version of all of this. |
+| **Last updated** | 2026-09-15                                                                                                                                                                                                                               |
+| **Next actions** | 1. Review and commit the marketing page. 2. Start Phase 8 by opening the accounts it lists — Neon, Cloudflare R2, two Vercel projects, Resend. Nothing else in the plan can move until those exist.                                      |
 
 ## Overview
 
-| Phase | Name                   | Requirements                                                                          | Estimate  | Status                               |
-| ----- | ---------------------- | ------------------------------------------------------------------------------------- | --------- | ------------------------------------ |
-| 0     | Foundations            | FR-1.3 (steps 1–2), FR-1.4, FR-1.6, NFR-3, NFR-8, NFR-9                               | 1 week    | `[x]` complete, CI green 2026-09-14  |
-| 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[x]` committed, CI green            |
-| 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` committed, CI green            |
-| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` committed, CI green            |
-| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[x]` committed, CI green            |
-| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[x]` committed, CI green            |
-| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[x]` committed, pushed              |
-| 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[x]` code complete, awaiting review |
+| Phase | Name                   | Requirements                                                                          | Estimate  | Status                              |
+| ----- | ---------------------- | ------------------------------------------------------------------------------------- | --------- | ----------------------------------- |
+| 0     | Foundations            | FR-1.3 (steps 1–2), FR-1.4, FR-1.6, NFR-3, NFR-8, NFR-9                               | 1 week    | `[x]` complete, CI green 2026-09-14 |
+| 1     | Write something        | FR-1.2, FR-1.3 (steps 3–4), FR-2, FR-4, FR-8.2–8.4, FR-11.1 (part), NFR-5, authz core | 2 weeks   | `[x]` committed, CI green           |
+| 2     | The loop               | FR-5, FR-6, FR-7, FR-8.1, FR-8.5, FR-9.1–9.2, NFR-2, NFR-7                            | 3 weeks   | `[x]` committed, CI green           |
+| 3     | Findable and durable   | FR-1.5, FR-9.3–9.6, FR-11, FR-12                                                      | 2 weeks   | `[x]` committed, CI green           |
+| 4     | Versions and spin-offs | FR-10, FR-7.5                                                                         | 2 weeks   | `[x]` committed, CI green           |
+| 5     | Import and export      | FR-3, FR-14                                                                           | 2 weeks   | `[x]` committed, CI green           |
+| 6     | Trust                  | FR-13, FR-15.5, NFR-6                                                                 | 1.5 weeks | `[x]` committed, pushed             |
+| 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[x]` committed, pushed             |
+| 8     | Into the world         | NFR-8, and every blocked task from phases 0–7                                         | 1 week    | `[ ]`                               |
+| 9     | The gaps we left       | FR-14.2 (.epub), FR-1.6, OD-3 (second half), decision 0017                            | 2 weeks   | `[ ]`                               |
+| 10    | What writers ask for   | Driven by use, not by this plan                                                       | open      | `[ ]`                               |
 
 Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 
@@ -492,6 +495,93 @@ written down (decision 0021).
 
 ---
 
+## Phase 8 — Into the world
+
+**Goal.** A stranger on the internet can do what phase 7's exit criterion
+describes. Today they cannot, because there is nowhere to do it.
+
+**The honest framing.** Every task in this phase is account work or
+configuration. Almost none of it is code, and the code that exists has been
+waiting on it since phase 3. It is one week of a kind of work that cannot be
+started until somebody with a credit card starts it.
+
+**Resolve first:** nothing. This phase is unblocked the moment the accounts
+exist.
+
+### Tasks, in order
+
+1. [ ] **Neon.** A Postgres 16 project with branch previews and daily backups at 30-day retention (NFR-8). `pnpm db:deploy` against it, then `pnpm db:seed` — which is idempotent, so it can run on every deploy.
+2. [ ] **Cloudflare R2.** One bucket, one access key, the four `R2_*` variables. Without them uploads fall back to a directory on the application server, which works and does not survive a redeploy.
+3. [ ] **Two Vercel projects**, `apps/app` and `apps/web`, from the same repository. Both need the root `.env` values; only the app needs `DATABASE_URL`, `AUTH_SECRET` and `CRON_SECRET`.
+4. [ ] **Six cron entries** (decision 0012), each a POST to `/api/cron/{job}` with the `CRON_SECRET` as a bearer token: `immediate` (every 10 min), `hourly`, `weekly`, `nudge` (daily), `prune` (daily), `purge` (daily). The endpoint fails closed without the secret, so a missing variable is a silent no-op rather than an open door.
+5. [ ] **Resend**, a verified sending domain, and `EMAIL_FROM` on it. Until then the console mailer logs to stdout, which is correct for development and useless in production.
+6. [ ] **The restore drill** (NFR-8). Not "backups are enabled" — take a backup, restore it into a fresh database, run `prisma migrate status` against it, and read a storyboard out of it. A backup nobody has restored is a hope.
+7. [ ] **The accessibility audit** phase 7 could not make a claim about: a screen reader through the reader, the editor and the request flow, plus an automated pass. Then, and only then, is "WCAG 2.2 AA" a thing this product says about itself.
+8. [ ] **Check the seeded excerpts** against the Gutenberg editions linked in `packages/db/prisma/seed/storyboards/library.ts`. An afternoon, and it removes the one dishonesty currently in the repository.
+9. [ ] **The 22 flows against production**, with `PLAYWRIGHT_BASE_URL` pointed at the deployed app. Then the traffic post.
+
+### Exit criteria
+
+- [ ] A person who has never seen this before, on their own device, on the public internet, reads a stuck passage and sends a suggestion.
+- [ ] A backup taken today restores into a working database.
+- [ ] The digests arrive by email, from a domain that passes SPF and DKIM.
+
+### Notes
+
+- Nothing in this phase should require a code change. If it does, that is a
+  finding worth writing down — it means something was configured in a file that
+  should have been an environment variable.
+
+---
+
+## Phase 9 — The gaps we left
+
+**Goal.** Close the things that were deferred with a named home, before they
+become the things nobody remembers were deferred at all.
+
+**Resolve first:** OD-1 (the name), if it is going to be resolved. Decision 0021
+lists what the rename touches; it gets more expensive with every external link.
+
+### Tasks, in order
+
+1. [ ] **Account deletion** (OD-3's second half). Phase 6 built erasure of a single contribution; deleting an account is the same machinery pointed at a person, and it is a legal obligation rather than a feature. The hard part is not the deletion — it is deciding what happens to storyboards they own that other people have contributed to, and that needs a decision record before any code.
+2. [ ] **`.epub` export** (FR-14.2), deferred twice. `packages/export` already has the `Manuscript` shape and three formats built on it; epub is a fourth, and a zip.
+3. [ ] **Upstash**, per decision 0017's own revisit trigger. The interface is `consume(key, limit, windowMs)` and a Redis driver is one file. Do this when a limit check shows up in a slow query log, not before.
+4. [ ] **OAuth** (FR-1.6), which the SRS defers explicitly and says not to build the abstraction for early. One provider, and only if sign-up drop-off says people want it.
+5. [ ] **The rename** (OD-1), if decided. Decision 0021 is the checklist.
+6. [ ] **Revisit the marketing site's weight** (see OD-9 below). It ships about 560 KB of JavaScript that no part of the page uses, because it is a Next.js application containing one static page.
+
+### Exit criteria
+
+- [ ] A person can delete their account, and what happens to the work they leave behind is written down somewhere a stranger could read and agree with.
+- [ ] Every format FR-14.2 names is available, or the SRS says plainly that it is not.
+
+---
+
+## Phase 10 — What writers ask for
+
+**Goal.** Deliberately not planned here.
+
+Everything above this line was specified before anybody used the product. Phase
+10 is the first one that should not be, and writing a task list for it now would
+be guessing dressed up as planning.
+
+What it will be drawn from, when there is use to draw on:
+
+- The deferred table in `01-srs.md` section 8 — real-time collaboration,
+  full-text search, mobile writing, licence verification — each of which has a
+  reason for waiting that use might or might not overturn.
+- What the report queue actually fills up with, which will say more about what
+  the community rules should have said than any amount of thinking will.
+- Where people stop. The sign-up funnel, the request that never gets an answer,
+  the suggestion that never gets a decision.
+
+The one thing to resist is building the deferred list because it is written
+down. Every item on it was deferred for a reason that is still in the table
+beside it.
+
+---
+
 ## Every phase, every pull request
 
 - `pnpm check-vocabulary`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` pass.
@@ -503,15 +593,17 @@ written down (decision 0021).
 
 ## Open decisions
 
-| OD   | Question                                                 | Blocks                 | Status   | Decision                                                                                                                                        |
-| ---- | -------------------------------------------------------- | ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| OD-1 | The name (domain taken; crowded in film)                 | Phase 7                | deferred | Decision 0021 — phase 7 ships as Storyboard; the rename is a find-and-replace whenever the name is chosen, and what it touches is written down. |
-| OD-2 | Helping under a pen name separate from the account       | Phase 3                | open     | —                                                                                                                                               |
-| OD-3 | Contributor's right to delete their credit record (GDPR) | Phase 4                | open     | —                                                                                                                                               |
-| OD-4 | Hide history written while private after going public?   | Phase 1                | open     | Schema carries `publicFrom` for "hide"; drop it if the answer is "expose everything".                                                           |
-| OD-5 | One "helped" idea per request, or unlimited              | Phase 2                | open     | —                                                                                                                                               |
-| OD-6 | Co-author quota exemption across storyboards             | Phase 6                | closed   | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3.                                                         |
-| OD-7 | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | closed   | Decision 0020 — 13+, one checkbox, no date of birth stored, and no private messages anywhere in the product, ever.                              |
+| OD   | Question                                                 | Blocks                 | Status   | Decision                                                                                                                                                                                     |
+| ---- | -------------------------------------------------------- | ---------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OD-1 | The name (domain taken; crowded in film)                 | Phase 7                | deferred | Decision 0021 — phase 7 ships as Storyboard; the rename is a find-and-replace whenever the name is chosen, and what it touches is written down.                                              |
+| OD-2 | Helping under a pen name separate from the account       | Phase 3                | open     | —                                                                                                                                                                                            |
+| OD-3 | Contributor's right to delete their credit record (GDPR) | Phase 4                | open     | —                                                                                                                                                                                            |
+| OD-4 | Hide history written while private after going public?   | Phase 1                | open     | Schema carries `publicFrom` for "hide"; drop it if the answer is "expose everything".                                                                                                        |
+| OD-5 | One "helped" idea per request, or unlimited              | Phase 2                | open     | —                                                                                                                                                                                            |
+| OD-6 | Co-author quota exemption across storyboards             | Phase 6                | closed   | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3.                                                                                                      |
+| OD-7 | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | closed   | Decision 0020 — 13+, one checkbox, no date of birth stored, and no private messages anywhere in the product, ever.                                                                           |
+| OD-8 | What is searchable in an unpublished manuscript          | Phase 10               | open     | Full-text search is in the deferred table for a privacy reason, not a technical one. Somebody has to say what a stranger may search inside work nobody has published.                        |
+| OD-9 | Whether the marketing site should be a Next.js app       | Phase 9                | open     | One static page currently ships ~560 KB of framework JavaScript it never uses. Plain HTML, or a static-site generator, would be a fraction of that — against the cost of a second toolchain. |
 
 ## Hosting and services checklist
 
