@@ -41,7 +41,7 @@
     "prettier": "catalog:",
     "prettier-plugin-tailwindcss": "0.8.1",
     "tsx": "catalog:",
-    "turbo": "2.10.12",
+    "turbo": "2.11.4",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

@@ -17,12 +17,12 @@
     "fast-xml-parser": "5.11.1",
     "fflate": "0.8.3",
     "mammoth": "1.12.3",
-    "marked": "18.0.13"
+    "marked": "18.0.14"
   },
   "devDependencies": {
     "@storyboard/config": "workspace:*",
     "@types/node": "catalog:",
-    "docx": "9.7.1",
+    "docx": "9.7.2",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
