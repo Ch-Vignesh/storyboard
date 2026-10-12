@@ -78,6 +78,12 @@ deployment either shares the production database, if `DATABASE_URL` is set for
 the Preview environment, or fails its build because the variable is missing.
 Set it for Production only until there is a second database for previews.
 
+The failing build is not hypothetical. Every Dependabot pull request built a
+preview of the app, and every one failed on the missing variables, a red mark
+on every pull request for no reason. So the app's previews are skipped:
+`ignoreCommand` in `apps/app/vercel.json` builds Production and nothing else.
+The marketing site needs no database, and its previews still build.
+
 **Connection headroom.** The pooled host allows 10 concurrent connections on
 Free, 100 on Starter and 500 on Pro. node-postgres opens up to 10 per
 function instance. That is fine at launch traffic, and the first place to look

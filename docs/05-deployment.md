@@ -69,9 +69,11 @@ advisory lock, or half-applies. `packages/db/prisma.config.ts` prefers
 
 In the Vercel project, add `DATABASE_URL` by hand with the pooled string, for
 **Production** only. A preview with the same value would write to the live
-database, and there is no per-preview database to give it instead. If the
-credentials are ever rotated in Prisma, update this variable too: the
-integration only rotates its own.
+database, and there is no per-preview database to give it instead. So the app
+does not build previews at all: `ignoreCommand` in `apps/app/vercel.json`
+skips every deployment that is not Production, and a pull request shows the
+app's check as skipped rather than failed. If the credentials are ever rotated
+in Prisma, update this variable too: the integration only rotates its own.
 
 Then, from a laptop with both values in the root `.env`:
 
