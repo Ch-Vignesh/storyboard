@@ -53,6 +53,9 @@ async function checkEnvironment(): Promise<void> {
     NEXT_PUBLIC_MARKETING_URL: process.env.NEXT_PUBLIC_MARKETING_URL ?? '',
     EMAIL_FROM: process.env.EMAIL_FROM ?? '',
     RESEND_API_KEY: process.env.RESEND_API_KEY,
+    SMTP_HOST: process.env.SMTP_HOST,
+    SMTP_USER: process.env.SMTP_USER,
+    SMTP_PASSWORD: process.env.SMTP_PASSWORD,
     CRON_SECRET: process.env.CRON_SECRET,
     R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
     R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
@@ -76,8 +79,8 @@ async function checkEnvironment(): Promise<void> {
 }
 
 async function checkDatabase(): Promise<void> {
-  const url = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL
-  if (!url) {
+  // The client below connects with DATABASE_URL, the URL the application uses.
+  if (!process.env.DATABASE_URL) {
     record(false, 'database', 'DATABASE_URL is not set', 'Copy .env.example to .env.')
     return
   }
@@ -158,19 +161,89 @@ async function checkObjectStore(): Promise<void> {
   )
 }
 
+const testSubject = 'Storyboard — this address can receive mail'
+
+function testText(provider: string): string {
+  return (
+    `If you are reading this, ${provider} and EMAIL_FROM all work.\n\n` +
+    'That is the whole check. Nobody can finish signing up until this message arrives,\n' +
+    'because sign-up is an emailed link — so this is the one to get right before launch.\n'
+  )
+}
+
 async function checkMail(): Promise<void> {
   const key = process.env.RESEND_API_KEY
   const from = process.env.EMAIL_FROM
+  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD } = process.env
 
-  if (!key) {
-    skip('email', 'RESEND_API_KEY not set; messages print to the server log')
+  if (!key && !SMTP_HOST && !SMTP_USER && !SMTP_PASSWORD) {
+    skip('email', 'neither RESEND_API_KEY nor SMTP_* is set; messages print to the server log')
     return
   }
   if (!from) {
     record(false, 'email', 'EMAIL_FROM is not set')
     return
   }
+  if (key) {
+    await checkResend(key, from)
+    return
+  }
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASSWORD) {
+    record(
+      false,
+      'email',
+      'SMTP is half configured',
+      'Set SMTP_HOST, SMTP_USER and SMTP_PASSWORD together, or none of them.',
+    )
+    return
+  }
 
+  // The application's own SMTP mailer, not a second implementation of it.
+  const { createSmtpMailer } = await import('../src/server/mail/smtp')
+  const port = SMTP_PORT ? Number(SMTP_PORT) : 465
+  const smtp = createSmtpMailer({
+    host: SMTP_HOST,
+    port,
+    user: SMTP_USER,
+    password: SMTP_PASSWORD,
+    from,
+  })
+  const server = `${SMTP_HOST}:${String(port)}`
+
+  try {
+    if (!sendTo) {
+      // A real login, so a wrong password fails here rather than at the first sign-up.
+      await smtp.verify()
+      record(true, 'email', `logged in to ${server} as ${SMTP_USER}, sending as ${from}`)
+      console.warn('     note: pass --email you@example.com to actually send one and prove it.')
+      return
+    }
+    const text = testText(`the SMTP login on ${server}`)
+    await smtp.send({
+      to: sendTo,
+      subject: testSubject,
+      text,
+      // Product mail is always both parts (FR-12.5); an empty HTML part would
+      // show as a blank message in clients that prefer it.
+      html: text
+        .split('\n\n')
+        .map((paragraph) => `<p>${paragraph.replaceAll('\n', ' ')}</p>`)
+        .join('\n'),
+    })
+    record(true, 'email', `sent to ${sendTo} through ${server} as ${from}`)
+    console.warn('     note: now check it arrived, and whether it landed in spam.')
+  } catch (error) {
+    record(
+      false,
+      'email',
+      String(error),
+      'Check SMTP_USER and SMTP_PASSWORD. For Gmail the password is an app password, which ' +
+        'needs 2-Step Verification on, and EMAIL_FROM should be the same address as SMTP_USER.',
+    )
+  }
+}
+
+async function checkResend(key: string, from: string): Promise<void> {
   if (!sendTo) {
     record(true, 'email', `key loaded ${fingerprint(key)}, sending as ${from}`, undefined)
     console.warn('     note: pass --email you@example.com to actually send one and prove it.')
@@ -182,11 +255,8 @@ async function checkMail(): Promise<void> {
   const { error } = await resend.emails.send({
     from,
     to: sendTo,
-    subject: 'Storyboard — this address can receive mail',
-    text:
-      'If you are reading this, the Resend key, the sending domain and EMAIL_FROM all work.\n\n' +
-      'That is the whole check. Nobody can finish signing up until this message arrives,\n' +
-      'because sign-up is an emailed link — so this is the one to get right before launch.\n',
+    subject: testSubject,
+    text: testText('the Resend key, the sending domain'),
   })
 
   record(

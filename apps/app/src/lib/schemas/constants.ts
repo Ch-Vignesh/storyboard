@@ -100,3 +100,10 @@ export const READING_LINE_HEIGHT = { min: 140, max: 210, default: 168, step: 7 }
 
 /** FR-12.4 */
 export const QUIET_REQUEST_NUDGE_DAYS = 7
+
+/**
+ * FR-12 over SMTP (decision 0029). A sign-up waits on its verification email,
+ * so a mail server that stops answering has to fail the request in seconds —
+ * the library's own defaults are two minutes to connect and ten to idle.
+ */
+export const SMTP_TIMEOUTS_MS = { connect: 10_000, greeting: 10_000, socket: 20_000 } as const

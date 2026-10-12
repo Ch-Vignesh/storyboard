@@ -1,0 +1,73 @@
+# Scheduled work (FR-12.3, FR-12.4; decisions 0012 and 0030).
+#
+# Vercel's Hobby plan refuses any cron that runs more than once a day, and this
+# product has a job every ten minutes. So the clock lives here and calls the
+# same authenticated endpoint Vercel Cron would have: POST /api/cron/<job>.
+#
+# Needs, under Settings → Secrets and variables → Actions:
+#   secret    CRON_SECRET  the same value as CRON_SECRET on the app's Vercel project
+#   variable  APP_URL      the app's public URL, e.g. https://draftboard-cyan.vercel.app
+# Without APP_URL every run is skipped, so a fork or an undeployed copy does nothing.
+#
+# GitHub starts scheduled runs late when it is busy — minutes, sometimes more —
+# and stops scheduling them in a repository with no commit for 60 days. Any job
+# can be run by hand from the Actions tab: Scheduled jobs → Run workflow.
+name: Scheduled jobs
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # immediate
+    - cron: '0 * * * *' # hourly
+    - cron: '0 9 * * 1' # weekly
+    - cron: '30 8 * * *' # nudge
+    - cron: '15 3 * * *' # prune
+    - cron: '45 3 * * *' # purge
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Job to run
+        required: true
+        type: choice
+        options: [immediate, hourly, weekly, nudge, prune, purge]
+
+permissions: {}
+
+# One run of a job at a time; a slow one is waited for, never cancelled halfway.
+concurrency:
+  group: cron-${{ github.event.schedule || inputs.job }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    if: vars.APP_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call the job
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          CHOSEN: ${{ inputs.job }}
+          APP_URL: ${{ vars.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        # No retry. A run that fails is picked up by the next one (decision
+        # 0012), and retrying one that failed partway could send mail twice.
+        run: |
+          case "$SCHEDULE" in
+            '*/10 * * * *') job=immediate ;;
+            '0 * * * *') job=hourly ;;
+            '0 9 * * 1') job=weekly ;;
+            '30 8 * * *') job=nudge ;;
+            '15 3 * * *') job=prune ;;
+            '45 3 * * *') job=purge ;;
+            '') job="$CHOSEN" ;;
+            *) echo "No job for schedule '$SCHEDULE'"; exit 1 ;;
+          esac
+          if [ -z "$CRON_SECRET" ]; then
+            echo "The CRON_SECRET repository secret is not set."
+            exit 1
+          fi
+          echo "Running $job against $APP_URL"
+          curl --fail-with-body --silent --show-error --max-time 300 \
+            -X POST -H "Authorization: Bearer $CRON_SECRET" \
+            "${APP_URL%/}/api/cron/$job"
+          echo

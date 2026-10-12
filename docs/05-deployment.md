@@ -11,19 +11,18 @@ it is code; most of it is opening accounts and copying values between them.
 
 ## What you need
 
-| Service           | Plan needed                    | What it is for                               |
-| ----------------- | ------------------------------ | -------------------------------------------- |
-| **Neon**          | any, including free            | Postgres 16, backups, preview databases      |
-| **Vercel**        | **Pro** — see _Scheduled work_ | Two projects: the app and the marketing site |
-| **Cloudflare R2** | free tier is enough            | Uploaded manuscripts                         |
-| **Resend**        | free tier is enough            | Every email the product sends                |
-| **A domain**      | —                              | The sending domain has to be one you own     |
+| Service                  | Plan needed                                          | What it is for                                 |
+| ------------------------ | ---------------------------------------------------- | ---------------------------------------------- |
+| **Prisma Postgres**      | **Business** for NFR-8 as is — see _Backups_         | Postgres, through Vercel's storage integration |
+| **Vercel**               | Hobby is enough — see _Scheduled work_               | Two projects: the app and the marketing site   |
+| **Cloudflare R2**        | free tier is enough                                  | Uploaded manuscripts                           |
+| **Resend**, or **Gmail** | free tier, or one Gmail account with an app password | Every email the product sends                  |
+| **A domain**             | — (Resend only)                                      | The sending domain has to be one you own       |
 
-The Vercel Hobby plan allows **two** scheduled jobs, each at most once a day.
-This product has six, one of them every ten minutes. On Hobby, four jobs will
-not run and the digests will not arrive. Either use Pro, or move the schedule to
-something else that can issue an authenticated request — the endpoint does not
-care who calls it (see _Scheduled work_).
+Vercel's Hobby plan runs a cron job at most once a day, and a deployment whose
+`vercel.json` asks for more **fails**. This product has a job every ten
+minutes, so the schedule lives in GitHub Actions instead and calls the same
+endpoint (decision 0030). On Pro, it can move back into `vercel.json`.
 
 ---
 
@@ -31,36 +30,48 @@ care who calls it (see _Scheduled work_).
 
 Each step produces a value the next one needs, so this order is not arbitrary.
 
-1. Neon, and run the migrations.
+1. Prisma Postgres, and run the migrations.
 2. R2, including its CORS rule.
-3. Resend, and verify the domain — DNS takes the longest, so start it early.
+3. Email: Resend with a verified domain — DNS takes the longest, so start it
+   early — or SMTP through Gmail, which needs no DNS at all.
 4. The two Vercel projects, with the values from 1–3.
 5. Scheduled work.
 6. Seed, then the restore drill.
 
 ---
 
-## 1. Neon
+## 1. Prisma Postgres
 
-Create a project on **Postgres 16** in the region nearest your Vercel
-deployment. Two settings matter, both under the project's settings:
+Decision 0028 covers why this is Prisma Postgres rather than Neon, and what
+that costs. Create the database from the app's Vercel project, under
+**Storage**, in the region nearest the project's functions. The integration
+adds variables named with the prefix you chose, for example
+`prisma_draftboard_POSTGRES_URL`. The application reads none of them by
+name.
 
-- **Point-in-time restore: 30 days.** NFR-8 asks for a 30-day recovery window,
-  and this is where that claim comes from.
-- **Branch previews**, if you want a database per preview deployment. Optional,
-  and the reason a Neon branch exists at all.
+You need two connection strings. They share credentials and differ only in
+the host, and they are not interchangeable:
 
-Neon gives you two connection strings. You need both, and they are not
-interchangeable:
+| Host                  | Goes in               | Why                                                             |
+| --------------------- | --------------------- | --------------------------------------------------------------- |
+| `pooled.db.prisma.io` | `DATABASE_URL`        | The application. Serverless opens many short connections.       |
+| `db.prisma.io`        | `DIRECT_DATABASE_URL` | Migrations only. DDL cannot run over a transaction-mode pooler. |
 
-| Neon calls it | Goes in               | Why                                                             |
-| ------------- | --------------------- | --------------------------------------------------------------- |
-| Pooled        | `DATABASE_URL`        | The application. Serverless opens many short connections.       |
-| Direct        | `DIRECT_DATABASE_URL` | Migrations only. DDL cannot run over a transaction-mode pooler. |
+The integration gives you the `db.prisma.io` one — every variable it adds holds
+that same string. The pooled one is that string with only the host changed;
+both hosts accept the same login. If an integration offers a
+`prisma+postgres://` URL instead, that is Prisma Accelerate, which this
+application does not use, and it refuses to start with it.
 
 Getting these the wrong way round produces a migration that hangs on an
 advisory lock, or half-applies. `packages/db/prisma.config.ts` prefers
 `DIRECT_DATABASE_URL` for exactly this reason; the application never reads it.
+
+In the Vercel project, add `DATABASE_URL` by hand with the pooled string, for
+**Production** only. A preview with the same value would write to the live
+database, and there is no per-preview database to give it instead. If the
+credentials are ever rotated in Prisma, update this variable too: the
+integration only rotates its own.
 
 Then, from a laptop with both values in the root `.env`:
 
@@ -73,6 +84,26 @@ pnpm db:seed        # idempotent: safe on every deploy, and on an existing datab
 `prisma db push` — the triggers and partial indexes live in migration files and
 `db push` does not run them, so you would get a database that accepts writes the
 product's invariants forbid.
+
+Do this before the first deployment, not after it: the build reads the database.
+The sitemap is prerendered from the published storyboards, so a build with no
+`DATABASE_URL`, or with one whose tables do not exist yet, fails.
+
+Expect the seed to take minutes from a laptop far from the database: every
+statement is a round trip, and at 300 ms one it took under four. That is also
+why the seed allows its transactions two minutes, where the application keeps
+Prisma's five seconds.
+
+**Put the functions next to the database.** Read the database's region in the
+Prisma Console, and set the app project's function region to the same one
+(Vercel → Settings → Functions). The application's transactions get five
+seconds. In the same region a statement takes a millisecond or two; across an
+ocean it takes hundreds, and a transaction of twenty statements fails.
+
+Point tools — Prisma Studio, `psql`, a script of your own — at the **direct**
+host. A session-level `SET` sent through the pooled one does not end with your
+session: it stays on the shared server connection and reaches whoever is given
+it next.
 
 ---
 
@@ -118,7 +149,13 @@ preview origin too if you want imports to work on preview deployments.
 
 ---
 
-## 3. Resend
+## 3. Email
+
+One of two providers. Resend is the one to grow into; SMTP through Gmail is the
+one that works today without a domain (decision 0029). With both set, Resend is
+used.
+
+### Resend
 
 Add your domain and publish the DNS records it gives you — SPF, DKIM, and a
 DMARC record. Wait for it to verify; this is the step with a delay measured in
@@ -134,10 +171,43 @@ EMAIL_FROM="Storyboard <hello@your-domain>"
 message is either rejected or filed as spam, and nothing in the application will
 tell you that is happening.
 
-Until a key is set the console mailer prints each message to stdout. That is
+### SMTP, through Gmail
+
+Turn on 2-Step Verification for the Google account, then create an **app
+password** under Security → 2-Step Verification → App passwords. Google shows
+it as four groups of four letters; the spaces are only for display. The account
+password does not work here.
+
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=abcdabcdabcdabcd
+EMAIL_FROM="Storyboard <you@gmail.com>"
+```
+
+`EMAIL_FROM` has to be the same address as `SMTP_USER`: Gmail sends as the
+account that logged in, whatever the message says. Port 465 is TLS from the
+start. 587 works too, and the connection is refused if the server will not
+upgrade it.
+
+Know the limits before relying on it. A personal account sends to roughly 500
+recipients a day, and Google blocks sending for up to a day past that. Changing
+the account password revokes every app password, which stops all mail at once.
+`pnpm check-deploy` logs in without sending, so it catches a revoked password.
+
+### Either way
+
+Until a provider is set the console mailer prints each message to stdout. That is
 correct on a laptop and useless in production, which is why a publicly reachable
 deployment refuses to start without one: otherwise sign-up appears to work and
 every new account is stranded waiting for a verification link that went to a log.
+
+Prove it with a real message before launch:
+
+```sh
+pnpm check-deploy --email you@example.com
+```
 
 ---
 
@@ -158,30 +228,35 @@ Vercel's own build settings on their defaults and let the file win.
 
 ### Environment variables
 
-Set these in **Settings → Environment Variables**. The application needs all of
-them; the marketing site needs only the two public URLs.
+Set these in **Settings → Environment Variables**. ● is required, ○ optional, and
+◐ one of two: Resend's key, or the SMTP host, user and password. The marketing
+site needs only the two public URLs.
 
-| Variable                    | App | Web | Notes                                             |
-| --------------------------- | :-: | :-: | ------------------------------------------------- |
-| `DATABASE_URL`              |  ●  |     | Neon **pooled**                                   |
-| `DIRECT_DATABASE_URL`       |  ○  |     | Neon **direct**. Only needed where migrations run |
-| `AUTH_SECRET`               |  ●  |     | `openssl rand -base64 32`                         |
-| `AUTH_URL`                  |  ●  |     | `https://app.your-domain`                         |
-| `AUTH_TRUST_HOST`           |  ●  |     | `true`                                            |
-| `EMAIL_FROM`                |  ●  |     | On the verified domain                            |
-| `RESEND_API_KEY`            |  ●  |     |                                                   |
-| `CRON_SECRET`               |  ●  |     | `openssl rand -hex 32`                            |
-| `R2_ACCOUNT_ID`             |  ●  |     | All four, or none                                 |
-| `R2_ACCESS_KEY_ID`          |  ●  |     |                                                   |
-| `R2_SECRET_ACCESS_KEY`      |  ●  |     |                                                   |
-| `R2_BUCKET`                 |  ●  |     |                                                   |
-| `AUTH_GOOGLE_ID`            |  ○  |     | Both or neither; no button without them           |
-| `AUTH_GOOGLE_SECRET`        |  ○  |     |                                                   |
-| `UPSTASH_REDIS_REST_URL`    |  ○  |     | Both or neither; limits run on Postgres without   |
-| `UPSTASH_REDIS_REST_TOKEN`  |  ○  |     |                                                   |
-| `NEXT_PUBLIC_APP_URL`       |  ●  |  ●  | `https://app.your-domain`                         |
-| `NEXT_PUBLIC_MARKETING_URL` |  ●  |  ●  | `https://your-domain`                             |
-| `LOG_LEVEL`                 |  ○  |  ○  | `info` is the default                             |
+| Variable                    | App | Web | Notes                                            |
+| --------------------------- | :-: | :-: | ------------------------------------------------ |
+| `DATABASE_URL`              |  ●  |     | `pooled.db.prisma.io`. Production only, by hand  |
+| `DIRECT_DATABASE_URL`       |  ○  |     | `db.prisma.io`. Only needed where migrations run |
+| `AUTH_SECRET`               |  ●  |     | `openssl rand -base64 32`                        |
+| `AUTH_URL`                  |  ●  |     | `https://app.your-domain`                        |
+| `AUTH_TRUST_HOST`           |  ●  |     | `true`                                           |
+| `EMAIL_FROM`                |  ●  |     | On the verified domain                           |
+| `RESEND_API_KEY`            |  ◐  |     | This, or the three `SMTP_*` below                |
+| `SMTP_HOST`                 |  ◐  |     | `smtp.gmail.com`. Host, user, password together  |
+| `SMTP_PORT`                 |  ○  |     | `465` is the default                             |
+| `SMTP_USER`                 |  ◐  |     | The Gmail address; the same one as `EMAIL_FROM`  |
+| `SMTP_PASSWORD`             |  ◐  |     | The app password, not the account password       |
+| `CRON_SECRET`               |  ●  |     | `openssl rand -hex 32`                           |
+| `R2_ACCOUNT_ID`             |  ●  |     | All four, or none                                |
+| `R2_ACCESS_KEY_ID`          |  ●  |     |                                                  |
+| `R2_SECRET_ACCESS_KEY`      |  ●  |     |                                                  |
+| `R2_BUCKET`                 |  ●  |     |                                                  |
+| `AUTH_GOOGLE_ID`            |  ○  |     | Both or neither; no button without them          |
+| `AUTH_GOOGLE_SECRET`        |  ○  |     |                                                  |
+| `UPSTASH_REDIS_REST_URL`    |  ○  |     | Both or neither; limits run on Postgres without  |
+| `UPSTASH_REDIS_REST_TOKEN`  |  ○  |     |                                                  |
+| `NEXT_PUBLIC_APP_URL`       |  ●  |  ●  | `https://app.your-domain`                        |
+| `NEXT_PUBLIC_MARKETING_URL` |  ●  |  ●  | `https://your-domain`                            |
+| `LOG_LEVEL`                 |  ○  |  ○  | `info` is the default                            |
 
 `NEXT_PUBLIC_*` values are compiled into the browser bundle at build time, not
 read at runtime. Changing one requires a new deployment, not a restart — and
@@ -193,14 +268,14 @@ baked in.
 
 `apps/app/src/env-preflight.ts` runs at startup. When `NEXT_PUBLIC_APP_URL` is
 not a loopback address — that is, when strangers can reach this deployment — it
-requires a mail key, a real sender, a cron secret, https URLs, and object
+requires a mail provider, a real sender, a cron secret, https URLs, and object
 storage on a serverless host. It lists **every** problem at once rather than one
 per attempt, and the message names the variable and what would silently happen
 without it.
 
 The check is keyed to the public URL rather than `NODE_ENV` deliberately:
 `NODE_ENV` is `production` for `next build`, for `next start` on a laptop, and
-for the Playwright suite, none of which have a Resend key or want one.
+for the Playwright suite, none of which have a mail provider or want one.
 
 `ALLOW_INCOMPLETE_DEPLOYMENT=1` downgrades all of it to warnings, for a staging
 box where none of it matters. It should never be set on the real thing.
@@ -209,7 +284,7 @@ box where none of it matters. It should never be set on the real thing.
 
 ## 5. Scheduled work
 
-Six jobs, in `apps/app/vercel.json` (decision 0012):
+Six jobs, in `.github/workflows/cron.yml` (decisions 0012 and 0030):
 
 | Job         | Schedule      | What it does                                  |
 | ----------- | ------------- | --------------------------------------------- |
@@ -220,10 +295,24 @@ Six jobs, in `apps/app/vercel.json` (decision 0012):
 | `prune`     | daily 03:15   | Expired rate-limit rows                       |
 | `purge`     | daily 03:45   | Storyboards past their 30-day deletion window |
 
-Times are UTC. Vercel adds `Authorization: Bearer $CRON_SECRET` to scheduled
-requests automatically when that variable is set on the project, which is what
-`/api/cron/[job]` checks — with a constant-time comparison, so the secret cannot
-be guessed a byte at a time.
+Times are UTC. Each run sends `Authorization: Bearer $CRON_SECRET`, which is
+what `/api/cron/[job]` checks — with a constant-time comparison, so the secret
+cannot be guessed a byte at a time.
+
+The workflow needs two things in the GitHub repository, under **Settings →
+Secrets and variables → Actions**:
+
+| Kind     | Name          | Value                                                           |
+| -------- | ------------- | --------------------------------------------------------------- |
+| Secret   | `CRON_SECRET` | The same value as the app's `CRON_SECRET` on Vercel             |
+| Variable | `APP_URL`     | The app's public URL, e.g. `https://draftboard-cyan.vercel.app` |
+
+Without `APP_URL` every run is skipped, so a fork does nothing. To check a job,
+run it by hand: **Actions → Scheduled jobs → Run workflow**.
+
+Two things to know. GitHub starts scheduled runs late when it is busy, usually
+by minutes. And it stops scheduling them in a repository with no commit for 60
+days — it emails when it does, and the workflow has to be re-enabled.
 
 The endpoint fails closed: no secret configured, no job runs, 503. That is the
 right behaviour for a public URL that sends email, and it is silent, which is
@@ -244,11 +333,23 @@ And locally, without HTTP at all: `pnpm cron hourly`.
 
 ## 6. Backups, and the drill
 
-Neon's point-in-time restore is the backup (NFR-8). Enabling it is not the
-requirement; **restoring from it is**. A backup nobody has restored is a hope.
+NFR-8 asks for a daily backup kept for 30 days. Prisma Postgres snapshots once
+a day, only on days with activity, and keeps them according to the plan: none
+on Free, 7 days on Starter and Pro, 30 on Business. There is no point-in-time
+restore. So:
+
+- **Business:** the snapshots are the backup. Restore one from the Backups tab
+  in the Prisma Console.
+- **Starter or Pro:** the snapshots cover a week. For the other 23 days, take a
+  daily `pg_dump` over `DIRECT_DATABASE_URL` and keep each one for 30 days. Use
+  version 17 client tools, since Prisma Postgres is based on 17.
+- **Free:** there is no backup. Do not let a real user sign up on it.
+
+Having a backup is not the requirement; **restoring from it is**. A backup
+nobody has restored is a hope.
 
 ```sh
-pnpm db:drill "postgresql://…restored-branch…"
+pnpm db:drill "postgresql://…restored-copy…"
 ```
 
 The drill checks four things against a database restored from a backup: that
@@ -257,7 +358,7 @@ there — the immutability trigger and both partial unique indexes, which are th
 ones `db push` would have skipped — that the tables hold rows, and that a whole
 storyboard can be read out of it, chapters and sections and revisions together.
 
-Run it against a restored branch, never against production: it refuses to run if
+Run it against a restored copy, never against production: it refuses to run if
 the database looks like the live one by declining any URL that is also
 `DATABASE_URL`.
 
@@ -318,12 +419,16 @@ Then, by hand, the things no test can claim for you:
 
 ## When something is wrong
 
-| What you see                                      | Where to look                                                           |
-| ------------------------------------------------- | ----------------------------------------------------------------------- |
-| Deployment refuses to start, with a numbered list | It is the preflight. Each line names its variable                       |
-| Sign-up email never arrives                       | Resend's log first; then whether `EMAIL_FROM` is on the verified domain |
-| Uploads fail, console shows a CORS error          | The R2 CORS rule. `AllowedOrigins` is the app's origin                  |
-| Import works, then the parse cannot find the file | R2 is not configured and instances do not share a disk                  |
-| No digest ever arrives                            | `CRON_SECRET` set on the project? Vercel's cron log?                    |
-| Migration hangs on an advisory lock               | It is running over the pooled URL. Use `DIRECT_DATABASE_URL`            |
-| A build serves an old URL in the browser          | A `NEXT_PUBLIC_*` change needs a new deployment, not a restart          |
+| What you see                                       | Where to look                                                               |
+| -------------------------------------------------- | --------------------------------------------------------------------------- |
+| Deployment refuses to start, with a numbered list  | It is the preflight. Each line names its variable                           |
+| Sign-up email never arrives                        | `pnpm check-deploy --email`; then Resend's log, or Gmail's Sent folder      |
+| Gmail: "Username and Password not accepted"        | It wants an app password. Changing the account password revokes them        |
+| Uploads fail, console shows a CORS error           | The R2 CORS rule. `AllowedOrigins` is the app's origin                      |
+| Import works, then the parse cannot find the file  | R2 is not configured and instances do not share a disk                      |
+| No digest ever arrives                             | The Actions tab: a 401 means the two `CRON_SECRET`s differ                  |
+| Migration hangs on an advisory lock                | It is running over the pooled URL. Use `DIRECT_DATABASE_URL`                |
+| "cannot execute INSERT in a read-only transaction" | A session `SET` went through the pooled host. `RESET` it on each connection |
+| "Transaction API error … expired transaction"      | Round trips too slow: the function region is not the database's             |
+| "DATABASE_URL must be a postgres:// connection"    | It is the `prisma+postgres://` URL. Use the `postgres://` one               |
+| A build serves an old URL in the browser           | A `NEXT_PUBLIC_*` change needs a new deployment, not a restart              |

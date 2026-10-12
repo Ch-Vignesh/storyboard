@@ -1,7 +1,8 @@
-import { loadRootEnv } from '@storyboard/config/env'
+import { keepTestsOffHostedDatabases, loadRootEnv } from '@storyboard/config/env'
 import { defineConfig } from 'vitest/config'
 
 loadRootEnv()
+keepTestsOffHostedDatabases()
 
 export default defineConfig({
   test: {

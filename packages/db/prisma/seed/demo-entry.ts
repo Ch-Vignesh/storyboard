@@ -11,7 +11,7 @@
  * only two things allowed to hard-delete prose (FR-8.2, decision 0008) and a
  * seed helper is not the third.
  */
-import { loadRootEnv } from '@storyboard/config/env'
+import { databaseHost, isLocalDatabase, loadRootEnv } from '@storyboard/config/env'
 
 import { createPrismaClient } from '../../src/client'
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, seedDemo } from './demo'
@@ -19,11 +19,10 @@ import { DEMO_ACCOUNTS, DEMO_PASSWORD, seedDemo } from './demo'
 loadRootEnv()
 
 function refuseUnlessLocal(url: string): void {
-  const host = new URL(url).hostname
-  const local = host === 'localhost' || host === '127.0.0.1' || host === '::1'
-  if (!local && process.env.ALLOW_REMOTE_DEMO_SEED !== 'yes-really') {
+  if (!isLocalDatabase(url) && process.env.ALLOW_REMOTE_DEMO_SEED !== 'yes-really') {
     throw new Error(
-      `Refusing to write demo accounts to ${host}. These accounts share one published password.\n` +
+      `Refusing to write demo accounts to ${databaseHost(url) ?? 'a URL that does not parse'}. ` +
+        'These accounts share one published password.\n' +
         'If you genuinely want this on a remote database, set ALLOW_REMOTE_DEMO_SEED=yes-really.',
     )
   }

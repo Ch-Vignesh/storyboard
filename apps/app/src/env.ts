@@ -11,12 +11,26 @@ import { deploymentProblems, deploymentWarnings, preflightReport } from './env-p
 export const env = createEnv({
   server: {
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    DATABASE_URL: z.url(),
+    // Not the prisma+postgres:// URL Prisma Postgres also offers: that one is
+    // for Prisma Accelerate, and this application connects with node-postgres.
+    DATABASE_URL: z
+      .url()
+      .regex(/^postgres(ql)?:\/\//, 'DATABASE_URL must be a postgres:// connection string'),
     AUTH_SECRET: z.string().min(32, 'AUTH_SECRET must be at least 32 characters'),
     AUTH_URL: z.url().optional(),
     AUTH_TRUST_HOST: z.string().optional(),
     EMAIL_FROM: z.string().min(3),
     RESEND_API_KEY: z.string().min(1).optional(),
+    /**
+     * FR-12 over SMTP instead of Resend (decision 0029) — Gmail with an app
+     * password, or any provider that speaks SMTP. Host, user and password: all
+     * three or none. 465 is TLS from the start; any other port must STARTTLS.
+     * Resend wins when both are configured.
+     */
+    SMTP_HOST: z.string().min(1).optional(),
+    SMTP_PORT: z.coerce.number().int().positive().default(465),
+    SMTP_USER: z.string().min(1).optional(),
+    SMTP_PASSWORD: z.string().min(1).optional(),
     LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).optional(),
     /** Dev and test only: the console mailer also appends each message here. */
     MAIL_LOG_FILE: z.string().min(1).optional(),
@@ -60,6 +74,10 @@ export const env = createEnv({
     AUTH_TRUST_HOST: process.env.AUTH_TRUST_HOST,
     EMAIL_FROM: process.env.EMAIL_FROM,
     RESEND_API_KEY: process.env.RESEND_API_KEY,
+    SMTP_HOST: process.env.SMTP_HOST,
+    SMTP_PORT: process.env.SMTP_PORT,
+    SMTP_USER: process.env.SMTP_USER,
+    SMTP_PASSWORD: process.env.SMTP_PASSWORD,
     LOG_LEVEL: process.env.LOG_LEVEL,
     MAIL_LOG_FILE: process.env.MAIL_LOG_FILE,
     CRON_SECRET: process.env.CRON_SECRET,

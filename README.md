@@ -34,7 +34,7 @@ Auth.js 5 · Tailwind 4 + shadcn-style components · Vitest · Turborepo + pnpm.
 ## Getting started
 
 Prerequisites: Node 24 (`.node-version`), pnpm 10 or newer, and PostgreSQL 16
-(Docker is the easy way; a [Neon](https://neon.tech) database works unchanged).
+(Docker is the easy way; any hosted Postgres works unchanged).
 Install pnpm with `corepack enable pnpm`, or with
 `npm i -g pnpm --allow-scripts=pnpm` (npm 11+ blocks the install script that
 sets up its launcher otherwise, and Turborepo then cannot spawn `pnpm`).

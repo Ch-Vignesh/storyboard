@@ -14,12 +14,12 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase**        | 9 — The gaps we left. All five items done; phase 8's accounts are still outstanding.                                                                                                                                                  |
-| **State**        | Phase 9 is complete: account deletion, `.epub`, Upstash, the Content-Security-Policy and Google sign-in. The age gate was removed on the way (decision 0026), which reopens OD-7. Uncommitted.                                        |
-| **Last updated** | 2026-09-15                                                                                                                                                                                                                            |
-| **Next actions** | 1. Review and commit phase 9. 2. Open phase 8's five accounts and follow `docs/05-deployment.md` — nothing deployed means no slow query log, no sign-up drop-off, and no restore drill, which is what phases 9 and 10 are waiting on. |
+|                  |                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 8 — Into the world, the account half. Phase 9 is done and pushed.                                                                                                                                                                                                                                                                                                                                                                   |
+| **State**        | The live database is migrated and seeded (decision 0028), mail goes through Gmail over SMTP (decision 0029), and both Vercel projects are configured: `draftboard` builds `apps/app` with its Production variables, and the marketing site is redeployed with real links. The team is on Hobby, so scheduled work runs from GitHub Actions (decision 0030). The app has never deployed: that happens on the next push. Uncommitted. |
+| **Last updated** | 2026-10-13                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Next actions** | 1. Review, commit and push: the push is the app's first deployment, at https://draftboard-cyan.vercel.app. 2. In GitHub → Settings → Secrets and variables → Actions: secret `CRON_SECRET` (copy it from the Vercel project) and variable `APP_URL`. 3. Sign up once on the deployment, and run one job by hand from the Actions tab. 4. Backups that meet NFR-8 (decision 0028). 5. R2, then remove `ALLOW_INCOMPLETE_DEPLOYMENT`. |
 
 ## Overview
 
@@ -61,7 +61,7 @@ Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 - [x] CI workflow: format, vocabulary, lint, typecheck, migrate, test (with Postgres service), build. _(2026-09-12; first run pending the push)_
 - [x] Typed environment (`apps/app/src/env.ts`) that fails the build on a missing variable; single root `.env` (decision 0006). _(2026-09-12)_
 - [x] Structured logger (pino) ready for NFR-7 events. _(2026-09-12)_
-- [ ] Hosting: two Vercel projects (`apps/app`, `apps/web`), Neon database with branch previews, daily backups with 30-day retention (NFR-8). _Account work, not code. See the hosting checklist below._
+- [ ] Hosting: two Vercel projects (`apps/app`, `apps/web`), Neon database with branch previews, daily backups with 30-day retention (NFR-8). _Account work, not code. See the hosting checklist below. The database became Prisma Postgres, without branch previews (decision 0028)._
 
 ### Exit criteria (from `03-build-plan.md`)
 
@@ -516,11 +516,22 @@ Marked `[x]` only where the work is actually finished. Everything still `[ ]`
 needs an account, a DNS record, or a person with a screen reader — none of which
 a commit can supply.
 
-1. [ ] **Neon.** A Postgres 16 project with branch previews and daily backups at 30-day retention (NFR-8). Two connection strings, and they are not interchangeable: the pooled one is `DATABASE_URL`, the direct one is `DIRECT_DATABASE_URL` and is what migrations use, because DDL cannot run over a transaction-mode pooler. `packages/db/prisma.config.ts` prefers it; the application never reads it.
+1. [ ] **Prisma Postgres**, in place of Neon (decision 0028). Two connection strings on two hosts, and they are not interchangeable: `pooled.db.prisma.io` is `DATABASE_URL`, `db.prisma.io` is `DIRECT_DATABASE_URL` and is what migrations use, because DDL cannot run over a transaction-mode pooler. `packages/db/prisma.config.ts` prefers it; the application never reads it. The `prisma+postgres://` URL beside them is Prisma Accelerate and is refused.
+   - [x] Created through Vercel's storage integration. _(2026-10-13)_
+   - [x] Guardrails, now that `.env` names the live database: test runs keep off a hosted `DATABASE_URL`, local `pnpm e2e` refuses one, and `migrate dev`, `migrate reset` and `db push` refuse one. `prisma.config.ts` also fell back from an empty `DIRECT_DATABASE_URL` with `??`, so a copy of `.env.example` could not run a migration. _(2026-10-13)_
+   - [x] The two strings in `.env`: the pooled host as `DATABASE_URL`, the direct host as `DIRECT_DATABASE_URL`. _(2026-10-13)_
+   - [x] `pnpm db:deploy`, `pnpm db:seed`, `pnpm check-deploy`. Rehearsed on a throwaway local database first. Live: 11 migrations, 26 storyboards, 3 accounts with no password; a second seed run changed no row, and the app served the sitemap and the storyboards locally without writing anything. _(2026-10-13)_
+     - The first live seed failed twice, and both are fixed. A session-level `SET` made through the pooled host — by a throwaway counting script, not the repository — stuck to one shared server connection and made it read-only; it was reset on every pooled connection and verified. Then the seed's transactions outran Prisma's 5 s default at about 300 ms a round trip from the laptop; the seed now allows 120 s (`prisma/seed/index.ts`). The application keeps the default, which is why the function region has to match the database's.
+   - [ ] `DATABASE_URL` in the Vercel project, Production only: a preview would otherwise write to the live database. And the function region set to the database's.
+   - [ ] Backups that meet NFR-8. Free has none and Starter or Pro keep 7 days, so it is Business or a daily `pg_dump` kept for 30 days.
 2. [ ] **Cloudflare R2.** One bucket, one access key, the four `R2_*` variables — **and the bucket's CORS rule**, which is the step that costs an afternoon when it is missed: the browser PUTs straight to R2, so the bucket has to allow the application's origin or every upload fails with an error that names nothing. The exact policy is in `docs/05-deployment.md`.
-3. [x] **Deployment configuration.** `apps/app/vercel.json` and `apps/web/vercel.json` — build through Turborepo from the workspace root, plus the six cron entries. Note the plan limit: Vercel's Hobby tier allows two scheduled jobs at most once a day, and this product has six, one every ten minutes.
+3. [x] **Deployment configuration.** `apps/app/vercel.json` and `apps/web/vercel.json` — build through Turborepo from the workspace root. The six cron entries moved to `.github/workflows/cron.yml` on 2026-10-13 (decision 0030): Hobby fails any deployment whose crons run more than once a day.
+   - [x] **The Vercel projects, configured from the API** _(2026-10-13)_. `draftboard` (the app): root directory `apps/app`, Next.js, function region `iad1`, the same as the database; 13 Production-only variables, with fresh `AUTH_SECRET` and `CRON_SECRET`, and `ALLOW_INCOMPLETE_DEPLOYMENT=1` until R2. Its production domain is `draftboard-cyan.vercel.app` — `draftboard.vercel.app` belongs to another team. `storyboard` (marketing): its two public URLs were unset, so every sign-up link on the live site pointed at `localhost:3200`; set, redeployed, and checked.
 4. [x] **The build actually works on a host with no `.env`.** Turborepo runs in `strict` env mode and `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_MARKETING_URL` and `CRON_SECRET` were not declared in `globalEnv`. Locally that is invisible, because `next.config.ts` loads the root `.env` itself. On Vercel there is no such file, so the first deployment would have failed on a required variable that was being filtered out — and, separately, a changed public URL would not have invalidated the build cache, which is how a deployment serves an old URL baked into the browser bundle.
-5. [ ] **Resend**, a verified sending domain, and `EMAIL_FROM` on it. Start this early: the DNS wait is measured in hours.
+5. [ ] **Email.** Resend with a verified sending domain, or SMTP (decision 0029).
+   - [x] SMTP through Gmail as `alerts.draftboard@gmail.com` with an app password: `server/mail/smtp.ts`, the preflight accepts either provider, and `pnpm check-deploy` logs in or, with `--email`, sends through the production code. A test message was sent and accepted. _(2026-10-13)_
+   - [ ] The `SMTP_*` variables and `EMAIL_FROM` in the Vercel project, then one real sign-up from the deployment.
+   - [ ] Resend and a domain, before the weekly digest outgrows Gmail's roughly 500 recipients a day.
 6. [x] **A deployment cannot start half-configured** (decision 0022). `apps/app/src/env-preflight.ts`. Every one of the fallbacks that is right on a laptop is silently wrong on the internet — no mail key means every verification link goes to stdout and every new account is stranded, no cron secret means no digest ever runs, no object store on a serverless host means uploads land on a machine that goes away. None of them raised anything. Now a publicly reachable deployment refuses to start and names all of them at once.
 7. [x] **The restore drill**, as a command (NFR-8). `pnpm db:drill "<url>"`. It checks that every migration is applied, that the invariants are really there — the immutability trigger and both partial unique indexes, which `prisma migrate status` cannot see and which a rebuilt database loses silently — that the tables hold rows, and that a whole storyboard reads out. It refuses any URL that is also `DATABASE_URL`. Verified in both directions against a copy of the development database: it passes on a good one and names exactly what is wrong with a damaged one.
    - [ ] **Run it against a real restored backup**, and write the date here. An undated drill did not happen.
@@ -674,17 +685,17 @@ counting mentions.
 
 Account work, not code. Each row says which phase first needs it.
 
-| Service                                                                                            | Purpose                                         | Needed from                    | Status |
-| -------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------ | ------ |
-| GitHub repository, branch protection on `main`, Dependabot, `good first issue` label               | NFR-9                                           | Phase 0                        | `[ ]`  |
-| Vercel project for `apps/app`                                                                      | hosting                                         | Phase 0                        | `[ ]`  |
-| Vercel project for `apps/web`                                                                      | hosting                                         | Phase 0                        | `[ ]`  |
-| Neon Postgres 16 with branch previews per PR; point-in-time restore configured for 30 days (NFR-8) | database, backups                               | Phase 0                        | `[ ]`  |
-| Resend with a verified sending domain                                                              | FR-1.3 emails, FR-12                            | Phase 0 (dev works without it) | `[ ]`  |
-| Inngest                                                                                            | digests, nudges, post-transaction notifications | Phase 3                        | `[ ]`  |
-| Cloudflare R2 bucket                                                                               | imports, exports                                | Phase 5                        | `[ ]`  |
-| Upstash Redis                                                                                      | rate limits                                     | Phase 6                        | `[ ]`  |
-| Domain(s) for the final name, DNS, `app.` subdomain                                                | OD-1                                            | Phase 7                        | `[ ]`  |
+| Service                                                                                    | Purpose                                         | Needed from                    | Status |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------- | ------------------------------ | ------ |
+| GitHub repository, branch protection on `main`, Dependabot, `good first issue` label       | NFR-9                                           | Phase 0                        | `[ ]`  |
+| Vercel project for `apps/app` — `draftboard`, configured; first deploy on the next push    | hosting                                         | Phase 0                        | `[ ]`  |
+| Vercel project for `apps/web` — `storyboard`, live at storyboard-rust-theta.vercel.app     | hosting                                         | Phase 0                        | `[x]`  |
+| Prisma Postgres (decision 0028; was Neon). Created 2026-10-13; backups to NFR-8 still open | database, backups                               | Phase 0                        | `[ ]`  |
+| Email: Gmail over SMTP now (decision 0029), Resend with a domain later                     | FR-1.3 emails, FR-12                            | Phase 0 (dev works without it) | `[ ]`  |
+| Inngest                                                                                    | digests, nudges, post-transaction notifications | Phase 3                        | `[ ]`  |
+| Cloudflare R2 bucket                                                                       | imports, exports                                | Phase 5                        | `[ ]`  |
+| Upstash Redis                                                                              | rate limits                                     | Phase 6                        | `[ ]`  |
+| Domain(s) for the final name, DNS, `app.` subdomain                                        | OD-1                                            | Phase 7                        | `[ ]`  |
 
 ## Deviations from `02-architecture.md`
 

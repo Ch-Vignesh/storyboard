@@ -1,4 +1,4 @@
-import { loadRootEnv } from '@storyboard/config/env'
+import { databaseHost, isLocalDatabase, loadRootEnv } from '@storyboard/config/env'
 import { defineConfig, devices } from '@playwright/test'
 
 loadRootEnv()
@@ -28,6 +28,19 @@ const localURL = `http://localhost:${String(PORT)}`
 const deployed = process.env.PLAYWRIGHT_BASE_URL
 const baseURL = deployed ?? localURL
 
+// Built from this working tree, the server writes to whatever DATABASE_URL
+// names, and two flows write to it directly as well. Once `.env` holds the
+// deployed database, that is production — so a local run needs a local one.
+const databaseUrl = process.env.DATABASE_URL
+if (!deployed && databaseUrl && !isLocalDatabase(databaseUrl)) {
+  throw new Error(
+    `DATABASE_URL points at ${databaseHost(databaseUrl) ?? 'a URL that does not parse'}, not this ` +
+      'machine. The flows sign up accounts and write storyboards, so run them against a local ' +
+      'database: DATABASE_URL=postgresql://storyboard:storyboard@localhost:5432/storyboard pnpm e2e. ' +
+      'To run them against a deployment on purpose, set PLAYWRIGHT_BASE_URL.',
+  )
+}
+
 export default defineConfig({
   testDir: './e2e',
   // Flows share one database; running them at once would make the sign-up
@@ -55,7 +68,11 @@ export default defineConfig({
         env: {
           // The console mailer prints the verification link to stdout, which is how
           // the sign-up flow gets its token without a mail server (decision 0002).
+          // Every provider is blanked, or a real one in .env would send instead.
           RESEND_API_KEY: '',
+          SMTP_HOST: '',
+          SMTP_USER: '',
+          SMTP_PASSWORD: '',
           NEXT_PUBLIC_APP_URL: localURL,
           AUTH_URL: localURL,
           AUTH_TRUST_HOST: 'true',

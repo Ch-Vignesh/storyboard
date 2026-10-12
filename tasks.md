@@ -24,16 +24,16 @@ something that is not code.
 These are the only things standing between the product and a launch. Every one
 of them needs an account, a DNS record, or a person — not a commit.
 
-| What                                  | Needs                             | Blocks                             |
-| ------------------------------------- | --------------------------------- | ---------------------------------- |
-| Neon database                         | an account                        | everything deployed                |
-| R2 bucket **and its CORS rule**       | a Cloudflare account              | manuscript uploads                 |
-| Two Vercel projects (`app`, `web`)    | an account, on the **Pro** tier   | everything deployed                |
-| Resend, and a verified sending domain | an account and DNS                | **sign-up itself** — do this first |
-| Running the restore drill for real    | a backup to restore               | the NFR-8 claim                    |
-| A screen-reader pass                  | an hour and a screen reader       | the WCAG 2.2 AA claim              |
-| The 26 flows against production       | a deployment                      | the traffic post                   |
-| The name (OD-1)                       | a decision, deliberately deferred | nothing                            |
+| What                                 | Needs                             | Blocks                             |
+| ------------------------------------ | --------------------------------- | ---------------------------------- |
+| Prisma Postgres: strings, migrations | pasting two values, then a laptop | everything deployed                |
+| R2 bucket **and its CORS rule**      | a Cloudflare account              | manuscript uploads                 |
+| Push, then the cron secret in GitHub | `CRON_SECRET` and `APP_URL`       | digests and the purge              |
+| Email: SMTP variables in Vercel      | four values (Gmail works locally) | **sign-up itself** — do this first |
+| Running the restore drill for real   | a backup to restore               | the NFR-8 claim                    |
+| A screen-reader pass                 | an hour and a screen reader       | the WCAG 2.2 AA claim              |
+| The 26 flows against production      | a deployment                      | the traffic post                   |
+| The name (OD-1)                      | a decision, deliberately deferred | nothing                            |
 
 Vercel's Hobby tier allows two scheduled jobs at most once a day. This product
 has six, one of them every ten minutes — so Hobby silently drops four of them.

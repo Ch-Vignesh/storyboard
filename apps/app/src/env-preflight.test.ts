@@ -148,6 +148,51 @@ describe('object storage', () => {
   })
 })
 
+describe('mail over SMTP (decision 0029)', () => {
+  const gmail = {
+    ...configured,
+    RESEND_API_KEY: undefined,
+    EMAIL_FROM: 'Storyboard <alerts@gmail.example>',
+    SMTP_HOST: 'smtp.gmail.example',
+    SMTP_USER: 'alerts@gmail.example',
+    SMTP_PASSWORD: 'app-password',
+  }
+
+  it('stands in for Resend', () => {
+    expect(deploymentProblems(gmail, { serverless: true })).toEqual([])
+    expect(deploymentWarnings(gmail, { serverless: true })).toEqual([])
+  })
+
+  it('needs host, user and password, not two of them', () => {
+    const problems = deploymentProblems(
+      { ...gmail, SMTP_PASSWORD: undefined },
+      { serverless: true },
+    )
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('SMTP_PASSWORD')
+  })
+
+  it('compares the sender to the login by address, not by display name or case', () => {
+    const same = { ...gmail, EMAIL_FROM: 'Somebody Else <Alerts@Gmail.example>' }
+    expect(deploymentWarnings(same, { serverless: true })).toEqual([])
+  })
+
+  it('warns when the sender is not the login, because the provider will rewrite or refuse it', () => {
+    const other = { ...gmail, EMAIL_FROM: 'Storyboard <hello@storyboard.example>' }
+    const warnings = deploymentWarnings(other, { serverless: true })
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('hello@storyboard.example')
+    expect(warnings[0]).toContain('alerts@gmail.example')
+  })
+
+  it('says which one is used when both are set', () => {
+    const both = { ...gmail, RESEND_API_KEY: 're_live_key' }
+    expect(deploymentWarnings(both, { serverless: true })).toEqual([
+      'RESEND_API_KEY and SMTP_* are both set. Mail goes through Resend; SMTP is ignored.',
+    ])
+  })
+})
+
 describe('the report', () => {
   it('names the escape hatch, so nobody has to read this file to find it', () => {
     const report = preflightReport(['CRON_SECRET is not set.'])

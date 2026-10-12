@@ -7,20 +7,39 @@ type CreateOptions = {
   connectionString?: string
   /** Prisma log levels. Defaults to warnings and errors. */
   log?: Array<'query' | 'info' | 'warn' | 'error'>
+  /**
+   * Interactive transaction limits, in milliseconds. Prisma's defaults — 2 s
+   * to get a connection, 5 s to finish — are sized for a web request next to
+   * its database. A batch run across the internet needs more.
+   */
+  transactionOptions?: { maxWait: number; timeout: number }
 }
 
 /**
  * Build a Prisma client backed by node-postgres. Prisma 7 talks to Postgres
  * through a driver adapter, so the same client works against local Docker
- * Postgres and a pooled Neon endpoint without configuration changes.
+ * Postgres and a pooled Prisma Postgres endpoint without configuration changes.
  */
 export function createPrismaClient(options: CreateOptions = {}): PrismaClient {
   const connectionString = options.connectionString ?? process.env.DATABASE_URL
   if (!connectionString) {
     throw new Error('DATABASE_URL is not set. Copy .env.example to .env at the repository root.')
   }
+  // Prisma also issues `prisma+postgres://` URLs, for Prisma Accelerate, which
+  // speaks HTTP; node-postgres would read one as a host to dial on 5432 and
+  // fail somewhere far less obvious than here.
+  if (!/^postgres(ql)?:\/\//.test(connectionString)) {
+    throw new Error(
+      'DATABASE_URL must be a postgres:// connection string. A prisma+postgres:// URL is for ' +
+        'Prisma Accelerate, which this application does not use; take the postgres:// one.',
+    )
+  }
   const adapter = new PrismaPg({ connectionString })
-  return new PrismaClient({ adapter, log: options.log ?? ['warn', 'error'] })
+  return new PrismaClient({
+    adapter,
+    log: options.log ?? ['warn', 'error'],
+    ...(options.transactionOptions && { transactionOptions: options.transactionOptions }),
+  })
 }
 
 const globalForPrisma = globalThis as typeof globalThis & { __storyboardPrisma?: PrismaClient }

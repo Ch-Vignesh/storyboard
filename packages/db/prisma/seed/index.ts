@@ -16,8 +16,17 @@ import { seedLibrary } from './storyboards/seed-library'
 
 loadRootEnv()
 
+/**
+ * One storyboard is one transaction: a few dozen statements, each a round trip.
+ * The seed runs from a laptop against the hosted database (05-deployment.md),
+ * and across an ocean a round trip is about 300 ms — measured against Prisma
+ * Postgres on 2026-10-13 — so Prisma's 5 s default expired on the first one.
+ * Getting a connection through the pooler took 2 to 4 s on the same run.
+ */
+const SEED_TRANSACTIONS = { maxWait: 30_000, timeout: 120_000 }
+
 async function main(): Promise<void> {
-  const prisma = createPrismaClient()
+  const prisma = createPrismaClient({ transactionOptions: SEED_TRANSACTIONS })
   try {
     let created = 0
     for (const genre of GENRES) {

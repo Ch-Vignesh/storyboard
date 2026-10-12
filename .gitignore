@@ -58,6 +58,8 @@ scratch/
 
 # AI assistant tooling: local to a contributor's machine, never committed
 CLAUDE.md
+# next dev writes this (and CLAUDE.md) when an AI agent runs it
+AGENTS.md
 .claude/
 .cursor/
 .cursorrules

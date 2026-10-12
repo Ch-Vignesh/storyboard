@@ -6,7 +6,7 @@
  * run without, badly, in ways that look like nothing is wrong.
  *
  * Every one of these was reachable before phase 8. With a public URL and no
- * `RESEND_API_KEY` the application starts, serves pages, accepts sign-ups, and
+ * mail provider the application starts, serves pages, accepts sign-ups, and
  * prints each verification link to stdout — so every new account is stranded
  * and the logs look healthy. With no `CRON_SECRET` every scheduled job answers
  * 503 forever, which is the correct thing for an unauthenticated endpoint that
@@ -37,11 +37,24 @@ export type PreflightInput = {
   NEXT_PUBLIC_MARKETING_URL: string
   EMAIL_FROM: string
   RESEND_API_KEY?: string | undefined
+  SMTP_HOST?: string | undefined
+  SMTP_USER?: string | undefined
+  SMTP_PASSWORD?: string | undefined
   CRON_SECRET?: string | undefined
   R2_ACCOUNT_ID?: string | undefined
   R2_ACCESS_KEY_ID?: string | undefined
   R2_SECRET_ACCESS_KEY?: string | undefined
   R2_BUCKET?: string | undefined
+}
+
+/** Host, user and password together; two of three is not SMTP (decision 0029). */
+function smtpConfigured(env: PreflightInput): boolean {
+  return Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD)
+}
+
+/** The bare address out of `Name <address>`, lower-cased for comparison. */
+function addressOf(from: string): string {
+  return (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase()
 }
 
 export function isPubliclyReachable(appUrl: string): boolean {
@@ -68,18 +81,19 @@ export function deploymentProblems(
 
   const problems: string[] = []
 
-  if (!env.RESEND_API_KEY) {
+  if (!env.RESEND_API_KEY && !smtpConfigured(env)) {
     problems.push(
-      'RESEND_API_KEY is not set. This deployment is reachable from the internet, so the ' +
-        'console mailer would print every verification link and digest to stdout instead of ' +
-        'sending it — nobody would be able to finish signing up.',
+      'No mail provider is configured: set RESEND_API_KEY, or SMTP_HOST, SMTP_USER and ' +
+        'SMTP_PASSWORD. This deployment is reachable from the internet, so the console mailer ' +
+        'would print every verification link and digest to stdout instead of sending it — ' +
+        'nobody would be able to finish signing up.',
     )
   }
 
   if (env.EMAIL_FROM.includes('example.com')) {
     problems.push(
-      `EMAIL_FROM is still the placeholder (${env.EMAIL_FROM}). It has to be an address on a ` +
-        'domain verified with the mail provider, or every message is rejected or filed as spam.',
+      `EMAIL_FROM is still the placeholder (${env.EMAIL_FROM}). It has to be an address the mail ` +
+        'provider will send as, or every message is rejected or filed as spam.',
     )
   }
 
@@ -133,14 +147,32 @@ export function deploymentWarnings(
 ): string[] {
   if (!isPubliclyReachable(env.NEXT_PUBLIC_APP_URL)) return []
 
+  const warnings: string[] = []
+
   const r2 = env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET
   if (!r2 && !serverless) {
-    return [
+    warnings.push(
       'The four R2_* variables are not set, so uploaded manuscripts are written to .uploads/ on ' +
         'this server. That works, and it means uploads share the fate of this filesystem.',
-    ]
+    )
   }
-  return []
+
+  const smtpUser = addressOf(env.SMTP_USER ?? '')
+  if (env.RESEND_API_KEY && smtpConfigured(env)) {
+    warnings.push(
+      'RESEND_API_KEY and SMTP_* are both set. Mail goes through Resend; SMTP is ignored.',
+    )
+  } else if (smtpConfigured(env) && addressOf(env.EMAIL_FROM) !== smtpUser) {
+    // Gmail quietly rewrites the sender to the account that logged in; other
+    // providers refuse the message. Neither is what EMAIL_FROM promised.
+    warnings.push(
+      `EMAIL_FROM (${addressOf(env.EMAIL_FROM)}) is not SMTP_USER (${smtpUser}). Most SMTP ` +
+        'providers, Gmail among them, send as the account that logs in — so the sender will be ' +
+        'rewritten or the message refused.',
+    )
+  }
+
+  return warnings
 }
 
 /** The message a refused deployment prints. One block, no stack trace worth reading. */
