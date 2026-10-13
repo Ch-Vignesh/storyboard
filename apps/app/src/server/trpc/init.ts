@@ -7,6 +7,8 @@ import { z, ZodError } from 'zod'
 import { auth } from '@/auth'
 import type { Actor } from '@/lib/authz'
 import { loadStoryboardAsAuthor } from '@/lib/authz/guard'
+import { logger } from '@/lib/logger'
+import { SLOW_PROCEDURE_MS } from '@/lib/schemas/constants'
 
 export async function createTRPCContext(opts: { headers: Headers }) {
   const session = await auth()
@@ -42,6 +44,21 @@ const t = initTRPC.context<Context>().create({
 })
 
 /**
+ * Every procedure is timed, and a slow one is logged with its path (phase 10).
+ * A page that is slow in production then names the call that made it slow,
+ * instead of leaving it to be guessed at from the outside.
+ */
+const timedProcedure = t.procedure.use(async ({ path, type, next }) => {
+  const started = performance.now()
+  const result = await next()
+  const ms = Math.round(performance.now() - started)
+  if (ms >= SLOW_PROCEDURE_MS) {
+    logger.warn({ event: 'trpc.slow', path, type, ms, ok: result.ok }, 'slow procedure')
+  }
+  return result
+})
+
+/**
  * The session as `lib/authz` wants it. A guest is `null`, which is the only
  * shape `can()` accepts for "signed out" — there is no anonymous actor object.
  *
@@ -74,7 +91,7 @@ export function actorFrom(
  * mutation goes through a storyboard — reporting, profile edits and account
  * settings do not — so the gate is here as well as there.
  */
-export const activeProcedure = t.procedure.use(({ ctx, next }) => {
+export const activeProcedure = timedProcedure.use(({ ctx, next }) => {
   if (!ctx.session?.user) {
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Sign in first.' })
   }
@@ -98,7 +115,7 @@ export const activeProcedure = t.procedure.use(({ ctx, next }) => {
 })
 
 /** Requires a signed-in administrator (FR-15.5). */
-export const adminProcedure = t.procedure.use(({ ctx, next }) => {
+export const adminProcedure = timedProcedure.use(({ ctx, next }) => {
   // Not FORBIDDEN: an admin screen is not a thing to be told about.
   if (!ctx.session?.user || !ctx.account?.isAdmin) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found.' })
@@ -111,10 +128,10 @@ export const createCallerFactory = t.createCallerFactory
 export const mergeRouters = t.mergeRouters
 
 /** Anyone, signed in or not. Data-layer checks still apply to what it returns. */
-export const publicProcedure = t.procedure
+export const publicProcedure = timedProcedure
 
 /** Requires a session. `ctx.session.user` is non-null downstream. */
-export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+export const protectedProcedure = timedProcedure.use(({ ctx, next }) => {
   if (!ctx.session?.user) {
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Sign in to continue.' })
   }

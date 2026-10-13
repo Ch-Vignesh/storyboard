@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { prisma } from '@storyboard/db'
-import { IMPORT_LIMITS } from '@storyboard/import'
+import { IMPORT_LIMITS } from '@storyboard/import/types'
 
 import { auth } from '@/auth'
 import { logger } from '@/lib/logger'

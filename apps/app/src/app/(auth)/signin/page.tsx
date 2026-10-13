@@ -3,7 +3,7 @@ import { Input } from '@storyboard/ui/components/input'
 import { Label } from '@storyboard/ui/components/label'
 import type { Metadata } from 'next'
 import { AuthError } from 'next-auth'
-import Link from 'next/link'
+import Link from '@/components/link'
 import { redirect } from 'next/navigation'
 
 import { signIn } from '@/auth'

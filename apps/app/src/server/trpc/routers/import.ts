@@ -3,14 +3,12 @@ import { randomUUID } from 'node:crypto'
 import type { Prisma, PrismaClient } from '@storyboard/db'
 
 import {
-  analyse as analyseFile,
-  extract,
   formatOf,
   IMPORT_LIMITS,
-  SuspiciousArchiveError,
   type Block,
+  type Format,
   type Proposal,
-} from '@storyboard/import'
+} from '@storyboard/import/types'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
@@ -33,6 +31,13 @@ import { createUploadTarget, deleteObject, getObject, uploadKey } from '@/server
 import { activeProcedure, createTRPCRouter, protectedProcedure } from '../init'
 
 const log = logger.child({ router: 'import' })
+
+/**
+ * The parsers bring mammoth and an XML parser with them. They load with the
+ * first file somebody analyses, not with every cold start of the tRPC route,
+ * which is what a top-level import cost (phase 10).
+ */
+const importer = () => import('@storyboard/import')
 
 /**
  * Import (FR-3), in four steps that mirror architecture section 5.
@@ -106,6 +111,7 @@ export const importRouter = createTRPCRouter({
     .input(z.object({ jobId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const job = await load(ctx.db, ctx.session.user.id, input.jobId)
+      const { analyse, SuspiciousArchiveError } = await importer()
 
       let file: Buffer
       try {
@@ -125,7 +131,7 @@ export const importRouter = createTRPCRouter({
 
       let proposal: Proposal
       try {
-        proposal = await analyseFile(job.format as Parameters<typeof analyseFile>[0], file)
+        proposal = await analyse(job.format as Format, file)
       } catch (error) {
         log.warn({ event: 'import.parse_failed', jobId: job.id, error }, 'could not read the file')
         // The archive guard has something specific to say; everything else gets
@@ -211,7 +217,8 @@ export const importRouter = createTRPCRouter({
 
       // The prose, read again from the file rather than taken from the request.
       const file = await getObject(job.fileKey)
-      const doc = await extract(job.format as Parameters<typeof extract>[0], file)
+      const { extract } = await importer()
+      const doc = await extract(job.format as Format, file)
       const blocks = doc.blocks
 
       const flavour = flavourForStoryType(input.type)

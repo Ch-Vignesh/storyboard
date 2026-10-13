@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import Link from '@/components/link'
 
 import { STORY_TYPE_LABELS, type StoryTypeValue } from '@/lib/schemas/storyboard'
 

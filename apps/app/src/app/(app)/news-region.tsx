@@ -2,7 +2,7 @@
 
 import type { SuggestionState } from '@storyboard/db'
 import { useSuspenseQuery } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 
 import { PASS_CHIPS } from '@/lib/schemas/help'
 import { useTRPC } from '@/trpc/client'

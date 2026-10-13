@@ -2,7 +2,7 @@
 
 import { Button } from '@storyboard/ui/components/button'
 import { useSuspenseQuery } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 
 import { STORY_TYPE_LABELS } from '@/lib/schemas/storyboard'
 import { useTRPC } from '@/trpc/client'

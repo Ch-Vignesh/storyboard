@@ -4,7 +4,7 @@ import { Button } from '@storyboard/ui/components/button'
 import { Label } from '@storyboard/ui/components/label'
 import { Textarea } from '@storyboard/ui/components/textarea'
 import { useMutation } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 import { useState } from 'react'
 
 import { REPORT_CATEGORIES, TARGET_LABELS, type ReportTarget } from '@/lib/schemas/report'

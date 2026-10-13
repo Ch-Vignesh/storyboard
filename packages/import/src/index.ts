@@ -5,24 +5,13 @@ import { extractMarkdown } from './extract/markdown'
 import { extractPlainText, extractRtf } from './extract/plain'
 import { extractFdx, extractFountain } from './extract/screenplay'
 import { detectSections } from './sections'
-import { FORMATS, type Format, type NormalisedDoc, type Proposal } from './types'
+import { IMPORT_LIMITS, type Format, type NormalisedDoc, type Proposal } from './types'
 
 export * from './types'
 export { detectChapters } from './chapters'
 export { detectSections, previewOf, HARD_SPLIT_WORDS } from './sections'
 export { countWords, isSceneBreakLine } from './extract/blocks'
 export { SuspiciousArchiveError, MAX_UNCOMPRESSED_BYTES } from './extract/zip-guard'
-
-/** FR-3.1 — the limits, in one place so the UI and the server agree. */
-export const IMPORT_LIMITS = {
-  bytes: 5 * 1024 * 1024,
-  words: 300_000,
-} as const
-
-export function formatOf(fileName: string): Format | null {
-  const extension = fileName.toLowerCase().split('.').pop() ?? ''
-  return (FORMATS as readonly string[]).includes(extension) ? (extension as Format) : null
-}
 
 /** Reads a file into the one shape everything downstream works on. */
 export async function extract(format: Format, file: Buffer): Promise<NormalisedDoc> {

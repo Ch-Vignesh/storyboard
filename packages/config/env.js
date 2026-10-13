@@ -49,6 +49,36 @@ export function isLocalDatabase(url) {
 }
 
 /**
+ * Whether two connection strings name the same database, for the tools that
+ * refuse to run against the live one.
+ *
+ * Host, port and name are not enough either way round. A provider that pools
+ * serves it from a sibling host — `pooled.db.prisma.io` beside `db.prisma.io`,
+ * `ep-…-pooler.…neon.tech` beside `ep-….…neon.tech` — and those are one
+ * database, so the pool's host is folded into the direct one. And a shared host
+ * tells its tenants apart by the login: every Prisma Postgres database is
+ * `db.prisma.io:5432/postgres`, and only the user name says whose. So the same
+ * place with a different user is a different database. One that does not parse
+ * is compared whole.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+export function sameDatabase(a, b) {
+  const identity = (/** @type {string} */ url) => {
+    const { hostname, port, pathname, username } = new URL(url)
+    const host = hostname.replace(/^pooled\./, '').replace(/-pooler\./, '.')
+    return `${username}@${host}:${port || '5432'}${pathname}`
+  }
+  try {
+    return identity(a) === identity(b)
+  } catch {
+    return a === b
+  }
+}
+
+/**
  * Keep a test run off any database that is not on this machine.
  *
  * The database tests write real rows — accounts, storyboards, reports — and two

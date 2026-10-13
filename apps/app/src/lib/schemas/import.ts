@@ -1,4 +1,4 @@
-import { FORMATS, STRATEGIES } from '@storyboard/import'
+import { FORMATS, STRATEGIES } from '@storyboard/import/types'
 import { z } from 'zod'
 
 /**

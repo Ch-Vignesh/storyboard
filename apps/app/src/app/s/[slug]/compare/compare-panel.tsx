@@ -2,7 +2,7 @@
 
 import { Select } from '@storyboard/ui/components/select'
 import { useQuery } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 import { useState } from 'react'
 
 import { useTRPC } from '@/trpc/client'

@@ -4,7 +4,7 @@ import { Button } from '@storyboard/ui/components/button'
 import { Input } from '@storyboard/ui/components/input'
 import { Label } from '@storyboard/ui/components/label'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 import { useState } from 'react'
 
 import { nameOf } from '@/lib/people'

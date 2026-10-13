@@ -14,12 +14,12 @@ as the work it describes.
 
 ## Current position
 
-|                  |                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Phase**        | 8 — Into the world, the account half. Phase 9 is done and pushed.                                                                                                                                                                                                                                                                                                                                                                   |
-| **State**        | The live database is migrated and seeded (decision 0028), mail goes through Gmail over SMTP (decision 0029), and both Vercel projects are configured: `draftboard` builds `apps/app` with its Production variables, and the marketing site is redeployed with real links. The team is on Hobby, so scheduled work runs from GitHub Actions (decision 0030). The app has never deployed: that happens on the next push. Uncommitted. |
-| **Last updated** | 2026-10-13                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **Next actions** | 1. Review, commit and push: the push is the app's first deployment, at https://draftboard-cyan.vercel.app. 2. In GitHub → Settings → Secrets and variables → Actions: secret `CRON_SECRET` (copy it from the Vercel project) and variable `APP_URL`. 3. Sign up once on the deployment, and run one job by hand from the Actions tab. 4. Backups that meet NFR-8 (decision 0028). 5. R2, then remove `ALLOW_INCOMPLETE_DEPLOYMENT`. |
+|                  |                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase**        | 10 — Fast in production. Phases 11 and 12 finish production and get it ready for other people; 13 is driven by use.                                                                                                                                                                                                                                                                 |
+| **State**        | Live at draftboard-cyan.vercel.app since 2026-10-13, and slow: a 6.5 s cold start, a burst of prefetches per page, and a 53 s sign-up. Phase 10's code is done (decision 0031). The Singapore database is migrated, holds a verified copy of every row, and passed the restore drill; `.env` names it (decision 0032). Vercel names Singapore for its next deployment. Uncommitted. |
+| **Last updated** | 2026-10-13                                                                                                                                                                                                                                                                                                                                                                          |
+| **Next actions** | 1. Commit and push: the deployment it starts is the first in Singapore. 2. Then check `instance.start` says `sin1`, compare the two databases once more, then measure the four numbers again. 3. Phase 11: the owner creates the R2 bucket and its token; then the nightly backup and a real restore drill.                                                                         |
 
 ## Overview
 
@@ -35,7 +35,10 @@ as the work it describes.
 | 7     | Launch                 | FR-1.1, FR-15.1–15.4, NFR-1, NFR-4, OD-1, OD-7                                        | 2 weeks   | `[x]` committed, pushed               |
 | 8     | Into the world         | NFR-8, and every blocked task from phases 0–7                                         | 1 week    | `[~]` code done, accounts outstanding |
 | 9     | The gaps we left       | FR-14.2 (.epub), FR-1.6, OD-3 (second half), decision 0017                            | 2 weeks   | `[~]` four of five done               |
-| 10    | What writers ask for   | Driven by use, not by this plan                                                       | open      | `[ ]`                                 |
+| 10    | Fast in production     | NFR-1, from the first week of real use                                                | 1 week    | `[~]` code done, measuring            |
+| 11    | Finish production      | NFR-8, FR-3.1 in production, phase 8's account half                                   | 1 week    | `[ ]`                                 |
+| 12    | Draftboard, and launch | OD-1, OD-7, OD-9, NFR-4, the audit                                                    | 1 week    | `[ ]`                                 |
+| 13    | What writers ask for   | Driven by use, not by this plan                                                       | open      | `[ ]`                                 |
 
 Estimates are calendar weeks at a side-project pace (from `03-build-plan.md`).
 
@@ -601,7 +604,88 @@ are unused and are ready when the data arrives.
 
 ---
 
-## Phase 10 — What writers ask for
+## Phase 10 — Fast in production
+
+**Goal.** The deployed application answers as quickly as the work it does
+allows. Planned on 2026-10-13 from the first real use, when the owner found it
+slow to load and an email 2–5 minutes late.
+
+**Measured first** (decision 0031), against draftboard-cyan.vercel.app from India:
+
+| What                     | Before                                                                             |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| A warm request           | ~0.27 s, nearly all of it the trip to Washington and back                          |
+| A cold start             | 6.5 s, paid by every new instance                                                  |
+| One view of a storyboard | ~10 server renders at once: tab links, plus an edit and a history link per section |
+| Sign-up                  | 53 s inside the request before Gmail had the email; delivered 2–5 min later        |
+
+### Tasks, in order
+
+1. [x] **Timing in the logs.** `instance.start` once per cold start, `trpc.slow` for any call over 500 ms with its path, `mail.sent` / `mail.failed` with milliseconds and provider. _(2026-10-13)_
+2. [x] **Links prefetch on intent, not on sight.** `components/link.tsx`, in all 43 files that used `next/link`, with a lint rule against importing it directly. _(2026-10-13)_
+3. [x] **Heavy libraries load on first use**, not with every cold start of the tRPC route: the AWS SDK, mammoth and the XML parser, Resend, nodemailer, Argon2. `@storyboard/import/types` is the importer's light entry point. _(2026-10-13)_
+4. [x] **A pool sized for serverless.** Five connections per instance, a ten-second wait before failing instead of forever, idle connections kept a minute; `sslmode=verify-full`, which silences node-postgres's warning on every cold start. _(2026-10-13)_
+5. [x] **The verification email goes after the response** (`afterResponse`, decision 0031). The form answers at once; a failed send is logged and the page already offers another link. _(2026-10-13)_
+6. [ ] **Deploy and measure again**, the same four numbers, and write them here. Before the deploy, locally: 453 unit and database tests, the production build, and all 33 browser flows pass; 461 tests after the move's, with the database suites against a local Postgres. _(2026-10-13)_
+7. [ ] **Move to Singapore** (decision 0032): a Prisma Postgres database in `sin1`, created by the owner; migrations and a copy of every row; the function region set to `sin1`; `DATABASE_URL` swapped; the old database kept until the new one is proven.
+   - [x] **The database.** Created by the owner in Singapore through Vercel (prefix `prisma_sin_`). Migrated; 405 rows in 24 tables copied from Washington, every table identical by checksum; the restore drill passed on the copy. The root `.env` names it, with Washington's strings kept as comments. The drill had refused it at first: every Prisma Postgres database is `db.prisma.io:5432/postgres`, and the drill told databases apart by host, port and name alone. `sameDatabase` now compares the login too (decision 0032). _(2026-10-13)_
+   - [x] **Vercel**, in one go, through its API: `DATABASE_URL` (Production) set to the new pooled string, and the function region to `sin1` (`resourceConfig.functionDefaultRegions`; the API refuses it alongside the older `serverlessFunctionRegion`, which follows by itself). They take effect with the next deployment. _(2026-10-13)_
+   - [ ] **The push**, then proof: `instance.start` logs `region: sin1`, and the two databases still compare identical.
+   - [ ] **Washington removed**, after a clean week: disconnected from the project, deleted in the Prisma Console, its strings taken out of `.env`.
+   - [x] **`pnpm db:copy`**, for the move and any after it (`packages/db/scripts/copy-database.ts`). No superuser needed: rows go in parent first by their actual foreign-key values, the two nullable columns that close a cycle are filled in last, and `Revision` — which a trigger forbids updating — is ordered row by row. One transaction, then a checksum of every table on both sides. It refuses a non-empty target, a target on different migrations, and a copy onto itself. Rehearsed twice locally: 380 seeded rows, then 1,741 rows left by the browser flows (a spin-off, 351 section heads, revisions from suggestions, import JSON) — every table identical, and the restore drill passes on the copy. _(2026-10-13)_
+8. [ ] **What the measurements in 6 point at.** `trpc.slow` names the procedures; the likely work is query count on the reader and the dashboard.
+
+### Exit criteria
+
+- [ ] Cold start under 3 s, from `instance.start` and the first response.
+- [ ] A warm signed-in page under 1 s from India.
+- [ ] Sign-up answers in under 2 s.
+- [ ] Every number measured on production and written above.
+
+---
+
+## Phase 11 — Finish production
+
+**Goal.** Nothing running on `ALLOW_INCOMPLETE_DEPLOYMENT`, and a backup that
+has been restored.
+
+### Tasks, in order
+
+1. [ ] **Cloudflare R2.** The owner opens the account; the bucket, an access key scoped to it, the CORS rule, the four `R2_*` variables on Vercel. Then `ALLOW_INCOMPLETE_DEPLOYMENT` comes off. _Account open with R2 enabled, 2026-10-13; no bucket yet._
+2. [ ] **A nightly encrypted backup** (NFR-8). A GitHub Actions job runs `pg_dump` over the direct host, encrypts it, and writes it to a bucket of its own with a 30-day expiry rule, through a token of its own: the application's key, which a compromised server would hold, should not be able to delete the backups. Prisma's Free plan keeps no snapshots, so this is the backup.
+3. [ ] **The restore drill, for real.** Last night's dump into a throwaway database, then `pnpm db:drill`. Dated here.
+4. [ ] **The flows against production**, with a plan for the accounts they create.
+
+### Exit criteria
+
+- [ ] The preflight passes with no override.
+- [ ] A dated restore drill from a real backup.
+- [ ] The flows green against production.
+
+---
+
+## Phase 12 — Draftboard, and launch readiness
+
+**Goal.** Ready for people who are not the owner.
+
+### Tasks, in order
+
+1. [ ] **The rename to Draftboard** (OD-1, decided 2026-10-13). Every name a person sees: page titles, emails, the sender, the marketing site, metadata. Package names and internals stay. One question to settle first: whether the thing a writer makes is still called a storyboard.
+2. [ ] **The audit**, as after phase 6: the whole codebase since phase 9, not the diff.
+3. [ ] **The screen-reader pass.** A person, not a test file.
+4. [ ] **The open decisions**: OD-7 (age policy), OD-9 (the marketing site's weight), OD-8 if search comes up.
+
+### Exit criteria
+
+- [ ] No user-visible "Storyboard" left that means the product.
+- [ ] The audit's findings fixed or recorded.
+- [ ] The screen-reader pass done, dated, and its findings fixed.
+
+---
+
+## Phase 13 — What writers ask for
+
+_This was phase 10 until 2026-10-13, when phases 10 to 12 were inserted ahead of it. Decision records written before then call it phase 10._
 
 **Goal.** Deliberately not planned here.
 
@@ -678,7 +762,7 @@ counting mentions.
 | OD-5  | One "helped" idea per request, or unlimited              | Phase 2                | closed      | Decision 0010 — one credited idea per request, enforced by the `one_helpful_idea_per_request` partial unique index.                                                                                                                                                                                                                                  |
 | OD-6  | Co-author quota exemption across storyboards             | Phase 6                | closed      | Decision 0016 — a bigger quota (10), not an exemption. Owner uncapped, everyone else 3.                                                                                                                                                                                                                                                              |
 | OD-7  | Under-16 policy and adult-to-minor messaging             | Phase 7 (not optional) | open again  | Decision 0020 closed it with two halves; decision 0026 withdrew the age gate, so it is open with a narrower question: is having no private surface at all sufficient on its own? Phase 10, from what the report queue fills up with. The no-private-messages half still holds.                                                                       |
-| OD-8  | What is searchable in an unpublished manuscript          | Phase 10               | open        | Full-text search is in the deferred table for a privacy reason, not a technical one. Somebody has to say what a stranger may search inside work nobody has published.                                                                                                                                                                                |
+| OD-8  | What is searchable in an unpublished manuscript          | Phase 13               | open        | Full-text search is in the deferred table for a privacy reason, not a technical one. Somebody has to say what a stranger may search inside work nobody has published.                                                                                                                                                                                |
 | OD-9  | Whether the marketing site should be a Next.js app       | Phase 9                | open        | One static page currently ships ~560 KB of framework JavaScript it never uses. Plain HTML, or a static-site generator, would be a fraction of that — against the cost of a second toolchain.                                                                                                                                                         |
 | OD-10 | A Content-Security-Policy, and what it costs             | Phase 9                | open        | The application renders prose that strangers wrote and has no CSP. A strict one needs a nonce threaded from the proxy through the layout, which is a real change with a real chance of breaking a screen quietly — so it wants its own deliberate pass rather than being bolted onto a deployment phase. HSTS and the other headers are already set. |
 
@@ -686,17 +770,17 @@ counting mentions.
 
 Account work, not code. Each row says which phase first needs it.
 
-| Service                                                                                    | Purpose                                         | Needed from                    | Status |
-| ------------------------------------------------------------------------------------------ | ----------------------------------------------- | ------------------------------ | ------ |
-| GitHub repository, branch protection on `main`, Dependabot, `good first issue` label       | NFR-9                                           | Phase 0                        | `[ ]`  |
-| Vercel project for `apps/app` — `draftboard`, configured; first deploy on the next push    | hosting                                         | Phase 0                        | `[ ]`  |
-| Vercel project for `apps/web` — `storyboard`, live at storyboard-rust-theta.vercel.app     | hosting                                         | Phase 0                        | `[x]`  |
-| Prisma Postgres (decision 0028; was Neon). Created 2026-10-13; backups to NFR-8 still open | database, backups                               | Phase 0                        | `[ ]`  |
-| Email: Gmail over SMTP now (decision 0029), Resend with a domain later                     | FR-1.3 emails, FR-12                            | Phase 0 (dev works without it) | `[ ]`  |
-| Inngest                                                                                    | digests, nudges, post-transaction notifications | Phase 3                        | `[ ]`  |
-| Cloudflare R2 bucket                                                                       | imports, exports                                | Phase 5                        | `[ ]`  |
-| Upstash Redis                                                                              | rate limits                                     | Phase 6                        | `[ ]`  |
-| Domain(s) for the final name, DNS, `app.` subdomain                                        | OD-1                                            | Phase 7                        | `[ ]`  |
+| Service                                                                                   | Purpose                                         | Needed from                    | Status |
+| ----------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------ | ------ |
+| GitHub repository, branch protection on `main`, Dependabot, `good first issue` label      | NFR-9                                           | Phase 0                        | `[ ]`  |
+| Vercel project for `apps/app` — `draftboard`, configured; first deploy on the next push   | hosting                                         | Phase 0                        | `[ ]`  |
+| Vercel project for `apps/web` — `storyboard`, live at storyboard-rust-theta.vercel.app    | hosting                                         | Phase 0                        | `[x]`  |
+| Prisma Postgres (decisions 0028, 0032). Singapore since 2026-10-13; backups to NFR-8 open | database, backups                               | Phase 0                        | `[ ]`  |
+| Email: Gmail over SMTP now (decision 0029), Resend with a domain later                    | FR-1.3 emails, FR-12                            | Phase 0 (dev works without it) | `[ ]`  |
+| Inngest                                                                                   | digests, nudges, post-transaction notifications | Phase 3                        | `[ ]`  |
+| Cloudflare R2: account open 2026-10-13; the bucket, its token and CORS rule still to do   | imports, exports                                | Phase 5                        | `[ ]`  |
+| Upstash Redis                                                                             | rate limits                                     | Phase 6                        | `[ ]`  |
+| Domain(s) for the final name, DNS, `app.` subdomain                                       | OD-1                                            | Phase 7                        | `[ ]`  |
 
 ## Deviations from `02-architecture.md`
 

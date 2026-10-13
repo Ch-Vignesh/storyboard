@@ -4,11 +4,27 @@
  * Six formats come in (FR-3.1) and exactly one structure comes out, so adding
  * a seventh format later touches one file in `extract/` and nothing else. This
  * is architecture section 5's `NormalisedDoc`, spelled out.
+ *
+ * Also the package's light entry point, `@storyboard/import/types`: nothing in
+ * this file loads a parser. Forms, schemas and the upload route import from
+ * here; only the code that actually reads a file pulls in the index, and with
+ * it mammoth (phase 10, cold starts).
  */
 
 /** The formats FR-3.1 accepts, by extension without the dot. */
 export const FORMATS = ['docx', 'md', 'txt', 'rtf', 'fountain', 'fdx'] as const
 export type Format = (typeof FORMATS)[number]
+
+/** FR-3.1 — the limits, in one place so the UI and the server agree. */
+export const IMPORT_LIMITS = {
+  bytes: 5 * 1024 * 1024,
+  words: 300_000,
+} as const
+
+export function formatOf(fileName: string): Format | null {
+  const extension = fileName.toLowerCase().split('.').pop() ?? ''
+  return (FORMATS as readonly string[]).includes(extension) ? (extension as Format) : null
+}
 
 /**
  * A block is a paragraph-sized piece of the document.

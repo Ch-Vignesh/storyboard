@@ -1,6 +1,11 @@
 'use client'
 
-import { IMPORT_LIMITS, STRATEGY_COPY, type Proposal, type Strategy } from '@storyboard/import'
+import {
+  IMPORT_LIMITS,
+  STRATEGY_COPY,
+  type Proposal,
+  type Strategy,
+} from '@storyboard/import/types'
 import { Button } from '@storyboard/ui/components/button'
 import { Input } from '@storyboard/ui/components/input'
 import { Label } from '@storyboard/ui/components/label'

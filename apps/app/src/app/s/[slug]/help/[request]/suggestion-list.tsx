@@ -2,7 +2,7 @@
 
 import { Button } from '@storyboard/ui/components/button'
 import { useMutation } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 import { useRouter } from 'next/navigation'
 
 import { PASS_CHIPS, SUGGESTION_STATE_LABELS } from '@/lib/schemas/help'

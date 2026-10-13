@@ -1,7 +1,7 @@
 import { FORMAT_LABELS, formatsFor } from '@storyboard/export'
 import { TRPCError } from '@trpc/server'
 import type { Metadata } from 'next'
-import Link from 'next/link'
+import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
 import { flavourForStoryType } from '@/lib/doc/schema'

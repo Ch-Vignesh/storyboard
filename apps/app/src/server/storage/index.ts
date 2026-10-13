@@ -4,13 +4,9 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 
-import {
-  GetObjectCommand,
-  PutObjectCommand,
-  S3Client,
-  DeleteObjectCommand,
-} from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+// Types only: erased at build, so the SDK itself still loads on first use.
+import type * as S3 from '@aws-sdk/client-s3'
+import type { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 import { env } from '@/env'
 
@@ -51,17 +47,35 @@ function r2Configured(): boolean {
   )
 }
 
-let client: S3Client | null = null
-function s3(): S3Client {
-  client ??= new S3Client({
-    region: 'auto',
-    endpoint: `https://${String(env.R2_ACCOUNT_ID)}.r2.cloudflarestorage.com`,
-    credentials: {
-      accessKeyId: String(env.R2_ACCESS_KEY_ID),
-      secretAccessKey: String(env.R2_SECRET_ACCESS_KEY),
-    },
-  })
-  return client
+type R2 = {
+  sdk: typeof S3
+  client: S3.S3Client
+  presign: typeof getSignedUrl
+}
+
+/**
+ * The AWS SDK, loaded on first use. It is megabytes of JavaScript, and this
+ * module sits under the tRPC router, so a top-level import made every cold
+ * start load it for the rare request that touches an upload (phase 10).
+ */
+let r2Loading: Promise<R2> | null = null
+function r2(): Promise<R2> {
+  r2Loading ??= (async () => {
+    const [sdk, presigner] = await Promise.all([
+      import('@aws-sdk/client-s3'),
+      import('@aws-sdk/s3-request-presigner'),
+    ])
+    const client = new sdk.S3Client({
+      region: 'auto',
+      endpoint: `https://${String(env.R2_ACCOUNT_ID)}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: String(env.R2_ACCESS_KEY_ID),
+        secretAccessKey: String(env.R2_SECRET_ACCESS_KEY),
+      },
+    })
+    return { sdk, client, presign: presigner.getSignedUrl }
+  })()
+  return r2Loading
 }
 
 /**
@@ -92,9 +106,10 @@ function localPath(key: string): string {
 /** Where the browser should PUT the file (FR-3.1). */
 export async function createUploadTarget(key: string, contentType: string): Promise<UploadTarget> {
   if (r2Configured()) {
-    const url = await getSignedUrl(
-      s3(),
-      new PutObjectCommand({
+    const { sdk, client, presign } = await r2()
+    const url = await presign(
+      client,
+      new sdk.PutObjectCommand({
         Bucket: String(env.R2_BUCKET),
         Key: key,
         ContentType: contentType,
@@ -115,7 +130,10 @@ export async function createUploadTarget(key: string, contentType: string): Prom
 
 export async function putObject(key: string, body: Buffer): Promise<void> {
   if (r2Configured()) {
-    await s3().send(new PutObjectCommand({ Bucket: String(env.R2_BUCKET), Key: key, Body: body }))
+    const { sdk, client } = await r2()
+    await client.send(
+      new sdk.PutObjectCommand({ Bucket: String(env.R2_BUCKET), Key: key, Body: body }),
+    )
     return
   }
   const path = localPath(key)
@@ -125,8 +143,9 @@ export async function putObject(key: string, body: Buffer): Promise<void> {
 
 export async function getObject(key: string): Promise<Buffer> {
   if (r2Configured()) {
-    const result = await s3().send(
-      new GetObjectCommand({ Bucket: String(env.R2_BUCKET), Key: key }),
+    const { sdk, client } = await r2()
+    const result = await client.send(
+      new sdk.GetObjectCommand({ Bucket: String(env.R2_BUCKET), Key: key }),
     )
     const bytes = await result.Body?.transformToByteArray()
     if (!bytes) throw new Error('That upload could not be read.')
@@ -143,7 +162,8 @@ export async function getObject(key: string): Promise<Buffer> {
 export async function deleteObject(key: string): Promise<void> {
   try {
     if (r2Configured()) {
-      await s3().send(new DeleteObjectCommand({ Bucket: String(env.R2_BUCKET), Key: key }))
+      const { sdk, client } = await r2()
+      await client.send(new sdk.DeleteObjectCommand({ Bucket: String(env.R2_BUCKET), Key: key }))
       return
     }
     await rm(localPath(key), { force: true })

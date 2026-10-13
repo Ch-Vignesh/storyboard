@@ -2,7 +2,7 @@
 
 import { Button } from '@storyboard/ui/components/button'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 
 import { NOTIFICATIONS } from '@/lib/schemas/notifications'
 import { useTRPC } from '@/trpc/client'

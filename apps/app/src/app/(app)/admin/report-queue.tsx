@@ -2,7 +2,7 @@
 
 import { Button } from '@storyboard/ui/components/button'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 import { useState } from 'react'
 
 import { REPORT_CATEGORIES } from '@/lib/schemas/report'

@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 
 import { useTRPC } from '@/trpc/client'
 

@@ -32,7 +32,7 @@ import { createRequire } from 'node:module'
 import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { loadRootEnv } from '@storyboard/config/env'
+import { loadRootEnv, sameDatabase } from '@storyboard/config/env'
 import { Client } from 'pg'
 
 loadRootEnv()
@@ -64,21 +64,6 @@ const results: Check[] = []
 function record(name: string, ok: boolean, detail: string): void {
   results.push({ name, ok, detail })
   console.warn(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`)
-}
-
-/**
- * Two database URLs are "the same database" when host, port and name agree.
- * Credentials and query parameters differ between a pooled and a direct string
- * for what is unarguably one database, so comparing the whole URL would let
- * production through on a technicality.
- */
-function sameDatabase(a: string, b: string): boolean {
-  try {
-    const [x, y] = [new URL(a), new URL(b)]
-    return x.host === y.host && x.pathname === y.pathname
-  } catch {
-    return a === b
-  }
 }
 
 async function main(): Promise<void> {

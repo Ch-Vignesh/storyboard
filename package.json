@@ -25,6 +25,7 @@
     "db:seed": "pnpm --filter @storyboard/db db:seed",
     "db:studio": "pnpm --filter @storyboard/db db:studio",
     "db:reset": "pnpm --filter @storyboard/db db:reset",
+    "db:copy": "pnpm --filter @storyboard/db db:copy",
     "db:drill": "pnpm --filter @storyboard/db db:drill",
     "prepare": "husky",
     "e2e": "pnpm --filter @storyboard/app e2e",

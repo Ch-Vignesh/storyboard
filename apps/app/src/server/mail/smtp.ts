@@ -1,4 +1,4 @@
-import { createTransport } from 'nodemailer'
+import type { Transporter } from 'nodemailer'
 
 import { SMTP_TIMEOUTS_MS } from '@/lib/schemas/constants'
 
@@ -32,20 +32,29 @@ export function createSmtpMailer(config: SmtpConfig): SmtpMailer {
   // upgrade a condition rather than a preference, so a server that declines it
   // (or anything in between that strips it) never sees the password.
   const implicitTls = config.port === 465
-  const transport = createTransport({
-    host: config.host,
-    port: config.port,
-    secure: implicitTls,
-    requireTLS: !implicitTls,
-    auth: { user: config.user, pass: config.password },
-    connectionTimeout: SMTP_TIMEOUTS_MS.connect,
-    greetingTimeout: SMTP_TIMEOUTS_MS.greeting,
-    socketTimeout: SMTP_TIMEOUTS_MS.socket,
-  })
+  // nodemailer loads with the first message, not with the server (phase 10).
+  let transport: Promise<Transporter> | null = null
+  const connect = () => {
+    transport ??= import('nodemailer').then(({ createTransport }) =>
+      createTransport({
+        host: config.host,
+        port: config.port,
+        secure: implicitTls,
+        requireTLS: !implicitTls,
+        auth: { user: config.user, pass: config.password },
+        connectionTimeout: SMTP_TIMEOUTS_MS.connect,
+        greetingTimeout: SMTP_TIMEOUTS_MS.greeting,
+        socketTimeout: SMTP_TIMEOUTS_MS.socket,
+      }),
+    )
+    return transport
+  }
 
   return {
     async send(mail) {
-      await transport.sendMail({
+      await (
+        await connect()
+      ).sendMail({
         from: config.from,
         to: mail.to,
         subject: mail.subject,
@@ -54,7 +63,7 @@ export function createSmtpMailer(config: SmtpConfig): SmtpMailer {
       })
     },
     async verify() {
-      await transport.verify()
+      await (await connect()).verify()
     },
   }
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 
 import { REQUEST_KINDS } from '@/lib/schemas/help'
 import { useTRPC } from '@/trpc/client'

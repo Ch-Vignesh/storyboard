@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs'
 
-import { Resend } from 'resend'
+import type { Resend } from 'resend'
 
 import { env } from '@/env'
 import { logger } from '@/lib/logger'
@@ -40,10 +40,16 @@ export const consoleMailer: Mailer = {
   },
 }
 
+/**
+ * Neither mail library loads until the first message: this module sits under the
+ * tRPC router, and most requests send nothing (phase 10, cold starts).
+ */
 function createResendMailer(apiKey: string): Mailer {
-  const resend = new Resend(apiKey)
+  let client: Promise<Resend> | null = null
   return {
     async send(mail) {
+      client ??= import('resend').then(({ Resend }) => new Resend(apiKey))
+      const resend = await client
       const { error } = await resend.emails.send({
         from: env.EMAIL_FROM,
         to: mail.to,
@@ -51,13 +57,7 @@ function createResendMailer(apiKey: string): Mailer {
         text: mail.text,
         html: mail.html,
       })
-      if (error) {
-        logger.error(
-          { event: 'mail.failed', to: mail.to, subject: mail.subject, error },
-          'email not sent',
-        )
-        throw new Error(`Email could not be sent: ${error.message}`)
-      }
+      if (error) throw new Error(error.message)
     },
   }
 }
@@ -84,19 +84,36 @@ function smtpConfig(): SmtpConfig | undefined {
   }
 }
 
-function withFailureLog(inner: Mailer): Mailer {
+/**
+ * Every real send is timed and logged, whichever provider carries it (phase
+ * 10). A slow email is then either a slow provider, visible here, or a slow
+ * request around it, visible in `trpc.slow` — not a guess.
+ */
+function logged(provider: 'resend' | 'smtp', inner: Mailer): Mailer {
   return {
     async send(mail) {
+      const started = performance.now()
       try {
         await inner.send(mail)
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
         logger.error(
-          { event: 'mail.failed', to: mail.to, subject: mail.subject, error: reason },
+          {
+            event: 'mail.failed',
+            provider,
+            ms: Math.round(performance.now() - started),
+            to: mail.to,
+            subject: mail.subject,
+            error: reason,
+          },
           'email not sent',
         )
         throw new Error(`Email could not be sent: ${reason}`)
       }
+      logger.info(
+        { event: 'mail.sent', provider, ms: Math.round(performance.now() - started) },
+        'email accepted by the provider',
+      )
     },
   }
 }
@@ -107,10 +124,10 @@ let mailer: Mailer | undefined
 export function getMailer(): Mailer {
   if (mailer) return mailer
   if (env.RESEND_API_KEY) {
-    mailer = createResendMailer(env.RESEND_API_KEY)
+    mailer = logged('resend', createResendMailer(env.RESEND_API_KEY))
   } else {
     const smtp = smtpConfig()
-    mailer = smtp ? withFailureLog(createSmtpMailer(smtp)) : consoleMailer
+    mailer = smtp ? logged('smtp', createSmtpMailer(smtp)) : consoleMailer
   }
   return mailer
 }

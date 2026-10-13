@@ -20,6 +20,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "db:seed:demo": "tsx prisma/seed/demo-entry.ts",
+    "db:copy": "tsx scripts/copy-database.ts",
     "db:drill": "tsx scripts/restore-drill.ts"
   },
   "dependencies": {

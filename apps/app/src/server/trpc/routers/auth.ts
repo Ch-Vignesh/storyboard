@@ -6,6 +6,7 @@ import { createVerificationToken, hashToken, isWithinResendCooldown } from '@/au
 import { env } from '@/env'
 import { logger } from '@/lib/logger'
 import { emailSchema, passwordSchema } from '@/lib/schemas/auth'
+import { afterResponse } from '@/server/after-response'
 import { getMailer } from '@/server/mail/mailer'
 import { verifyEmailMail } from '@/server/mail/templates/verify-email'
 
@@ -28,8 +29,23 @@ async function issueVerification(db: Context['db'], user: { id: string; email: s
   const { token, tokenHash, expiresAt } = createVerificationToken()
   await db.emailVerificationToken.create({ data: { userId: user.id, tokenHash, expiresAt } })
   const url = `${env.NEXT_PUBLIC_APP_URL}/verify?token=${token}`
-  await getMailer().send(verifyEmailMail({ to: user.email, url }))
-  logger.info({ event: 'auth.verification.sent', userId: user.id }, 'verification email sent')
+  // Resolved here, in the request: a half-configured provider throws, and that
+  // has to surface as an error now rather than vanish after the response.
+  const mailer = getMailer()
+  // After the response (phase 10): Gmail can take many seconds to accept a
+  // message, and the form only needs to know the link exists. A failed send is
+  // logged, and the page already offers another link.
+  await afterResponse(async () => {
+    try {
+      await mailer.send(verifyEmailMail({ to: user.email, url }))
+      logger.info({ event: 'auth.verification.sent', userId: user.id }, 'verification email sent')
+    } catch (error) {
+      logger.error(
+        { event: 'auth.verification.failed', userId: user.id, error: String(error) },
+        'verification email not sent',
+      )
+    }
+  })
   return 'sent' as const
 }
 

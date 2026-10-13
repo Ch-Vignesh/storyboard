@@ -107,3 +107,10 @@ export const QUIET_REQUEST_NUDGE_DAYS = 7
  * the library's own defaults are two minutes to connect and ten to idle.
  */
 export const SMTP_TIMEOUTS_MS = { connect: 10_000, greeting: 10_000, socket: 20_000 } as const
+
+/**
+ * Phase 10. A tRPC call slower than this is logged with its path. Warm, a call
+ * here takes tens of milliseconds next to the database; half a second is worth
+ * a line in the log.
+ */
+export const SLOW_PROCEDURE_MS = 500

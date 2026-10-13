@@ -16,6 +16,25 @@ type CreateOptions = {
 }
 
 /**
+ * The connection pool, sized for a serverless host behind a database pooler
+ * (phase 10). node-postgres defaults to ten connections per instance and to
+ * waiting forever for one; Prisma Postgres's Free plan allows ten in total. So
+ * an instance keeps few, a request that cannot get one fails in seconds rather
+ * than hanging until the platform kills it, and an idle connection is kept for
+ * a minute so the next request does not pay for a new TLS handshake.
+ */
+const POOL = { max: 5, connectionTimeoutMillis: 10_000, idleTimeoutMillis: 60_000 } as const
+
+/**
+ * node-postgres 8 already treats `sslmode=require` as `verify-full` — it checks
+ * the certificate — and warns on every cold start that version 9 will stop
+ * doing so. Say what is meant, and the warning and the future weakening both go.
+ */
+export function explicitSslMode(connectionString: string): string {
+  return connectionString.replace(/([?&]sslmode=)require(?=&|$)/u, '$1verify-full')
+}
+
+/**
  * Build a Prisma client backed by node-postgres. Prisma 7 talks to Postgres
  * through a driver adapter, so the same client works against local Docker
  * Postgres and a pooled Prisma Postgres endpoint without configuration changes.
@@ -34,7 +53,10 @@ export function createPrismaClient(options: CreateOptions = {}): PrismaClient {
         'Prisma Accelerate, which this application does not use; take the postgres:// one.',
     )
   }
-  const adapter = new PrismaPg({ connectionString })
+  const adapter = new PrismaPg({
+    connectionString: explicitSslMode(connectionString),
+    ...POOL,
+  })
   return new PrismaClient({
     adapter,
     log: options.log ?? ['warn', 'error'],

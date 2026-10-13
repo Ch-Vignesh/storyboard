@@ -3,7 +3,7 @@
 import { Button } from '@storyboard/ui/components/button'
 import { Input } from '@storyboard/ui/components/input'
 import { Label } from '@storyboard/ui/components/label'
-import Link from 'next/link'
+import Link from '@/components/link'
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 

@@ -21,7 +21,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { Button } from '@storyboard/ui/components/button'
 import { Input } from '@storyboard/ui/components/input'
 import { useMutation } from '@tanstack/react-query'
-import Link from 'next/link'
+import Link from '@/components/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 

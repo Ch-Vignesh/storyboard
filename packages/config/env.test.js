@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { isLocalDatabase, keepTestsOffHostedDatabases } from './env.js'
+import { isLocalDatabase, keepTestsOffHostedDatabases, sameDatabase } from './env.js'
 
 describe('isLocalDatabase', () => {
   it.each([
@@ -26,6 +26,52 @@ describe('isLocalDatabase', () => {
     '',
   ])('not a database on this machine: %s', (url) => {
     expect(isLocalDatabase(url)).toBe(false)
+  })
+})
+
+describe('sameDatabase', () => {
+  const prisma = (user, host = 'db.prisma.io') =>
+    `postgres://${user}:sk_secret@${host}:5432/postgres?sslmode=require`
+
+  it.each([
+    ['a pool and its direct host', prisma('a1b2', 'pooled.db.prisma.io'), prisma('a1b2')],
+    [
+      "Neon's pooler and its endpoint",
+      'postgres://owner:pw@ep-cool-123-pooler.us-east-2.aws.neon.tech/neondb',
+      'postgres://owner:pw@ep-cool-123.us-east-2.aws.neon.tech/neondb?sslmode=require',
+    ],
+    [
+      'the default port, written and not',
+      'postgresql://storyboard:storyboard@localhost/storyboard',
+      'postgresql://storyboard:other@localhost:5432/storyboard',
+    ],
+  ])('one database: %s', (_, a, b) => {
+    expect(sameDatabase(a, b)).toBe(true)
+    expect(sameDatabase(b, a)).toBe(true)
+  })
+
+  it.each([
+    // Every Prisma Postgres database is db.prisma.io:5432/postgres. Comparing
+    // only the place refused a restore drill on any of them (decision 0032).
+    ['two databases on a shared host', prisma('a1b2'), prisma('c3d4')],
+    [
+      'a pool and somebody else’s direct host',
+      prisma('a1b2', 'pooled.db.prisma.io'),
+      prisma('c3d4'),
+    ],
+    [
+      'two names on one server',
+      'postgresql://storyboard:storyboard@localhost:5432/storyboard',
+      'postgresql://storyboard:storyboard@localhost:5432/storyboard_restored',
+    ],
+    [
+      'two ports on one machine',
+      'postgresql://storyboard:storyboard@localhost:5432/storyboard',
+      'postgresql://storyboard:storyboard@localhost:5433/storyboard',
+    ],
+    ['strings that do not parse, and differ', 'not a url', 'also not a url'],
+  ])('two databases: %s', (_, a, b) => {
+    expect(sameDatabase(a, b)).toBe(false)
   })
 })
 
