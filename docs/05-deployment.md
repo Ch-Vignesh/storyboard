@@ -469,6 +469,13 @@ preflight against a presigned upload URL. It checks the origin of
 `NEXT_PUBLIC_APP_URL`, which on a laptop is `localhost`; pass `--origin` to
 check production's from there.
 
+CORS saying yes is half of it. The page's own Content-Security-Policy has to
+let the browser connect to the bucket too, or the upload dies before it leaves
+the machine, with "Failed to fetch" as the only clue. So for each origin that
+answers, the check reads the policy and confirms `connect-src` names the
+upload's origin. Uploads are signed path-style, on the account's R2 endpoint
+(`src/lib/r2.ts`), which is the one host the policy adds.
+
 One thing it cannot check, and says so rather than implying otherwise: whether
 the email actually _arrived_, and in which folder, is something only you can
 look at.
@@ -511,16 +518,16 @@ So the rest is by hand, once, and it is the part no test can claim for you:
 
 ## When something is wrong
 
-| What you see                                       | Where to look                                                               |
-| -------------------------------------------------- | --------------------------------------------------------------------------- |
-| Deployment refuses to start, with a numbered list  | It is the preflight. Each line names its variable                           |
-| Sign-up email never arrives                        | `pnpm check-deploy --email`; then Resend's log, or Gmail's Sent folder      |
-| Gmail: "Username and Password not accepted"        | It wants an app password. Changing the account password revokes them        |
-| Uploads fail, console shows a CORS error           | The R2 CORS rule. `AllowedOrigins` is the app's origin                      |
-| Import works, then the parse cannot find the file  | R2 is not configured and instances do not share a disk                      |
-| No digest ever arrives                             | The Actions tab: a 401 means the two `CRON_SECRET`s differ                  |
-| Migration hangs on an advisory lock                | It is running over the pooled URL. Use `DIRECT_DATABASE_URL`                |
-| "cannot execute INSERT in a read-only transaction" | A session `SET` went through the pooled host. `RESET` it on each connection |
-| "Transaction API error … expired transaction"      | Round trips too slow: the function region is not the database's             |
-| "DATABASE_URL must be a postgres:// connection"    | It is the `prisma+postgres://` URL. Use the `postgres://` one               |
-| A build serves an old URL in the browser           | A `NEXT_PUBLIC_*` change needs a new deployment, not a restart              |
+| What you see                                       | Where to look                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Deployment refuses to start, with a numbered list  | It is the preflight. Each line names its variable                                                                                                                                                                                                                                                                  |
+| Sign-up email never arrives                        | The spam folder first: mail from a new Gmail sender, with links to a `vercel.app` address, lands there until it has a reputation. An address that already has an account gets "You already have a Draftboard account" instead of a link. Then `pnpm check-deploy --email`, and Resend's log or Gmail's Sent folder |
+| Gmail: "Username and Password not accepted"        | It wants an app password. Changing the account password revokes them                                                                                                                                                                                                                                               |
+| Uploads fail, console shows a CORS error           | The R2 CORS rule. `AllowedOrigins` is the app's origin                                                                                                                                                                                                                                                             |
+| Import works, then the parse cannot find the file  | R2 is not configured and instances do not share a disk                                                                                                                                                                                                                                                             |
+| No digest ever arrives                             | The Actions tab: a 401 means the two `CRON_SECRET`s differ                                                                                                                                                                                                                                                         |
+| Migration hangs on an advisory lock                | It is running over the pooled URL. Use `DIRECT_DATABASE_URL`                                                                                                                                                                                                                                                       |
+| "cannot execute INSERT in a read-only transaction" | A session `SET` went through the pooled host. `RESET` it on each connection                                                                                                                                                                                                                                        |
+| "Transaction API error … expired transaction"      | Round trips too slow: the function region is not the database's                                                                                                                                                                                                                                                    |
+| "DATABASE_URL must be a postgres:// connection"    | It is the `prisma+postgres://` URL. Use the `postgres://` one                                                                                                                                                                                                                                                      |
+| A build serves an old URL in the browser           | A `NEXT_PUBLIC_*` change needs a new deployment, not a restart                                                                                                                                                                                                                                                     |

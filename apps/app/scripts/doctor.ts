@@ -146,9 +146,12 @@ async function checkObjectStore(): Promise<void> {
     DeleteObjectCommand,
     ListObjectsV2Command,
   } = await import('@aws-sdk/client-s3')
+  // The application's own client options, so what is checked here is the URL
+  // shape a browser is really sent (path-style; see src/lib/r2.ts).
+  const { R2_CLIENT_OPTIONS, r2Endpoint } = await import('../src/lib/r2')
   const s3 = new S3Client({
-    region: 'auto',
-    endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    ...R2_CLIENT_OPTIONS,
+    endpoint: r2Endpoint(R2_ACCOUNT_ID),
     credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
   })
 
@@ -195,6 +198,7 @@ async function checkObjectStore(): Promise<void> {
     }
   }
   for (const origin of origins) await checkCors(url, origin)
+  for (const origin of origins) await checkPolicyAllows(origin, new URL(url).origin)
 
   if (backupBucket) {
     await checkKeptOut(backupBucket, () =>
@@ -228,6 +232,36 @@ async function checkKeptOut(bucket: string, list: () => Promise<unknown>): Promi
       record(false, name, String(error))
     }
   }
+}
+
+/**
+ * The other half of a browser upload: the page's own Content-Security-Policy
+ * has to let it connect to the bucket. CORS can say yes and the policy still
+ * say no, and then the upload dies in the browser with "Failed to fetch" —
+ * which is how the first import on production failed (2026-10-15).
+ */
+async function checkPolicyAllows(origin: string, uploadOrigin: string): Promise<void> {
+  const name = `${origin}'s policy lets the browser upload`
+  let policy: string | null
+  try {
+    const response = await fetch(`${origin}/signin`, { redirect: 'manual' })
+    policy = response.headers.get('content-security-policy')
+  } catch {
+    skip(name, 'nothing answered there; start the app to check it')
+    return
+  }
+  const connect = policy
+    ?.split(';')
+    .map((directive) => directive.trim())
+    .find((directive) => directive.startsWith('connect-src'))
+  const allowed = Boolean(connect?.split(/\s+/u).includes(uploadOrigin))
+  record(
+    allowed,
+    name,
+    allowed ? `connect-src names ${uploadOrigin}` : `connect-src is "${connect ?? 'missing'}"`,
+    'Uploads go to the R2 endpoint path-style (src/lib/r2.ts); the policy adds that ' +
+      'endpoint when R2_ACCOUNT_ID is set (withObjectStore in src/lib/csp.ts).',
+  )
 }
 
 async function checkCors(presignedPut: string, origin: string): Promise<void> {

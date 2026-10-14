@@ -10,6 +10,7 @@ import type { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 import { env } from '@/env'
 import { logger } from '@/lib/logger'
+import { R2_CLIENT_OPTIONS, r2Endpoint } from '@/lib/r2'
 
 const log = logger.child({ module: 'storage' })
 
@@ -69,8 +70,8 @@ function r2(): Promise<R2> {
       import('@aws-sdk/s3-request-presigner'),
     ])
     const client = new sdk.S3Client({
-      region: 'auto',
-      endpoint: `https://${String(env.R2_ACCOUNT_ID)}.r2.cloudflarestorage.com`,
+      ...R2_CLIENT_OPTIONS,
+      endpoint: r2Endpoint(String(env.R2_ACCOUNT_ID)),
       credentials: {
         accessKeyId: String(env.R2_ACCESS_KEY_ID),
         secretAccessKey: String(env.R2_SECRET_ACCESS_KEY),

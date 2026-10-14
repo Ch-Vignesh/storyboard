@@ -1,12 +1,12 @@
 'use client'
 
 import { Button } from '@storyboard/ui/components/button'
-import { Input } from '@storyboard/ui/components/input'
 import { Label } from '@storyboard/ui/components/label'
 import { useMutation } from '@tanstack/react-query'
 import { signIn } from 'next-auth/react'
 import { useState } from 'react'
 
+import { PasswordInput } from '@/components/password-input'
 import { useTRPC } from '@/trpc/client'
 
 export function SetPasswordForm({ token, email }: { token: string; email: string }) {
@@ -30,9 +30,8 @@ export function SetPasswordForm({ token, email }: { token: string; email: string
     >
       <div className="space-y-1.5">
         <Label htmlFor="password">Password</Label>
-        <Input
+        <PasswordInput
           id="password"
-          type="password"
           autoComplete="new-password"
           minLength={10}
           maxLength={128}

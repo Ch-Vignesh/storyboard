@@ -18,8 +18,11 @@ export function SignUpForm() {
     return (
       <div className="mt-8 rounded-control border border-moss-wash bg-moss-wash p-4 text-[14px] text-moss">
         {signUp.data.status === 'cooldown'
-          ? 'We sent a link a moment ago. Check your inbox, and wait a minute before asking for another.'
-          : `Check your inbox. If ${email} can receive email, a confirmation link is on its way.`}
+          ? 'We sent a message a moment ago. Check your inbox and your spam folder, and wait a minute before asking for another.'
+          : // The same words whether or not the address has an account (FR-1.3).
+            // Spam is named because, until the sender has a reputation of its
+            // own, that is where a first message often lands.
+            `Check your inbox. If ${email} can receive email, a message from Draftboard is on its way: a confirmation link, or a note if the address already has an account. Give it a couple of minutes, and look in spam too.`}
       </div>
     )
   }

@@ -27,6 +27,8 @@
  * be minted per request, and a header in the Next config is static.
  */
 
+import { r2Endpoint } from './r2'
+
 /** A fresh nonce. Base64 of 16 random bytes; `crypto` is available on the edge. */
 export function makeNonce(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16))
@@ -64,15 +66,15 @@ export function contentSecurityPolicy(nonce: string, { isDev }: { isDev: boolean
 }
 
 /**
- * The R2 account host, so a presigned upload can be reached from the browser.
+ * The R2 endpoint, so a presigned upload can be reached from the browser.
  *
  * FR-3.1 sends the file straight to the object store, which is a cross-origin
  * PUT and therefore `connect-src`. Without this the upload fails with a CSP
  * error rather than a CORS one, which is a different confusing message for the
- * same missing configuration.
+ * same missing configuration. The URLs are path-style (`lib/r2.ts`), so this
+ * one origin is every upload's origin; `r2.test.ts` signs one and checks.
  */
 export function withObjectStore(policy: string, accountId: string | undefined): string {
   if (!accountId) return policy
-  const host = `https://${accountId}.r2.cloudflarestorage.com`
-  return policy.replace(`connect-src 'self'`, `connect-src 'self' ${host}`)
+  return policy.replace(`connect-src 'self'`, `connect-src 'self' ${r2Endpoint(accountId)}`)
 }

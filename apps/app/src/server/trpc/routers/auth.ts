@@ -2,16 +2,22 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { hashPassword } from '@/auth/password'
-import { createVerificationToken, hashToken, isWithinResendCooldown } from '@/auth/tokens'
+import {
+  VERIFICATION_RESEND_COOLDOWN_MS,
+  createVerificationToken,
+  hashToken,
+  isWithinResendCooldown,
+} from '@/auth/tokens'
 import { env } from '@/env'
 import { logger } from '@/lib/logger'
 import { emailSchema, passwordSchema } from '@/lib/schemas/auth'
 import { afterResponse } from '@/server/after-response'
 import { getMailer } from '@/server/mail/mailer'
+import { accountExistsMail } from '@/server/mail/templates/account-exists'
 import { verifyEmailMail } from '@/server/mail/templates/verify-email'
 
 import { AUTH_LIMITS } from '@/lib/schemas/constants'
-import { DAY_MS, HOUR_MS, enforce, key, whenToRetry } from '@/server/limits'
+import { DAY_MS, HOUR_MS, consume, enforce, key, whenToRetry } from '@/server/limits'
 
 import { type Context, createTRPCRouter, publicProcedure } from '../init'
 
@@ -43,6 +49,55 @@ async function issueVerification(db: Context['db'], user: { id: string; email: s
       logger.error(
         { event: 'auth.verification.failed', userId: user.id, error: String(error) },
         'verification email not sent',
+      )
+    }
+  })
+  return 'sent' as const
+}
+
+/**
+ * FR-1.4's one-minute rhythm, for an address with no link to issue: one that
+ * already has an account, or none at all.
+ *
+ * An address waiting for its link answers "cooldown" when asked twice inside a
+ * minute, because `issueVerification` says so. Every other address used to
+ * answer "sent" every time, so two requests told a stranger which kind an
+ * address was. This gives them the same rhythm. It records a hit when it lets
+ * one through, so the second request inside the minute is the one refused.
+ */
+async function inQuietCooldown(db: Context['db'], email: string): Promise<boolean> {
+  const verdict = await consume(db, key.addressCooldown(email), {
+    limit: 1,
+    windowMs: VERIFICATION_RESEND_COOLDOWN_MS,
+  })
+  return !verdict.ok
+}
+
+/**
+ * The same answer for an address that already has an account (FR-1.3), and a
+ * note to it saying so — the only place the owner, and only the owner, can
+ * read that. Before the note, they were told a link was on its way and nothing
+ * came (2026-10-15, the first sign-up attempt on production).
+ */
+async function noticeExistingAccount(db: Context['db'], user: { id: string; email: string }) {
+  if (await inQuietCooldown(db, user.email)) return 'cooldown' as const
+
+  const mailer = getMailer()
+  // After the response, like the verification email, so neither path is the
+  // slower one: the time an answer takes must not say which kind it was.
+  await afterResponse(async () => {
+    try {
+      await mailer.send(
+        accountExistsMail({ to: user.email, signInUrl: `${env.NEXT_PUBLIC_APP_URL}/signin` }),
+      )
+      logger.info(
+        { event: 'auth.signup.existing.notified', userId: user.id },
+        'account-exists note sent',
+      )
+    } catch (error) {
+      logger.error(
+        { event: 'auth.signup.existing.failed', userId: user.id, error: String(error) },
+        'account-exists note not sent',
       )
     }
   })
@@ -82,7 +137,7 @@ export const authRouter = createTRPCRouter({
       const existing = await ctx.db.user.findUnique({ where: { email: input.email } })
       if (existing?.emailVerifiedAt) {
         logger.info({ event: 'auth.signup.existing' }, 'sign-up attempted for a verified address')
-        return { status: 'sent' as const }
+        return { status: await noticeExistingAccount(ctx.db, existing) }
       }
       // FR-13.4 — the rules are on the screen that produced this call, so
       // this records that they were shown rather than claiming they were read.
@@ -107,7 +162,12 @@ export const authRouter = createTRPCRouter({
       )
 
       const user = await ctx.db.user.findUnique({ where: { email: input.email } })
-      if (!user || user.emailVerifiedAt) return { status: 'sent' as const }
+      if (user?.emailVerifiedAt) return { status: await noticeExistingAccount(ctx.db, user) }
+      if (!user) {
+        return {
+          status: (await inQuietCooldown(ctx.db, input.email)) ? 'cooldown' : 'sent',
+        } as const
+      }
       return { status: await issueVerification(ctx.db, user) }
     }),
 

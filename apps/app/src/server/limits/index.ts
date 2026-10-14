@@ -158,4 +158,6 @@ export const key = {
   // action is about, and it is what somebody abusing it has to keep changing.
   signUp: (email: string) => `auth:signup:${email.toLowerCase()}`,
   verificationResend: (email: string) => `auth:resend:${email.toLowerCase()}`,
+  // The one-minute rhythm for an address with no link to send (auth router).
+  addressCooldown: (email: string) => `auth:cooldown:${email.toLowerCase()}`,
 } as const

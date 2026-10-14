@@ -65,14 +65,22 @@ export function ImportFlow({ genres }: { genres: Genre[] }) {
         byteSize: chosen.size,
       })
 
-      const response = await fetch(target.url, {
-        method: 'PUT',
-        headers: target.headers,
-        body: chosen,
-        // The local endpoint needs the session cookie; a presigned URL must not
-        // be sent one, and would reject the request if it were.
-        credentials: target.direct ? 'omit' : 'same-origin',
-      })
+      let response: Response
+      try {
+        response = await fetch(target.url, {
+          method: 'PUT',
+          headers: target.headers,
+          body: chosen,
+          // The local endpoint needs the session cookie; a presigned URL must not
+          // be sent one, and would reject the request if it were.
+          credentials: target.direct ? 'omit' : 'same-origin',
+        })
+      } catch {
+        // The browser could not send it at all: offline, or refused by a
+        // policy. Its own words for that are "Failed to fetch", which is what
+        // the first import on production showed (2026-10-15).
+        throw new Error('Your file could not be sent. Check your connection and try again.')
+      }
       if (!response.ok) throw new Error('The upload did not finish.')
 
       setJobId(id)

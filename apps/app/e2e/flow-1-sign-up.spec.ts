@@ -25,8 +25,13 @@ test('a new writer signs up, verifies, onboards and reaches the dashboard', asyn
   await page.goto(link)
 
   // Step 3 — set a password. FR-1.4's link is single-use, so this is the only
-  // time it works.
-  await page.getByLabel('Password').fill('a-long-enough-passphrase')
+  // time it works. It can be read back before it is sent, and hidden again.
+  const password = page.getByLabel('Password')
+  await password.fill('a-long-enough-passphrase')
+  await page.getByRole('button', { name: 'Show password' }).click()
+  await expect(password).toHaveAttribute('type', 'text')
+  await page.getByRole('button', { name: 'Hide password' }).click()
+  await expect(password).toHaveAttribute('type', 'password')
   await page.getByRole('button', { name: /set password/i }).click()
 
   // Step 4 — choose a username. FR-1.3 warns that it is permanent, and the

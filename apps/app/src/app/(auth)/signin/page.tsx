@@ -4,6 +4,7 @@ import { Label } from '@storyboard/ui/components/label'
 import type { Metadata } from 'next'
 import { AuthError } from 'next-auth'
 import Link from '@/components/link'
+import { PasswordInput } from '@/components/password-input'
 import { redirect } from 'next/navigation'
 
 import { signIn } from '@/auth'
@@ -48,13 +49,7 @@ export default async function SignInPage({ searchParams }: Props) {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="password">Password</Label>
-          <Input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-          />
+          <PasswordInput id="password" name="password" autoComplete="current-password" required />
         </div>
         {error ? (
           <p role="alert" className="text-[13.5px] text-crimson">
