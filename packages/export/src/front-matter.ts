@@ -44,7 +44,7 @@ export function frontMatterLines(manuscript: Manuscript): FrontMatterLine[] {
 
 /** The footer line. Every page of the PDF carries it; other formats carry it once. */
 export function sourceLine(manuscript: Manuscript): string {
-  return `Written on Storyboard — ${manuscript.sourceUrl}`
+  return `Written on Draftboard — ${manuscript.sourceUrl}`
 }
 
 /** A file name a writer will recognise in their downloads folder. */

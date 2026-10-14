@@ -115,8 +115,8 @@ export default async function ContributorsPage({ params }: Params) {
 
       {credits.length === 0 ? (
         <p className="mt-6 text-[14.5px] leading-relaxed text-ink-soft">
-          Nobody has contributed to this storyboard yet. When someone&rsquo;s suggestion is
-          accepted, or an idea of theirs helps, they appear here permanently.
+          Nobody has contributed to this story yet. When someone&rsquo;s suggestion is accepted, or
+          an idea of theirs helps, they appear here permanently.
         </p>
       ) : (
         <>

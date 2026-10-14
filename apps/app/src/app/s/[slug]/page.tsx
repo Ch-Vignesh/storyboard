@@ -57,7 +57,7 @@ export default async function StoryboardPage({ params, searchParams }: Params) {
       signedIn={Boolean(session?.user)}
       header={
         <Link href="/" className="font-manuscript text-[19px] font-medium tracking-tight text-ink">
-          Storyboard
+          Draftboard
         </Link>
       }
     />

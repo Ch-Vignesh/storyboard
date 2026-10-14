@@ -64,8 +64,7 @@ function toResource(row: LoadedStoryboard): StoryboardResource & { publicFrom: D
   }
 }
 
-const notFound = () =>
-  new TRPCError({ code: 'NOT_FOUND', message: 'That storyboard does not exist.' })
+const notFound = () => new TRPCError({ code: 'NOT_FOUND', message: 'That story does not exist.' })
 
 /**
  * Load a storyboard by id or slug and assert the action against it.

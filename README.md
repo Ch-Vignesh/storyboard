@@ -1,16 +1,18 @@
-# Storyboard
+# Draftboard
 
 An open-source platform where a writer posts a draft they are stuck on, other
 writers propose prose for the stuck passage, the author accepts one into the
 main draft with permanent credit, and anyone who disagrees can spin the story
 off into their own version.
 
-> **Status: pre-alpha, phase 0 of 8.** Nothing is deployed. See
+> **Status: live, before launch**, at
+> [draftboard-cyan.vercel.app](https://draftboard-cyan.vercel.app). See
 > [`docs/04-phase-plan.md`](docs/04-phase-plan.md) for where the build is.
 >
-> **Name:** _Storyboard_ is a working name. The domain is taken and the word is
-> crowded in film and animation; a rename is planned (open decision OD-1) and
-> will be a find-and-replace on the string, never on the concepts.
+> **Name:** the product was called _Storyboard_ while it was built, and became
+> _Draftboard_ in phase 12 (OD-1): "storyboard" belongs to film. Everything a
+> person sees says Draftboard, and what a writer makes is a story. The code, the
+> `@storyboard/*` packages and this repository keep the working name.
 
 ## What makes it different
 

@@ -353,7 +353,7 @@ async function describe(
         where: { id: targetId },
         select: { title: true, slug: true, logline: true },
       })
-      if (!storyboard) return { label: 'a deleted storyboard', href: null, excerpt: null }
+      if (!storyboard) return { label: 'a deleted story', href: null, excerpt: null }
       return {
         label: storyboard.title,
         href: `/s/${storyboard.slug}`,

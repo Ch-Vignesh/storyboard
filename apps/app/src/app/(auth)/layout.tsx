@@ -7,7 +7,7 @@ export default function AuthLayout({ children }: Readonly<{ children: React.Reac
         href="/signin"
         className="font-manuscript text-[21px] font-medium tracking-tight text-ink"
       >
-        Storyboard
+        Draftboard
       </Link>
       <div className="mt-12">{children}</div>
     </main>

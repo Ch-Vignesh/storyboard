@@ -91,7 +91,7 @@ export const VISIBILITY_COPY = {
   },
   /** The honest warning. Shown whenever public is the selected option. */
   copyingRisk:
-    'Anyone can read a public storyboard, and anyone can copy what they read. Timestamps prove you wrote it first. If that is not enough for this manuscript, keep it private and invite people you know.',
+    'Anyone can read a public story, and anyone can copy what they read. Timestamps prove you wrote it first. If that is not enough for this manuscript, keep it private and invite people you know.',
 } as const
 
 /** FR-2.6 — the confirmation names the affected contributors before deleting. */

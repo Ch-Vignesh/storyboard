@@ -30,6 +30,7 @@ const RESERVED_USERNAMES = new Set([
   'administrator',
   'api',
   'browse',
+  'draftboard',
   'help',
   'import',
   'me',

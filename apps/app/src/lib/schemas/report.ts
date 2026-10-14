@@ -33,7 +33,7 @@ export const REPORT_CATEGORIES = [
   {
     value: 'LIFTED_WORK' as const,
     label: 'Lifted from someone here',
-    blurb: 'Copied out of another storyboard on this site.',
+    blurb: 'Copied out of another story on this site.',
   },
   {
     value: 'OFF_TOPIC' as const,
@@ -75,7 +75,7 @@ export const REPORT_COPY = {
 
 export const TARGET_LABELS: Record<ReportTarget, string> = {
   USER: 'this writer',
-  STORYBOARD: 'this storyboard',
+  STORYBOARD: 'this story',
   SUGGESTION: 'this suggestion',
   IDEA: 'this idea',
 }

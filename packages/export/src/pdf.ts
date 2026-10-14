@@ -262,7 +262,7 @@ export async function toAuthorshipProof(proof: AuthorshipProof): Promise<Buffer>
     )
   document.fillColor('#000000').moveDown(1.5)
 
-  label('Storyboard', proof.storyboardTitle)
+  label('Story', proof.storyboardTitle)
   label('Author', proof.author)
   label('Chapter', proof.chapterTitle)
   label('Section', proof.sectionTitle)

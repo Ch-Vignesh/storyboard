@@ -116,7 +116,7 @@ export const NOTIFICATIONS: Record<NotificationType, Definition> = {
   REQUEST_CLOSED: {
     label: 'A passage you were answering was closed',
     sentence:
-      'The author closed it, or made the storyboard private. Any suggestion you sent stays on your profile.',
+      'The author closed it, or made the story private. Any suggestion you sent stays on your profile.',
     // Immediate: somebody may be mid-draft on it right now, and every hour they
     // spend after this point is an hour spent on something nobody can accept.
     delivery: 'immediate',

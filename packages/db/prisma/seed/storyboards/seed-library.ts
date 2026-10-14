@@ -49,7 +49,7 @@ function slugify(title: string): string {
       .replaceAll(/[^\w\s-]+/gu, '')
       .trim()
       .replaceAll(/\s+/gu, '-')
-      .slice(0, 60) || 'storyboard'
+      .slice(0, 60) || 'story'
   )
 }
 
@@ -72,7 +72,14 @@ export async function seedLibrary(prisma: PrismaClient): Promise<LibraryResult> 
       bio: PLATFORM_ACCOUNT.bio,
       onboardedAt: new Date(),
     },
-    update: {},
+    // Everything shown, kept current: this pass runs on every seed, where the
+    // example storyboard's returns early once it exists. It is how a database
+    // seeded as Storyboard came to say Draftboard (phase 12).
+    update: {
+      username: PLATFORM_ACCOUNT.username,
+      displayName: PLATFORM_ACCOUNT.displayName,
+      bio: PLATFORM_ACCOUNT.bio,
+    },
     select: { id: true },
   })
 

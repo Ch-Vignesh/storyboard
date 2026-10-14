@@ -13,7 +13,7 @@ test('a writer creates a storyboard and writes a section', async ({ page }) => {
   await signUpAndOnboard(page)
 
   await page
-    .getByRole('link', { name: /start a storyboard/i })
+    .getByRole('link', { name: /start a story/i })
     .first()
     .click()
   await expect(page).toHaveURL(/\/new/)
@@ -50,7 +50,7 @@ test('a writer creates a storyboard and writes a section', async ({ page }) => {
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
 
   // The words are in the manuscript.
-  await page.getByRole('link', { name: /back to the storyboard/i }).click()
+  await page.getByRole('link', { name: /back to the story/i }).click()
   await expect(page.getByText(/the harbour had been empty for a year/i)).toBeVisible()
 
   // FR-8.2, FR-8.3 — the version is in the history, attributed and immutable.

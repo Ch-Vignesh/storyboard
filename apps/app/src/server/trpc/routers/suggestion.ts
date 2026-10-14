@@ -192,7 +192,7 @@ export const suggestionRouter = createTRPCRouter({
           if (held >= quota) {
             throw new TRPCError({
               code: 'TOO_MANY_REQUESTS',
-              message: `You can have ${String(quota)} suggestions waiting on this storyboard at once. Wait for a decision on one, or withdraw it.`,
+              message: `You can have ${String(quota)} suggestions waiting on this story at once. Wait for a decision on one, or withdraw it.`,
             })
           }
         }

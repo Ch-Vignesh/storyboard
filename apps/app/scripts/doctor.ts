@@ -263,7 +263,7 @@ async function checkCors(presignedPut: string, origin: string): Promise<void> {
   }
 }
 
-const testSubject = 'Storyboard — this address can receive mail'
+const testSubject = 'Draftboard — this address can receive mail'
 
 function testText(provider: string): string {
   return (

@@ -45,16 +45,16 @@ export default function RulesPage() {
 
       <section className="mt-9">
         <h2 className="font-manuscript text-[21px] font-medium text-ink">
-          2. Three at a time, per storyboard
+          2. Three at a time, per story
         </h2>
         <p className="mt-2 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
-          You can have three suggestions waiting for a decision on any one storyboard. When one is
+          You can have three suggestions waiting for a decision on any one story. When one is
           accepted, passed on, or withdrawn, the slot frees up. Drafts do not count.
         </p>
         <p className="mt-2 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
           The limit is not about you. Every suggestion is something a person has to read and decide
-          about, and an author who opens their storyboard to thirty waiting suggestions closes it
-          again. Three keeps the door open.
+          about, and an author who opens their story to thirty waiting suggestions closes it again.
+          Three keeps the door open.
         </p>
       </section>
 
@@ -95,9 +95,9 @@ export default function RulesPage() {
         </h2>
         <p className="mt-2 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
           When a suggestion is accepted, the person who wrote it is credited permanently — on the
-          storyboard, on their profile, and in the front matter of every export. That credit does
-          not come off if the passage is later rewritten, and it cannot be removed by anyone except
-          the contributor themselves.
+          story, on their profile, and in the front matter of every export. That credit does not
+          come off if the passage is later rewritten, and it cannot be removed by anyone except the
+          contributor themselves.
         </p>
         <p className="mt-2 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
           If you publish a book that contains other people&rsquo;s writing, credit them wherever it
@@ -123,16 +123,16 @@ export default function RulesPage() {
           If something is wrong
         </h2>
         <p className="mt-3 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
-          Every storyboard, suggestion, idea and profile can be reported. Reports are read by a
-          person, nobody is told who reported what, and report counts are never shown publicly on
-          anybody. Ten upheld reports suspend an account while the rest are reviewed — their writing
-          stays where it is, because it is part of other people&rsquo;s manuscripts too.
+          Every story, suggestion, idea and profile can be reported. Reports are read by a person,
+          nobody is told who reported what, and report counts are never shown publicly on anybody.
+          Ten upheld reports suspend an account while the rest are reviewed — their writing stays
+          where it is, because it is part of other people&rsquo;s manuscripts too.
         </p>
       </section>
 
       <p className="mt-10 text-[13px] text-ink-faint">
         <Link href="/" className="text-pencil hover:underline">
-          Back to Storyboard
+          Back to Draftboard
         </Link>
       </p>
     </main>

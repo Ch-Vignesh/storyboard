@@ -106,7 +106,7 @@ test('a fourth submitted suggestion is refused, and says why', async ({ browser 
   await sendSuggestion(helperPage, requestPath, 'Fourth.')
   // The refusal names the number and says what to do about it, rather than
   // saying "rate limited".
-  await expect(helperPage.getByText(/3 suggestions waiting on this storyboard/i)).toBeVisible({
+  await expect(helperPage.getByText(/3 suggestions waiting on this story/i)).toBeVisible({
     timeout: 15_000,
   })
   await expect(helperPage.getByText(/wait for a decision on one, or withdraw it/i)).toBeVisible()
@@ -214,14 +214,14 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   await signUpAndOnboard(reporterPage)
 
   await reporterPage.goto(`${targetPath}/contributors`)
-  await reporterPage.getByRole('button', { name: /report this storyboard/i }).click()
+  await reporterPage.getByRole('button', { name: /report this story/i }).click()
   await reporterPage.getByRole('radio', { name: /spam/i }).check()
   await reporterPage.getByRole('button', { name: /send the report/i }).click()
   await expect(reporterPage.getByText(/nobody is told who reported what/i)).toBeVisible()
 
   // Reporting the same thing again is not an error and does not double-count.
   await reporterPage.reload()
-  await reporterPage.getByRole('button', { name: /report this storyboard/i }).click()
+  await reporterPage.getByRole('button', { name: /report this story/i }).click()
   await reporterPage.getByRole('radio', { name: /spam/i }).check()
   await reporterPage.getByRole('button', { name: /send the report/i }).click()
   await expect(reporterPage.getByText(/already reported this/i)).toBeVisible()

@@ -161,7 +161,7 @@ test('a reader spins off a public storyboard and keeps its credits', async ({ br
     await editor.pressSequentially(sentence)
     await readerPage.getByRole('button', { name: /save now/i }).click()
     await expect(readerPage.getByText('Saved', { exact: true })).toBeVisible()
-    await readerPage.getByRole('link', { name: /back to the storyboard/i }).click()
+    await readerPage.getByRole('link', { name: /back to the story/i }).click()
   }
 
   // FR-10.6 — the original knows, and the author cannot make it go away. The

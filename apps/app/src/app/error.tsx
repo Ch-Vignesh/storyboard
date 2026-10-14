@@ -30,7 +30,7 @@ export default function Error({
     // The browser console, not the application logger: this is a client
     // boundary and `lib/logger` is pino, which does not run here. The server
     // has already logged the cause under the same digest.
-    console.error('Storyboard render failed', { digest: error.digest, message: error.message })
+    console.error('render failed', { digest: error.digest, message: error.message })
   }, [error])
 
   return (

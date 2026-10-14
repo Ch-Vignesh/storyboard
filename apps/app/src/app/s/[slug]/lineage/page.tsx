@@ -91,8 +91,8 @@ export default async function LineagePage({ params }: Params) {
             {lineage.truncated ? (
               <p className="mt-3 text-[12.5px] text-ink-faint">
                 {lineage.total - lineage.ancestors.length} older{' '}
-                {lineage.total - lineage.ancestors.length === 1 ? 'storyboard' : 'storyboards'} in
-                the chain are not shown. Open the one above to keep walking back.
+                {lineage.total - lineage.ancestors.length === 1 ? 'story' : 'stories'} in the chain
+                are not shown. Open the one above to keep walking back.
               </p>
             ) : null}
           </>
@@ -149,9 +149,9 @@ export default async function LineagePage({ params }: Params) {
         {storyboard.visibility === 'PUBLIC' && session?.user ? (
           <div className="mt-8 border-t border-rule pt-6">
             <p className="text-[13.5px] leading-relaxed text-ink-soft">
-              You can start your own version of {storyboard.title}. It becomes a private storyboard
-              of yours, credited to everyone who has written in this one, and it will not follow
-              what happens here afterwards.
+              You can start your own version of {storyboard.title}. It becomes a private story of
+              yours, credited to everyone who has written in this one, and it will not follow what
+              happens here afterwards.
             </p>
             <div className="mt-4">
               <SpinOffButton storyboardId={storyboard.id} title={storyboard.title} />

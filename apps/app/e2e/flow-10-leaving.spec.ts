@@ -29,7 +29,7 @@ test('a writer deletes their account, and can stop it before it happens', async 
   await page.getByRole('button', { name: /delete my account/i }).click()
 
   // The screen has to say what is kept before anybody presses anything.
-  await expect(page.getByText(/every storyboard you own/i)).toBeVisible()
+  await expect(page.getByText(/every story you own/i)).toBeVisible()
   await expect(page.getByText(/a former member/i)).toBeVisible()
 
   const confirm = page.getByRole('button', { name: /^delete my account$/i })

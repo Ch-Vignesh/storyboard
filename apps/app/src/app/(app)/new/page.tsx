@@ -11,7 +11,7 @@ import { CreateStoryboardForm } from './create-storyboard-form'
  */
 export const dynamic = 'force-dynamic'
 
-export const metadata: Metadata = { title: 'Start a storyboard' }
+export const metadata: Metadata = { title: 'Start a story' }
 
 /** FR-2.1 — title, type, one to three genres, visibility. Everything else later. */
 export default function NewStoryboardPage() {
@@ -21,7 +21,7 @@ export default function NewStoryboardPage() {
     <HydrateClient>
       <div className="mx-auto max-w-xl px-6 py-14">
         <h1 className="font-manuscript text-[28px] leading-tight font-medium text-ink">
-          Start a storyboard
+          Start a story
         </h1>
         <p className="mt-3 text-[14.5px] leading-relaxed text-ink-soft">
           All of this can change later. Give it a working title and start writing.

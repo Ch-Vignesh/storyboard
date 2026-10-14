@@ -70,7 +70,7 @@ export default function HomePage() {
 
         <header className="flex items-baseline justify-between gap-6 pt-6">
           <span className="font-manuscript text-[20px] font-medium tracking-tight text-ink">
-            Storyboard
+            Draftboard
           </span>
           <nav aria-label="Quick links" className="flex gap-4 text-[13.5px]">
             <a href="#how" className="text-ink-soft hover:text-ink hover:underline">
@@ -121,7 +121,7 @@ export default function HomePage() {
 
                 <div className="mt-8 flex flex-wrap items-center gap-3">
                   <Button asChild variant="primary" size="lg">
-                    <a href={`${appUrl}/signup`}>Start a storyboard</a>
+                    <a href={`${appUrl}/signup`}>Start a story</a>
                   </Button>
                   <Button asChild size="lg">
                     <a href="#what">See how it works</a>
@@ -150,7 +150,7 @@ export default function HomePage() {
                 A workshop for one passage at a time
               </h2>
               <Body>
-                Storyboard is a place to put the paragraph that is not working and get writing back
+                Draftboard is a place to put the paragraph that is not working and get writing back
                 for it — not notes, not a critique, not &ldquo;have you considered&rdquo;. Actual
                 prose, written for that spot, in your voice, inside the word count you asked for.
               </Body>
@@ -277,7 +277,7 @@ export default function HomePage() {
                   </span>
                 </div>
                 <p className="font-screenplay text-[11.5px] leading-relaxed break-all text-ink-faint">
-                  sha256 3f9c1a…e71b · storyboard.com/s/the-ship-never-lands-k3x9q2
+                  sha256 3f9c1a…e71b · {new URL(appUrl).host}/s/the-ship-never-lands-k3x9q2
                 </p>
                 <p className="text-[12.5px] leading-relaxed text-ink-faint">
                   Printed in the front matter of every .docx, .md and .pdf you export. Not removable
@@ -348,8 +348,8 @@ export default function HomePage() {
 
               <div className="flex flex-col gap-3 border-l-2 border-ochre bg-ochre-wash py-5 pr-6 pl-6">
                 <p className="text-[16px] leading-relaxed text-ink">
-                  Anyone can read a public storyboard, and anyone can copy what they read. No
-                  website can stop a screenshot, and this one will not pretend to.
+                  Anyone can read a public story, and anyone can copy what they read. No website can
+                  stop a screenshot, and this one will not pretend to.
                 </p>
                 <p className="text-[16px] leading-relaxed text-ink">
                   What it does instead is timestamp and hash every version as you write it, so you
@@ -367,7 +367,7 @@ export default function HomePage() {
             {/* ── Read one, then close */}
             <Section id="read" number="" eyebrow="read one without signing up">
               <h2 className="font-manuscript text-[clamp(1.55rem,3.4vw,2.05rem)] leading-tight font-medium text-balance text-ink">
-                Two real storyboards, open to anyone
+                Two real stories, open to anyone
               </h2>
               <ul className="mt-2 divide-y divide-rule border-y border-rule">
                 {EXAMPLE_STORYBOARDS.map((storyboard) => (
@@ -403,7 +403,7 @@ export default function HomePage() {
                   Bring the chapter you are stuck on
                 </h2>
                 <p className="max-w-[38ch] text-[16px] leading-relaxed text-ink-soft">
-                  Start a storyboard, or import the manuscript you already have. Either way you are
+                  Start a story, or import the manuscript you already have. Either way you are
                   asking for help on one passage at a time.
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-4">
@@ -440,7 +440,7 @@ export default function HomePage() {
         </div>
 
         <footer className="flex flex-wrap items-baseline gap-x-6 gap-y-3 border-t border-rule pt-8 pb-12 text-[13px] text-ink-faint">
-          <span className="font-manuscript text-[16px] font-medium text-ink">Storyboard</span>
+          <span className="font-manuscript text-[16px] font-medium text-ink">Draftboard</span>
           <a href={`${appUrl}/rules`} className="text-ink-soft hover:text-ink hover:underline">
             How this place works
           </a>

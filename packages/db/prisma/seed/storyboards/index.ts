@@ -20,10 +20,12 @@ import { EXAMPLE_STORYBOARD } from './example-storyboard'
 
 /** The account every seeded storyboard belongs to (FR-15.3). */
 export const PLATFORM_ACCOUNT = {
+  // The key the seed finds this account by, and never shown, so it kept the
+  // old name through the rename to Draftboard; everything shown did not.
   email: 'examples@storyboard.invalid',
-  username: 'storyboard-examples',
-  displayName: 'Storyboard examples',
-  bio: 'Public-domain manuscripts, posted as examples of how a storyboard reads.',
+  username: 'draftboard-examples',
+  displayName: 'Draftboard examples',
+  bio: 'Public-domain manuscripts, posted as examples of how a story reads.',
 } as const
 
 /** Stable, so a second run recognises the storyboard it made last time. */

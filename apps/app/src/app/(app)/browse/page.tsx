@@ -81,7 +81,7 @@ export default async function BrowsePage({ searchParams }: Params) {
           {storyboards.length > 0 ? (
             <section className="mt-14">
               <h2 className="border-b border-rule pb-3 text-[12px] font-medium tracking-wide text-ink-faint uppercase">
-                Storyboards you can read
+                Stories you can read
               </h2>
               <ul className="mt-5 grid gap-4 sm:grid-cols-2">
                 {storyboards.map((storyboard) => (

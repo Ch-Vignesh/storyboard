@@ -38,8 +38,8 @@ export default function NotFound() {
         published. Unpublished writing is not listed and not readable, which is the point of it.
       </p>
       <p className="mt-3 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
-        If somebody sent you this link and meant you to read it, they can add you to the storyboard
-        from its settings.
+        If somebody sent you this link and meant you to read it, they can add you to the story from
+        its settings.
       </p>
 
       <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-[13.5px]">

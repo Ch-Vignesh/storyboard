@@ -479,17 +479,27 @@ look at.
 
 ```sh
 pnpm check-excerpts                              # the seeded quotations still match their editions
+pnpm check-deploy --origin https://app.your-domain
 PLAYWRIGHT_BASE_URL=https://app.your-domain pnpm e2e
 ```
 
-The flows run against the deployed application. They sign up real accounts, so
-point them at production once, deliberately, and expect the seeded data to gain
-a few example users.
+Against a deployment, `pnpm e2e` runs only the tests tagged `@deployed`
+(decision 0034): accessibility and the Content-Security-Policy on every public
+page, and proof that scripts run. They visit pages and write nothing, so they
+are safe to point at production as often as you like.
 
-Then, by hand, the things no test can claim for you:
+The other flows run in CI on every push, against a fresh build and a real
+Postgres, and cannot run against a deployment: they read the verification
+email from a file only a local server writes, and some write to the database
+directly.
 
-- Sign up from a phone, on a network that is not yours, and read the
-  verification email in a real inbox. Check where it landed.
+So the rest is by hand, once, and it is the part no test can claim for you:
+
+- Sign up, ideally from a phone on a network that is not yours, and read the
+  verification email in a real inbox. Check where it landed, and how long it
+  took.
+- Import a manuscript. It is the one browser upload that goes to the bucket,
+  so it proves the CORS rule and the token from the side a writer sees.
 - Read a stuck passage, send a suggestion, accept it, and confirm the credit
   line appears — the loop the whole product exists for.
 - A screen reader through the reader, the editor, and the request flow. The

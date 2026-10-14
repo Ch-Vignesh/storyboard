@@ -82,9 +82,9 @@ export function FinishedSwitch({
   return (
     <div className="mt-3">
       <p className="max-w-measure text-[14px] leading-relaxed text-ink-soft">
-        A finished storyboard gets a reading page with no margin and no request cards — the work
-        rather than the workshop. Everything else stays: the history, the credits, and anything
-        anyone has spun off.
+        A finished story gets a reading page with no margin and no request cards — the work rather
+        than the workshop. Everything else stays: the history, the credits, and anything anyone has
+        spun off.
       </p>
 
       {confirming ? (

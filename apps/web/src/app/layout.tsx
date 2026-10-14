@@ -19,7 +19,7 @@ const newsreader = Newsreader({
 })
 
 export const metadata: Metadata = {
-  title: 'Storyboard',
+  title: 'Draftboard',
   description:
     'Post the passage you are stuck on. Other writers propose prose. You accept one, with permanent credit.',
 }

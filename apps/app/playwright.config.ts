@@ -18,12 +18,16 @@ const PORT = Number(process.env.E2E_PORT ?? 3100)
 const localURL = `http://localhost:${String(PORT)}`
 
 /**
- * Against a deployment rather than a build of this working tree (phase 8).
+ * Against a deployment rather than a build of this working tree.
  *
- * With `PLAYWRIGHT_BASE_URL` set, nothing is built and no server is started —
- * the flows run against whatever is already there. They sign up real accounts
- * and write real storyboards, so this is a deliberate act against a deployment
- * you own, not something to point at production on a habit.
+ * With `PLAYWRIGHT_BASE_URL` set, nothing is built and no server is started,
+ * and only the tests tagged `@deployed` run: the ones that visit pages and
+ * write nothing. The rest cannot work against a deployment and must not try.
+ * They read the verification email from `MAIL_LOG_FILE`, which a deployed
+ * server never writes, so every sign-up would send a real email to an
+ * undeliverable address and then fail; and some write to `DATABASE_URL`
+ * directly, which on a laptop whose `.env` names production is production.
+ * Tagging a test `@deployed` is a claim that it does neither.
  */
 const deployed = process.env.PLAYWRIGHT_BASE_URL
 const baseURL = deployed ?? localURL
@@ -43,6 +47,7 @@ if (!deployed && databaseUrl && !isLocalDatabase(databaseUrl)) {
 
 export default defineConfig({
   testDir: './e2e',
+  grep: deployed ? /@deployed/u : undefined,
   // Flows share one database; running them at once would make the sign-up
   // counts and the dashboard contents race each other.
   workers: 1,

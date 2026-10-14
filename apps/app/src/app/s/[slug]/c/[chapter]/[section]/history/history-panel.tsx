@@ -59,7 +59,7 @@ export function HistoryPanel({
       {history.data?.truncatedByVisibility ? (
         // Decision 0007 — an incomplete chain is explained, not hidden.
         <p className="mb-6 border-l-2 border-rule py-1 pl-4 text-[12.5px] leading-relaxed text-ink-faint">
-          This storyboard was private for part of its life. Versions written then are visible to its
+          This story was private for part of its life. Versions written then are visible to its
           authors only.
         </p>
       ) : null}
@@ -159,7 +159,7 @@ export function HistoryPanel({
 
       <p className="mt-6 text-[13.5px]">
         <a href={backHref} className="text-pencil hover:underline">
-          Back to the storyboard
+          Back to the story
         </a>
       </p>
     </div>

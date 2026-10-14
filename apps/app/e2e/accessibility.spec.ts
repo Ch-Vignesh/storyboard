@@ -42,7 +42,8 @@ async function scan(page: Page, description: string): Promise<void> {
 }
 
 test.describe('what a machine can check (NFR-4)', () => {
-  test.describe('signed out', () => {
+  // @deployed: these only visit pages, so they may run against production.
+  test.describe('signed out', { tag: '@deployed' }, () => {
     test('the marketing entry points and the sign-up path', async ({ page }) => {
       for (const path of ['/signup', '/signin', '/browse', '/rules']) {
         await page.goto(path)

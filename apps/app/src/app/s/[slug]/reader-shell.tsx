@@ -207,7 +207,7 @@ export function ReaderShell({
           {/* Decision 0007 — say so rather than letting history look incomplete. */}
           {historyVisibleFrom ? (
             <p className="mb-8 max-w-measure border-l-2 border-rule py-1 pl-4 text-[12.5px] leading-relaxed text-ink-faint">
-              This storyboard was private until{' '}
+              This story was private until{' '}
               {historyVisibleFrom.toLocaleDateString('en-GB', {
                 day: 'numeric',
                 month: 'long',
@@ -233,7 +233,7 @@ export function ReaderShell({
           ) : null}
 
           {chapters.length === 0 ? (
-            <p className="text-ink-soft">This storyboard has no chapters yet.</p>
+            <p className="text-ink-soft">This story has no chapters yet.</p>
           ) : (
             <article>
               <h2 className="font-manuscript text-[24px] font-medium text-ink">

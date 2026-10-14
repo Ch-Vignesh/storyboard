@@ -107,8 +107,8 @@ export function SettingsForm({
             {/* FR-14.5 — stored as written, shown as written, verified by nobody.
                 Deliberately not a licence picker, which would look authoritative. */}
             <p className="text-[12.5px] leading-relaxed text-ink-faint">
-              Shown on the storyboard exactly as you write it. Storyboard does not check it, and
-              makes no claim on your work.
+              Shown on the story exactly as you write it. Draftboard does not check it, and makes no
+              claim on your work.
             </p>
           </div>
 
@@ -129,7 +129,7 @@ export function SettingsForm({
           Who can read it
         </h2>
         <p className="mt-3 text-[14px] text-ink">
-          This storyboard is <strong className="font-medium">{visibility.toLowerCase()}</strong>.
+          This story is <strong className="font-medium">{visibility.toLowerCase()}</strong>.
         </p>
 
         {visibility === 'PUBLIC' ? (
@@ -174,7 +174,7 @@ export function SettingsForm({
 
       <section>
         <h2 className="text-[13px] font-medium tracking-wide text-ink-faint uppercase">
-          Delete this storyboard
+          Delete this story
         </h2>
         <p className="mt-3 text-[13.5px] leading-relaxed text-ink-soft">
           It disappears from everywhere immediately. You have {SOFT_DELETE_GRACE_DAYS} days to
@@ -187,13 +187,12 @@ export function SettingsForm({
           <div className="mt-3 border-l-2 border-crimson bg-paper-sunk px-4 py-3">
             <p className="text-[13.5px] leading-relaxed text-ink">
               {contributors.length === 1
-                ? 'One writer has helped with this storyboard:'
-                : `${contributors.length} writers have helped with this storyboard:`}{' '}
+                ? 'One writer has helped with this story:'
+                : `${contributors.length} writers have helped with this story:`}{' '}
               {contributors
                 .map((person) => person.displayName ?? person.username ?? 'a writer')
                 .join(', ')}
-              . Their contributions stay on their profiles, but their writing goes with this
-              storyboard.
+              . Their contributions stay on their profiles, but their writing goes with this story.
             </p>
           </div>
         ) : null}
@@ -220,7 +219,7 @@ export function SettingsForm({
           disabled={!confirmDelete || remove.isPending}
           onClick={() => remove.mutate({ storyboardId })}
         >
-          {remove.isPending ? 'Deleting' : 'Delete this storyboard'}
+          {remove.isPending ? 'Deleting' : 'Delete this story'}
         </Button>
       </section>
     </div>

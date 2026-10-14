@@ -11,7 +11,7 @@ function escapeHtml(value: string): string {
 /** FR-1.3 step one. Plain and single-column by design (FR-12.5). */
 export function verifyEmailMail(input: { to: string; url: string }): Mail {
   const text = [
-    'Confirm your email address to finish creating your Storyboard account:',
+    'Confirm your email address to finish creating your Draftboard account:',
     '',
     input.url,
     '',
@@ -23,7 +23,7 @@ export function verifyEmailMail(input: { to: string; url: string }): Mail {
 <html lang="en">
   <body style="margin:0;padding:32px 16px;background:#fbfbf9;color:#11202b;font-family:system-ui,sans-serif;font-size:16px;line-height:1.5">
     <div style="max-width:520px;margin:0 auto">
-      <p style="margin:0 0 16px">Confirm your email address to finish creating your Storyboard account.</p>
+      <p style="margin:0 0 16px">Confirm your email address to finish creating your Draftboard account.</p>
       <p style="margin:0 0 24px"><a href="${url}" style="color:#2b5ca8">Confirm my email</a></p>
       <p style="margin:0 0 8px;color:#55636d;font-size:14px">Or paste this link into your browser:</p>
       <p style="margin:0 0 24px;word-break:break-all;color:#55636d;font-size:14px">${url}</p>
@@ -32,5 +32,5 @@ export function verifyEmailMail(input: { to: string; url: string }): Mail {
   </body>
 </html>`
 
-  return { to: input.to, subject: 'Confirm your email for Storyboard', text, html }
+  return { to: input.to, subject: 'Confirm your email for Draftboard', text, html }
 }

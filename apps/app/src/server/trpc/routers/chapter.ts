@@ -130,7 +130,7 @@ export const chapterRouter = createTRPCRouter({
       ) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'That ordering does not match this storyboard.',
+          message: 'That ordering does not match this story.',
         })
       }
 
@@ -166,7 +166,7 @@ export const chapterRouter = createTRPCRouter({
       if (live <= 1) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'A storyboard keeps at least one chapter. Rename this one instead.',
+          message: 'A story keeps at least one chapter. Rename this one instead.',
         })
       }
 

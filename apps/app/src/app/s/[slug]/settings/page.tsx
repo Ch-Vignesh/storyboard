@@ -9,7 +9,7 @@ import { SettingsForm } from './settings-form'
 
 type Params = { params: Promise<{ slug: string }> }
 
-export const metadata: Metadata = { title: 'Storyboard settings' }
+export const metadata: Metadata = { title: 'Story settings' }
 
 /** Screen 16, storyboard half — FR-2.6, FR-2.7, FR-14.5. Owner only. */
 export default async function StoryboardSettingsPage({ params }: Params) {

@@ -22,14 +22,14 @@ export default async function AppLayout({ children }: Readonly<{ children: React
             href="/"
             className="font-manuscript text-[19px] font-medium tracking-tight text-ink"
           >
-            Storyboard
+            Draftboard
           </Link>
           <nav className="flex items-center gap-4 text-[13.5px]">
             <Link href="/browse" className="text-ink-soft hover:text-ink">
               Browse
             </Link>
             <Link href="/new" className="text-pencil hover:underline">
-              Start a storyboard
+              Start a story
             </Link>
             <Link href="/notifications" className="text-ink-soft hover:text-ink">
               Notifications

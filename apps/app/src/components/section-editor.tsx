@@ -281,7 +281,7 @@ export function SectionEditor({
           ) : null}
         </p>
         <a href={returnHref} className="text-[13.5px] text-pencil hover:underline">
-          Back to the storyboard
+          Back to the story
         </a>
       </footer>
 

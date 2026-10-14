@@ -23,7 +23,7 @@ export function SeededPanel() {
       </h2>
       <p className="mt-2 max-w-measure text-[13.5px] leading-relaxed text-ink-soft">
         Every one of these is labelled <em>example</em> in the interface and owned by a platform
-        account (FR-15.3). A seeded storyboard that looks like a real writer&rsquo;s is the one
+        account (FR-15.3). A seeded story that looks like a real writer&rsquo;s is the one
         unrecoverable launch failure.
       </p>
 
@@ -45,7 +45,7 @@ export function SeededPanel() {
 
           {(data?.storyboards.length ?? 0) === 0 ? (
             <p className="mt-5 text-[14px] text-ink-soft">
-              Nothing seeded yet. FR-15.4 wants 25 storyboards across 6 genres before launch.
+              Nothing seeded yet. FR-15.4 wants 25 stories across 6 genres before launch.
             </p>
           ) : (
             <ul className="mt-5 divide-y divide-rule border-y border-rule">
@@ -80,7 +80,7 @@ export function SeededPanel() {
 function labelFor(name: string): string {
   switch (name) {
     case 'storyboards':
-      return 'Storyboards'
+      return 'Stories'
     case 'genres':
       return 'Genres covered'
     case 'openRequests':

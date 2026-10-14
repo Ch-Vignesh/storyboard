@@ -54,8 +54,8 @@ test('a new writer signs up, verifies, onboards and reaches the dashboard', asyn
   // dead end even with nothing in it.
   await expect(page).toHaveURL(/\/$|\/\?/)
   await expect(page.getByRole('heading', { name: /your dashboard/i })).toBeVisible()
-  await expect(page.getByText(/storyboards you are writing/i)).toBeVisible()
-  await expect(page.getByRole('link', { name: /start your first storyboard/i })).toBeVisible()
+  await expect(page.getByText(/stories you are writing/i)).toBeVisible()
+  await expect(page.getByRole('link', { name: /start your first story/i })).toBeVisible()
 })
 
 test('a half-onboarded writer is sent back to the step they left', async ({ page }) => {

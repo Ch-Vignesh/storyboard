@@ -39,7 +39,15 @@ export const BANNED_TERMS: readonly BannedTerm[] = [
   },
   { term: 'pull request', pattern: /\bpull[ -]requests?\b/i, sayInstead: 'suggestion' },
   { term: 'diff', pattern: /\bdiffs?\b/i, sayInstead: 'comparison, or what changed' },
-  { term: 'repository', pattern: /\brepositor(?:y|ies)\b/i, sayInstead: 'storyboard' },
+  { term: 'repository', pattern: /\brepositor(?:y|ies)\b/i, sayInstead: 'story' },
+  // Phase 12: the product is Draftboard, and what a writer makes is a story
+  // (or a script or manuscript, by type). "Storyboard" belongs to film, which
+  // is why the product was renamed; it survives only in code and package names.
+  {
+    term: 'storyboard',
+    pattern: /\bstoryboards?\b/i,
+    sayInstead: 'story (script, manuscript by type), or Draftboard for the product',
+  },
   { term: 'master', pattern: /\bmaster\b/i, sayInstead: 'the main draft' },
   { term: 'revert', pattern: /\brevert(?:s|ed|ing)?\b/i, sayInstead: 'restore an earlier version' },
   {
@@ -154,6 +162,8 @@ function isUserFacingText(node: ts.Node): node is TextNode {
   if (ts.isPropertyAssignment(parent) && parent.name === node) return false
   if (ts.isElementAccessExpression(parent) && parent.argumentExpression === node) return false
   if (ts.isLiteralTypeNode(parent) || ts.isEnumMember(parent)) return false
+  // `case 'storyboards':` compares a key; whatever it returns is the copy.
+  if (ts.isCaseClause(parent)) return false
   if (ts.isPropertySignature(parent) || ts.isMethodSignature(parent)) return false
   // JSX attributes: only the ones people read.
   if (ts.isJsxAttribute(parent)) return COPY_ATTRIBUTES.has(parent.name.getText())

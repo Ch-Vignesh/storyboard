@@ -52,7 +52,7 @@ export const storyboardRouter = createTRPCRouter({
       key.storyboardsCreated(userId),
       { limit: DAILY_LIMITS.storyboardsCreated, windowMs: DAY_MS },
       (retryAt) =>
-        `You can start ${String(DAILY_LIMITS.storyboardsCreated)} storyboards a day. Try again ${whenToRetry(retryAt)}.`,
+        `You can start ${String(DAILY_LIMITS.storyboardsCreated)} stories a day. Try again ${whenToRetry(retryAt)}.`,
     )
 
     const id = publicId()
@@ -480,7 +480,7 @@ export const storyboardRouter = createTRPCRouter({
         select: { id: true, ownerId: true, deletedAt: true },
       })
       if (row?.ownerId !== userId || row.deletedAt === null) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'That storyboard does not exist.' })
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'That story does not exist.' })
       }
 
       return ctx.db.storyboard.update({

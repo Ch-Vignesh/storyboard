@@ -159,7 +159,7 @@ test('a writer brings an 80,000-word manuscript in and takes it back out', async
   expect(text).toContain('## The harbour')
   expect(text).toContain('The harbour had been empty for a year')
   // FR-14.3 — the source line is part of the file, not an option.
-  expect(text).toContain('Written on Storyboard')
+  expect(text).toContain('Written on Draftboard')
   expect(text).toContain(`/s/${slug}`)
 
   const docx = await page.request.get(`/api/export/${slug}?format=docx`)

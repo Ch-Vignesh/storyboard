@@ -125,20 +125,20 @@ export function DeleteAccount({
             <dt className="text-crimson">Erased</dt>
             <dd className="text-ink-soft">
               Your name, username, email, biography, picture and password. Your notifications, your
-              reading settings, and any manuscript you uploaded but never turned into a storyboard.
+              reading settings, and any manuscript you uploaded but never turned into a story.
             </dd>
             <dt className="text-moss">Kept</dt>
             <dd className="text-ink-soft">
-              Every storyboard you own, every revision you wrote and every credit you hold — shown
-              as <span className="italic">a former member</span>. Other people have contributed to
-              your work and been credited on it, and that is theirs as much as yours.
+              Every story you own, every revision you wrote and every credit you hold — shown as{' '}
+              <span className="italic">a former member</span>. Other people have contributed to your
+              work and been credited on it, and that is theirs as much as yours.
             </dd>
           </dl>
 
           <p className="mt-4 max-w-measure text-[13.5px] leading-relaxed text-ink-soft">
             If what you want is a manuscript gone rather than an account, this will not do it.
-            Delete the storyboard first — it goes for good after thirty days — and then come back
-            here. They are different things and only one of them is what this button is for.
+            Delete the story first — it goes for good after thirty days — and then come back here.
+            They are different things and only one of them is what this button is for.
           </p>
 
           <p className="mt-3 max-w-measure text-[13.5px] leading-relaxed text-ink-soft">

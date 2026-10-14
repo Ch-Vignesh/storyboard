@@ -109,7 +109,7 @@ export const compareRouter = createTRPCRouter({
       if (base.storyboardId !== target.storyboardId) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'Those versions belong to different storyboards.',
+          message: 'Those versions belong to different stories.',
         })
       }
 

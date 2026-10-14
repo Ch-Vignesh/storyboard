@@ -76,7 +76,7 @@ export default async function ProfilePage({ params }: Params) {
       {/* FR-9.3 — the four counts. */}
       <dl className="mt-8 flex flex-wrap gap-x-10 gap-y-3 border-y border-rule py-4">
         {[
-          { label: 'storyboards', value: counts.authored },
+          { label: 'stories', value: counts.authored },
           { label: 'contributions accepted', value: counts.prose },
           { label: 'ideas that helped', value: counts.ideas },
           { label: 'spin-offs', value: counts.spinOffs },
@@ -99,7 +99,7 @@ export default async function ProfilePage({ params }: Params) {
       {authored.length > 0 ? (
         <section className="mt-12">
           <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
-            Storyboards
+            Stories
           </h2>
           <ul className="mt-4 divide-y divide-rule border-y border-rule">
             {authored.map((storyboard) => (

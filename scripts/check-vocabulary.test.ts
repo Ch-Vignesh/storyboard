@@ -54,6 +54,22 @@ describe('check-vocabulary', () => {
     expect(checkCode(source, 'c.ts')).toEqual([])
   })
 
+  it('ignores a case label, which compares a key, and checks what the case returns', () => {
+    const source =
+      "function f(k: string) {\n  switch (k) {\n    case 'storyboards':\n      return 'Storyboards'\n  }\n}"
+    const findings = checkCode(source, 'h.ts')
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({ term: 'storyboard', text: 'Storyboards', line: 4 })
+  })
+
+  it('catches the old product name and noun, which are Draftboard and story since phase 12', () => {
+    const source = "const t = 'Start a storyboard'\nconst u = <p>Back to Storyboard</p>"
+    expect(terms(checkCode(source, 'i.tsx'))).toEqual(['storyboard', 'storyboard'])
+    expect(
+      checkCode("import { db } from '@storyboard/db'\nconst s = storyboard.title", 'j.ts'),
+    ).toEqual([])
+  })
+
   it('skips plumbing JSX attributes but checks copy attributes', () => {
     const source = 'const A = () => <a href="/merge" className="fork-x" title="Merge now">go</a>'
     const findings = checkCode(source, 'd.tsx')

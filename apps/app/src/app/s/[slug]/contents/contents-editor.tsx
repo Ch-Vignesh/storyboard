@@ -155,9 +155,7 @@ export function ContentsEditor({
                         variant="ghost"
                         disabled={chapters.length <= 1 || deleteChapter.isPending}
                         title={
-                          chapters.length <= 1
-                            ? 'A storyboard keeps at least one chapter.'
-                            : undefined
+                          chapters.length <= 1 ? 'A story keeps at least one chapter.' : undefined
                         }
                         onClick={() => deleteChapter.mutate({ chapterId: chapter.id })}
                       >

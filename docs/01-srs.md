@@ -1,6 +1,6 @@
-# Storyboard — software requirements specification
+# Draftboard — software requirements specification
 
-Version 0.1 · owner: Vignesh · status: draft for build
+Version 0.1 · owner: Vignesh · status: draft for build · named Storyboard until phase 12 (decision 0035)
 
 ---
 
@@ -41,21 +41,21 @@ This table is normative. `scripts/check-vocabulary.ts` fails CI if a banned term
 
 ### 2.1 Objects
 
-| Internal / schema            | UI string                                          | Never say           |
-| ---------------------------- | -------------------------------------------------- | ------------------- |
-| `Storyboard`                 | storyboard, or story / script / manuscript by type | repository, project |
-| `Version` (`is_main = true`) | the main draft                                     | main branch, master |
-| `Version` (author-owned)     | alternate version                                  | branch              |
-| `Storyboard.forked_from_id`  | spin-off                                           | fork                |
-| `Chapter`                    | chapter, act, part                                 | directory, file     |
-| `Section`                    | section                                            | file, node          |
-| `Revision`                   | version 4, or saved on 12 Sep                      | commit, SHA         |
-| `ContributionRequest`        | a spot I'm stuck on / open for help                | issue, ticket       |
-| `Suggestion`                 | suggestion                                         | pull request, patch |
-| `Idea`                       | idea                                               | comment             |
-| `Credit`                     | contribution                                       | attribution record  |
-| diff view                    | comparison, what changed                           | diff                |
-| conflict                     | overlapping edits                                  | merge conflict      |
+| Internal / schema            | UI string                                              | Never say                       |
+| ---------------------------- | ------------------------------------------------------ | ------------------------------- |
+| `Storyboard`                 | story, or script / manuscript by type (since phase 12) | repository, project, storyboard |
+| `Version` (`is_main = true`) | the main draft                                         | main branch, master             |
+| `Version` (author-owned)     | alternate version                                      | branch                          |
+| `Storyboard.forked_from_id`  | spin-off                                               | fork                            |
+| `Chapter`                    | chapter, act, part                                     | directory, file                 |
+| `Section`                    | section                                                | file, node                      |
+| `Revision`                   | version 4, or saved on 12 Sep                          | commit, SHA                     |
+| `ContributionRequest`        | a spot I'm stuck on / open for help                    | issue, ticket                   |
+| `Suggestion`                 | suggestion                                             | pull request, patch             |
+| `Idea`                       | idea                                                   | comment                         |
+| `Credit`                     | contribution                                           | attribution record              |
+| diff view                    | comparison, what changed                               | diff                            |
+| conflict                     | overlapping edits                                      | merge conflict                  |
 
 ### 2.2 Actions
 

@@ -53,7 +53,7 @@ const courierPrime = Courier_Prime({
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-  title: { default: 'Storyboard', template: '%s | Storyboard' },
+  title: { default: 'Draftboard', template: '%s | Draftboard' },
   description:
     'Post the passage you are stuck on. Other writers propose prose. You accept one, with permanent credit.',
 }

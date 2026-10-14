@@ -283,7 +283,7 @@ export const spinOffRouter = createTRPCRouter({
           ancestors.push({
             id: row.id,
             slug: null,
-            title: 'a storyboard that is no longer public',
+            title: 'a story that is no longer public',
             visibility: row.visibility,
             forkedAt: ownForkedAt,
             continuedSince: false,
