@@ -5,35 +5,36 @@ record — every task, every exit criterion, every decision and why. This file i
 the short version: what is done, what is being worked on, and what is blocked on
 something that is not code.
 
-**Last updated:** 2026-10-13
+**Last updated:** 2026-10-14
 
 ---
 
 ## Now
 
-| What                                | State                  | Note                                                                 |
-| ----------------------------------- | ---------------------- | -------------------------------------------------------------------- |
-| Phases 0–9, the audit before deploy | pushed, live           | At draftboard-cyan.vercel.app since 2026-10-13                       |
-| Phase 10 — fast in production       | code done, uncommitted | Measure again after the deploy                                       |
-| The move to Singapore               | database done          | Migrated, copied, drilled; Vercel set to `sin1`. Lands with the push |
-| Phase 11 — finish production        | next                   | The R2 bucket and token; a nightly backup; a real restore drill      |
-| Phase 12 — Draftboard               | planned                | The rename, the audit, the screen-reader pass                        |
-| Phase 13                            | deliberately unplanned | Drawn from real use, when there is some (was phase 10)               |
+| What                                | State                    | Note                                                                                |
+| ----------------------------------- | ------------------------ | ----------------------------------------------------------------------------------- |
+| Phases 0–9, the audit before deploy | pushed, live             | At draftboard-cyan.vercel.app since 2026-10-13                                      |
+| Phase 10 — fast in production       | deployed                 | Cold start 1.2–1.4 s (was 6.5 s); sign-up still to time                             |
+| The move to Singapore               | live                     | Functions and database in Singapore; Washington deleted after a clean week          |
+| Phase 11 — finish production        | in progress, uncommitted | R2 done and on Vercel; backup and weekly drill built, need their bucket and secrets |
+| Phase 12 — Draftboard               | planned                  | The rename, the audit, the screen-reader pass                                       |
+| Phase 13                            | deliberately unplanned   | Drawn from real use, when there is some (was phase 10)                              |
 
 ## Blocked, and not on code
 
 These are the only things standing between the product and a launch. Every one
 of them needs an account, a DNS record, or a person — not a commit.
 
-| What                                 | Needs                               | Blocks                |
-| ------------------------------------ | ----------------------------------- | --------------------- |
-| The push                             | a commit                            | the move to Singapore |
-| R2 bucket **and its CORS rule**      | a bucket and a token (account open) | manuscript uploads    |
-| Push, then the cron secret in GitHub | `CRON_SECRET` and `APP_URL`         | digests and the purge |
-| Running the restore drill for real   | a backup to restore                 | the NFR-8 claim       |
-| A screen-reader pass                 | an hour and a screen reader         | the WCAG 2.2 AA claim |
-| The 33 flows against production      | a deployment                        | the traffic post      |
-| The name (OD-1)                      | a decision, deliberately deferred   | nothing               |
+| What                                      | Needs                                   | Blocks                                 |
+| ----------------------------------------- | --------------------------------------- | -------------------------------------- |
+| Push                                      | a commit                                | R2 in production, the strict preflight |
+| Push, then the cron secret in GitHub      | `CRON_SECRET` and `APP_URL`             | digests and the purge                  |
+| The backup bucket, lock, lifecycle, token | the Cloudflare dashboard                | the nightly backup                     |
+| Four secrets and two variables in GitHub  | `05-deployment.md` section 6            | the nightly backup                     |
+| Running the restore drill for real        | a first backup (then weekly, by itself) | the NFR-8 claim                        |
+| A screen-reader pass                      | an hour and a screen reader             | the WCAG 2.2 AA claim                  |
+| The 33 flows against production           | a deployment                            | the traffic post                       |
+| The name (OD-1)                           | a decision, deliberately deferred       | nothing                                |
 
 Vercel's Hobby tier runs a scheduled job at most once a day, and this product has
 one every ten minutes, so all six run from GitHub Actions instead (decision 0030).

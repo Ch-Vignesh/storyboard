@@ -47,7 +47,9 @@ the function region is `sin1`, before the push that deploys them.
    pooled string, and the function region set to `sin1`. Then the push.
 
 The first `instance.start` line after the deploy names its region. That line is
-the proof the functions moved; `sin1` is the only right answer.
+the proof the functions moved; `sin1` is the only right answer. It said `sin1`,
+at 15:31 UTC on 2026-10-13, and every response since names `bom1::sin1`: the
+edge in Mumbai, the function in Singapore.
 
 ## Rows written in between
 
@@ -56,7 +58,8 @@ deploy. Anything written there after the copy (a sign-up, a cron job's work)
 is not in Singapore. The site had no users besides its owner, so the answer
 was to not use it in between, and to compare the two databases table by table
 once the deploy was live. If they differ, the copy is repeated into a fresh
-database rather than patched.
+database rather than patched. They did not: all 24 tables were identical after
+the switch.
 
 ## Washington is kept, for now
 

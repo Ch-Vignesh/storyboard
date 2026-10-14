@@ -11,6 +11,7 @@ import {
 import { QUIET_REQUEST_NUDGE_DAYS } from '@/lib/schemas/constants'
 import { pruneRateLimits } from '@/server/limits'
 import { purgeDeletedAccounts } from '@/server/purge/accounts'
+import { purgeAbandonedImports } from '@/server/purge/imports'
 import { purgeDeletedStoryboards } from '@/server/purge'
 
 import { getMailer, type Mailer } from './mailer'
@@ -414,10 +415,14 @@ export const CRON_JOBS = {
    * Storyboards first. An account purge does not touch storyboards, but doing
    * the rows-and-revisions work before the identity work means a failure in the
    * harder half never leaves an account half-erased.
+   *
+   * Then imports nobody finished, whose uploads would otherwise stay in the
+   * bucket for good. Last, because an account purge removes its own.
    */
   purge: async (db: Db) => ({
     storyboards: await purgeDeletedStoryboards(db as PrismaClient),
     accounts: await purgeDeletedAccounts(db as PrismaClient),
+    imports: await purgeAbandonedImports(db as PrismaClient),
   }),
 } as const
 

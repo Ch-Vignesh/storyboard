@@ -11,13 +11,13 @@ it is code; most of it is opening accounts and copying values between them.
 
 ## What you need
 
-| Service                  | Plan needed                                          | What it is for                                 |
-| ------------------------ | ---------------------------------------------------- | ---------------------------------------------- |
-| **Prisma Postgres**      | **Business** for NFR-8 as is — see _Backups_         | Postgres, through Vercel's storage integration |
-| **Vercel**               | Hobby is enough — see _Scheduled work_               | Two projects: the app and the marketing site   |
-| **Cloudflare R2**        | free tier is enough                                  | Uploaded manuscripts                           |
-| **Resend**, or **Gmail** | free tier, or one Gmail account with an app password | Every email the product sends                  |
-| **A domain**             | — (Resend only)                                      | The sending domain has to be one you own       |
+| Service                  | Plan needed                                            | What it is for                                 |
+| ------------------------ | ------------------------------------------------------ | ---------------------------------------------- |
+| **Prisma Postgres**      | Free is enough with the nightly backup — see _Backups_ | Postgres, through Vercel's storage integration |
+| **Vercel**               | Hobby is enough — see _Scheduled work_                 | Two projects: the app and the marketing site   |
+| **Cloudflare R2**        | free tier is enough                                    | Uploaded manuscripts, and the backups          |
+| **Resend**, or **Gmail** | free tier, or one Gmail account with an app password   | Every email the product sends                  |
+| **A domain**             | — (Resend only)                                        | The sending domain has to be one you own       |
 
 Vercel's Hobby plan runs a cron job at most once a day, and a deployment whose
 `vercel.json` asks for more **fails**. This product has a job every ten
@@ -147,7 +147,12 @@ useful about the cause. In the bucket's **Settings → CORS policy**:
 ```
 
 `AllowedOrigins` is the **application's** origin, not the bucket's. Add the
-preview origin too if you want imports to work on preview deployments.
+preview origin too if you want imports to work on preview deployments, and
+`http://localhost:3200` if you want them to work from `pnpm dev` with the bucket
+configured. The browser flows blank the four variables, so they never need it.
+
+An upload lives until its import is committed, or for a day if it never is: the
+daily `purge` job removes older ones, file and row together.
 
 ---
 
@@ -288,14 +293,14 @@ box where none of it matters. It should never be set on the real thing.
 
 Six jobs, in `.github/workflows/cron.yml` (decisions 0012 and 0030):
 
-| Job         | Schedule      | What it does                                  |
-| ----------- | ------------- | --------------------------------------------- |
-| `immediate` | every 10 min  | Decisions on your own work (FR-12.3)          |
-| `hourly`    | hourly        | Everything that is not about your own work    |
-| `weekly`    | Mondays 09:00 | The weekly digest                             |
-| `nudge`     | daily 08:30   | The seven-day silence nudge (FR-12.4)         |
-| `prune`     | daily 03:15   | Expired rate-limit rows                       |
-| `purge`     | daily 03:45   | Storyboards past their 30-day deletion window |
+| Job         | Schedule      | What it does                                                                  |
+| ----------- | ------------- | ----------------------------------------------------------------------------- |
+| `immediate` | every 10 min  | Decisions on your own work (FR-12.3)                                          |
+| `hourly`    | hourly        | Everything that is not about your own work                                    |
+| `weekly`    | Mondays 09:00 | The weekly digest                                                             |
+| `nudge`     | daily 08:30   | The seven-day silence nudge (FR-12.4)                                         |
+| `prune`     | daily 03:15   | Expired rate-limit rows                                                       |
+| `purge`     | daily 03:45   | Storyboards past their 30 days, accounts past their 7, imports left for a day |
 
 Times are UTC. Each run sends `Authorization: Bearer $CRON_SECRET`, which is
 what `/api/cron/[job]` checks — with a constant-time comparison, so the secret
@@ -336,22 +341,89 @@ And locally, without HTTP at all: `pnpm cron hourly`.
 ## 6. Backups, and the drill
 
 NFR-8 asks for a daily backup kept for 30 days. Prisma Postgres snapshots once
-a day, only on days with activity, and keeps them according to the plan: none
-on Free, 7 days on Starter and Pro, 30 on Business. There is no point-in-time
-restore. So:
+a day on paid plans only (7 days on Starter and Pro, 30 on Business, none on
+Free), so the backup is a workflow of our own, whatever the plan (decision
+0033): `.github/workflows/backup.yml`.
 
-- **Business:** the snapshots are the backup. Restore one from the Backups tab
-  in the Prisma Console.
-- **Starter or Pro:** the snapshots cover a week. For the other 23 days, take a
-  daily `pg_dump` over `DIRECT_DATABASE_URL` and keep each one for 30 days. Use
-  version 17 client tools, since Prisma Postgres is based on 17.
-- **Free:** there is no backup. Do not let a real user sign up on it.
+- **Nightly**, 21:30 UTC: `pg_dump` over the direct host, checked, encrypted
+  with a passphrase, and written to an R2 bucket of its own.
+- **Sundays**: the newest backup is restored into an empty PostgreSQL 17 and
+  `pnpm db:drill` runs against it. It fails if that backup is more than 36
+  hours old, which is how a nightly job that quietly stopped gets noticed.
+
+GitHub emails you when a scheduled run fails.
+
+### The bucket
+
+A second bucket, **not** the uploads one, with its own API token. The
+application's key lives on the server; if it could reach the backups, anyone
+who took the server could delete them.
+
+1. **R2 → Create bucket**, e.g. `draftboard-backups`. Private, like the other.
+2. **Settings → Bucket lock rules**: add a rule for the prefix `nightly/` that
+   retains objects for **30 days**. Nothing can delete or overwrite a backup
+   inside that window, the backup token included.
+3. **Settings → Object lifecycle rules**: delete objects with the prefix
+   `nightly/` after **31 days**: the day after their lock expires.
+4. **R2 → Manage API tokens → Create**: **Object Read & Write**, applied to
+   **this bucket only**.
+5. Prove the separation. The application's key must be refused on the backup
+   bucket:
+
+   ```sh
+   pnpm check-deploy --backup-bucket draftboard-backups
+   ```
+
+   If it is not, the application's token was made for every bucket. Make a new
+   one for the uploads bucket only and replace the four `R2_*` values.
+
+### The secrets
+
+A passphrase first. It encrypts every backup, and without it none of them can
+be read, so keep a copy somewhere that is not GitHub, such as a password
+manager:
+
+```sh
+openssl rand -base64 32
+```
+
+Then, under **Settings → Secrets and variables → Actions** in the repository:
+
+| Kind     | Name                          | Value                                                |
+| -------- | ----------------------------- | ---------------------------------------------------- |
+| Secret   | `BACKUP_DATABASE_URL`         | The direct string (`db.prisma.io`), never the pooled |
+| Secret   | `BACKUP_PASSPHRASE`           | The passphrase above                                 |
+| Secret   | `BACKUP_R2_ACCESS_KEY_ID`     | The backup token's access key id                     |
+| Secret   | `BACKUP_R2_SECRET_ACCESS_KEY` | The backup token's secret                            |
+| Variable | `BACKUP_BUCKET`               | The backup bucket's name                             |
+| Variable | `R2_ACCOUNT_ID`               | The Cloudflare account id, the same as the app's     |
+
+Without `BACKUP_BUCKET` every run is skipped. Then run it by hand once:
+**Actions → Backups → Run workflow → backup**, and then **drill**. The drill's
+summary is the dated record that goes in `04-phase-plan.md`.
+
+### Restoring, for real
+
+Into an **empty** PostgreSQL 17 or newer: a new Prisma Postgres database, or a
+local one. A dump from 17 does not restore into 16. Download the backup from
+the bucket in the Cloudflare dashboard, then, in Git Bash:
+
+```sh
+BACKUP_PASSPHRASE='…' bash packages/db/scripts/restore.sh 2026-10-15T2130Z.dump.gpg "postgresql://…empty…"
+pnpm db:drill "postgresql://…the same…"
+```
+
+`restore.sh` decrypts with GnuPG, which ships with Git for Windows, and needs
+PostgreSQL 17's `pg_restore` on `PATH` or in `PG_BIN`. It is all or nothing:
+one transaction, stopped at the first error, so aimed at a database that
+already has tables it refuses and changes nothing.
 
 Having a backup is not the requirement; **restoring from it is**. A backup
 nobody has restored is a hope.
 
 ```sh
 pnpm db:drill "postgresql://…restored-copy…"
+pnpm db:drill --quiet "postgresql://…"   # pass or fail only, for logs other people read
 ```
 
 The drill checks four things against a database restored from a backup: that
@@ -374,13 +446,15 @@ happened.
 
 ```sh
 pnpm check-deploy                       # is it configured, and does any of it work
+pnpm check-deploy --origin https://app.your-domain   # and the CORS rule for that origin
 pnpm check-deploy --email you@you.com   # and send one real message, end to end
 ```
 
 Run it after each account above, with that account's variables in the
 environment. It is the difference between believing a key is right and knowing
-it — it connects to the database, round-trips an object through the bucket, and
-sends a real email if you ask it to.
+it — it connects to the database, round-trips an object through the bucket,
+asks the bucket whether a browser may upload to it, and sends a real email if
+you ask it to.
 
 This is deliberately not the same check the application makes at startup. The
 preflight asks whether the variables are _present_, which is all it can safely
@@ -388,10 +462,16 @@ do at boot: a check that phoned a third party on every start would turn
 somebody else's outage into yours. This one asks whether they are _right_, by
 using them, which is only safe because a person chose to run it.
 
-Two things it cannot check, and says so rather than implying otherwise. The
-bucket's CORS rule is enforced by the browser, not the API, so no shell command
-can see it — and it is the step most often missed. And whether the email
-actually _arrived_, and in which folder, is something only you can look at.
+The CORS rule is the step most often missed, and the browser reports it as a
+CORS error that says nothing about the bucket. The browser enforces the rule,
+but it asks first, with an `OPTIONS` preflight, and the check sends that same
+preflight against a presigned upload URL. It checks the origin of
+`NEXT_PUBLIC_APP_URL`, which on a laptop is `localhost`; pass `--origin` to
+check production's from there.
+
+One thing it cannot check, and says so rather than implying otherwise: whether
+the email actually _arrived_, and in which folder, is something only you can
+look at.
 
 ---
 

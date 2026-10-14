@@ -9,6 +9,9 @@ import type * as S3 from '@aws-sdk/client-s3'
 import type { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 import { env } from '@/env'
+import { logger } from '@/lib/logger'
+
+const log = logger.child({ module: 'storage' })
 
 /**
  * Where an uploaded manuscript lives between the browser and the parser.
@@ -158,17 +161,28 @@ export async function getObject(key: string): Promise<Buffer> {
  * Deletes an upload. Called once the proposal is committed or abandoned: the
  * file has served its purpose and keeping somebody's whole manuscript around
  * afterwards is storage nobody asked for.
+ *
+ * Never throws, because every caller has finished its real work by the time it
+ * gets here — an import that committed must not fail on its cleanup. Returns
+ * false when the store refused or could not be reached, so a caller that keeps
+ * a pointer to the file can keep it and try again. A file that was already gone
+ * counts as deleted: R2 and `rm --force` both say so without an error.
  */
-export async function deleteObject(key: string): Promise<void> {
+export async function deleteObject(key: string): Promise<boolean> {
   try {
     if (r2Configured()) {
       const { sdk, client } = await r2()
       await client.send(new sdk.DeleteObjectCommand({ Bucket: String(env.R2_BUCKET), Key: key }))
-      return
+      return true
     }
     await rm(localPath(key), { force: true })
-  } catch {
-    // A file that is already gone is the outcome we wanted.
+    return true
+  } catch (error) {
+    // The directory, which is unique, and not the file name, which can say
+    // whose manuscript it is — this runs during an account erasure too.
+    const where = key.slice(0, key.lastIndexOf('/') + 1)
+    log.warn({ event: 'storage.delete.failed', where, error: String(error) }, 'upload not deleted')
+    return false
   }
 }
 

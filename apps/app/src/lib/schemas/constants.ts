@@ -92,6 +92,13 @@ export const ACCOUNT_DELETION_GRACE_DAYS = 7
 export const IMPORT_LIMITS = { maxBytes: 5 * 1024 * 1024, maxWords: 300_000 } as const
 
 /**
+ * FR-3.1 — an import is working state, not a record. A day after its last
+ * change, its uploaded file and its row are deleted, finished or not: an
+ * upload somebody walked away from is still their whole manuscript.
+ */
+export const IMPORT_JOB_RETENTION_HOURS = 24
+
+/**
  * NFR-5 — reading comfort, as percentages of the manuscript tokens in
  * packages/ui (19px, line height 1.68). Decision 0009.
  */

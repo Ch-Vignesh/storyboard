@@ -73,6 +73,13 @@ export default defineConfig({
           SMTP_HOST: '',
           SMTP_USER: '',
           SMTP_PASSWORD: '',
+          // The same for the bucket: with R2 in .env, flow 7 would upload its
+          // manuscript to the production bucket, from an origin its CORS rule
+          // does not allow. Blank, uploads go to .uploads/ on this server.
+          R2_ACCOUNT_ID: '',
+          R2_ACCESS_KEY_ID: '',
+          R2_SECRET_ACCESS_KEY: '',
+          R2_BUCKET: '',
           NEXT_PUBLIC_APP_URL: localURL,
           AUTH_URL: localURL,
           AUTH_TRUST_HOST: 'true',

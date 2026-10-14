@@ -23,6 +23,7 @@
  *    lose across a restore.
  *
  *   pnpm db:drill "postgresql://…restored…"
+ *   pnpm db:drill --quiet "postgresql://…restored…"    for a log others can read
  *
  * Point it at the restored copy, never at production — it refuses a URL that is
  * also `DATABASE_URL`.
@@ -66,10 +67,18 @@ function record(name: string, ok: boolean, detail: string): void {
   console.warn(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`)
 }
 
+/**
+ * `--quiet`: whether each check passed, not what it found. For a log other
+ * people can read — the weekly drill runs in a public repository's Actions,
+ * where a row count says how many people have signed up and a title may be
+ * one its writer has not made public.
+ */
+const quiet = process.argv.includes('--quiet')
+
 async function main(): Promise<void> {
-  const url = process.argv[2]
+  const url = process.argv.slice(2).find((arg) => !arg.startsWith('--'))
   if (!url) {
-    console.error('Usage: pnpm db:drill "postgresql://…restored…"\n')
+    console.error('Usage: pnpm db:drill [--quiet] "postgresql://…restored…"\n')
     console.error('Point it at a database restored from a backup. See docs/05-deployment.md.')
     process.exitCode = 1
     return
@@ -166,7 +175,11 @@ async function main(): Promise<void> {
     record(
       'the tables hold data',
       empty.length === 0,
-      empty.length ? `empty: ${empty.join(', ')}` : counts.join(', '),
+      empty.length
+        ? `empty: ${empty.join(', ')}`
+        : quiet
+          ? `${String(MUST_HAVE_ROWS.length)} tables, none empty`
+          : counts.join(', '),
     )
 
     // 4. One storyboard, read out whole. Structure and counts can both be right
@@ -196,7 +209,7 @@ async function main(): Promise<void> {
       'a storyboard reads out whole',
       Boolean(row),
       row
-        ? `“${row.title}” — ${row.chapters} chapters, ${row.sections} sections, ${row.revisions} current revisions`
+        ? `${quiet ? 'the largest' : `“${row.title}”`} — ${row.chapters} chapters, ${row.sections} sections, ${row.revisions} current revisions`
         : 'no storyboard has a readable section: the revision chain did not survive',
     )
   } finally {

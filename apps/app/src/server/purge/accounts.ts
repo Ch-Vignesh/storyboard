@@ -87,11 +87,9 @@ async function purgeOne(db: PrismaClient, userId: string): Promise<void> {
   // and the files are re-findable from the log if it does.
   const jobs = await db.importJob.findMany({ where: { userId }, select: { fileKey: true } })
   for (const job of jobs) {
-    try {
-      await deleteObject(job.fileKey)
-    } catch (error) {
+    if (!(await deleteObject(job.fileKey))) {
       log.error(
-        { event: 'purge.account.upload', userId, error: String(error) },
+        { event: 'purge.account.upload', userId },
         'could not remove an uploaded manuscript; the database row goes anyway',
       )
     }

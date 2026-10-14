@@ -12,9 +12,12 @@
  * it can safely do at boot — a check that phoned a third party on every start
  * would mean an outage somewhere else became an outage here. This asks whether
  * they are *right*, by using them: it connects to the database, round-trips an
- * object through the bucket, and, when asked, sends one real email.
+ * object through the bucket, asks the bucket whether a browser may upload to
+ * it, and, when asked, sends one real email.
  *
  *   pnpm check-deploy                      everything checkable for free
+ *   pnpm check-deploy --origin https://…   and the bucket's CORS rule for that origin too
+ *   pnpm check-deploy --backup-bucket …    and that the app's key is refused on the backups
  *   pnpm check-deploy --email you@you.com  and send one real message, end to end
  *
  * Exits non-zero if anything failed, so it can gate a deploy.
@@ -25,6 +28,16 @@ loadRootEnv()
 
 const wanted = process.argv.indexOf('--email')
 const sendTo = wanted >= 0 ? process.argv[wanted + 1] : undefined
+
+/** Origins to check the CORS rule for besides NEXT_PUBLIC_APP_URL's, e.g. production from a laptop. */
+const extraOrigins = process.argv.flatMap((arg, index) => {
+  const value = process.argv[index + 1]
+  return arg === '--origin' && value ? [value] : []
+})
+
+/** The backup bucket (decision 0033), which the application's key must not reach. */
+const backupFlag = process.argv.indexOf('--backup-bucket')
+const backupBucket = backupFlag >= 0 ? process.argv[backupFlag + 1] : undefined
 
 type Result = { ok: boolean; name: string; detail: string; fix?: string }
 const results: Result[] = []
@@ -126,8 +139,13 @@ async function checkObjectStore(): Promise<void> {
     return
   }
 
-  const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } =
-    await import('@aws-sdk/client-s3')
+  const {
+    S3Client,
+    PutObjectCommand,
+    GetObjectCommand,
+    DeleteObjectCommand,
+    ListObjectsV2Command,
+  } = await import('@aws-sdk/client-s3')
   const s3 = new S3Client({
     region: 'auto',
     endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -153,12 +171,96 @@ async function checkObjectStore(): Promise<void> {
     )
   }
 
-  // The CORS rule cannot be checked from here — it is enforced by the browser,
-  // not by the API — so say so rather than implying the bucket is finished.
-  console.warn(
-    '     note: the bucket CORS rule is not checkable from a shell. It is what makes the\n' +
-      '           browser upload work, and it is the step most often missed. See docs/05-deployment.md.',
+  // The CORS rule is enforced by the browser, but the browser asks first: an
+  // OPTIONS preflight, which a shell can send just as well. Same URL shape as a
+  // real upload (a presigned PUT) and the same header, from each origin that
+  // uploads. A missing rule is the step most often skipped, and in the browser
+  // it shows up as a CORS error that says nothing about the bucket.
+  const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
+  const url = await getSignedUrl(
+    s3,
+    new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: 'doctor/cors-preflight.txt',
+      ContentType: 'application/octet-stream',
+    }),
+    { expiresIn: 60 },
   )
+  const origins = new Set<string>()
+  for (const candidate of [process.env.NEXT_PUBLIC_APP_URL, ...extraOrigins]) {
+    try {
+      if (candidate) origins.add(new URL(candidate).origin)
+    } catch {
+      record(false, 'bucket CORS rule', `${candidate} is not a URL`)
+    }
+  }
+  for (const origin of origins) await checkCors(url, origin)
+
+  if (backupBucket) {
+    await checkKeptOut(backupBucket, () =>
+      s3.send(new ListObjectsV2Command({ Bucket: backupBucket, MaxKeys: 1 })),
+    )
+  }
+}
+
+/**
+ * Whoever takes the server holds this key. If it can reach the backups, it can
+ * delete them, and the backups are what you would restore from afterwards.
+ * Listing is enough to tell, and writes nothing into a bucket under a lock.
+ */
+async function checkKeptOut(bucket: string, list: () => Promise<unknown>): Promise<void> {
+  const name = `the app’s key is kept out of ${bucket}`
+  const fix =
+    'Make the application’s R2 token for its own bucket only, and replace the four R2_* ' +
+    'values with the new one. See docs/05-deployment.md section 6.'
+  try {
+    await list()
+    record(false, name, 'it can list that bucket', fix)
+  } catch (error) {
+    const code = (error as { name?: string }).name
+    if (code === 'AccessDenied') {
+      record(true, name, 'refused, as it should be')
+    } else if (code === 'NoSuchBucket') {
+      // A key scoped to one bucket is refused before it learns whether another
+      // exists. Being told it does not exist means the key reaches every bucket.
+      record(false, name, 'no bucket by that name, and a key that could tell', fix)
+    } else {
+      record(false, name, String(error))
+    }
+  }
+}
+
+async function checkCors(presignedPut: string, origin: string): Promise<void> {
+  const name = `bucket CORS rule for ${origin}`
+  const fix =
+    'Add this origin to the bucket’s CORS policy, with PUT and the content-type header. ' +
+    'See docs/05-deployment.md.'
+  try {
+    const response = await fetch(presignedPut, {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'PUT',
+        'access-control-request-headers': 'content-type',
+      },
+    })
+    const allowOrigin = response.headers.get('access-control-allow-origin')
+    const methods = response.headers.get('access-control-allow-methods') ?? ''
+    const headers = (response.headers.get('access-control-allow-headers') ?? '').toLowerCase()
+    const allowed =
+      response.ok &&
+      (allowOrigin === origin || allowOrigin === '*') &&
+      /\bPUT\b/u.test(methods) &&
+      (headers.includes('content-type') || headers === '*')
+    record(
+      allowed,
+      name,
+      allowed ? 'a browser there may upload' : `preflight answered ${String(response.status)}`,
+      fix,
+    )
+  } catch (error) {
+    record(false, name, String(error), fix)
+  }
 }
 
 const testSubject = 'Storyboard — this address can receive mail'

@@ -1,0 +1,189 @@
+# Nightly backups, and a weekly restore drill that proves them (NFR-8,
+# decision 0033).
+#
+# Prisma Postgres on the Free plan keeps no snapshots, so this is the backup: a
+# pg_dump over the direct host, encrypted, written to an R2 bucket of its own
+# through a token of its own. The application's R2 key, which anybody who
+# compromised the server would hold, cannot reach that bucket at all.
+#
+# Needs, under Settings → Secrets and variables → Actions:
+#   secret    BACKUP_DATABASE_URL          the direct string (db.prisma.io), not the pooled one
+#   secret    BACKUP_PASSPHRASE            encrypts every backup; keep a copy outside GitHub
+#   secret    BACKUP_R2_ACCESS_KEY_ID      an R2 token for the backup bucket alone,
+#   secret    BACKUP_R2_SECRET_ACCESS_KEY    with Object Read & Write
+#   variable  BACKUP_BUCKET                that bucket's name
+#   variable  R2_ACCOUNT_ID                the Cloudflare account id
+# Without BACKUP_BUCKET every run is skipped, so a fork does nothing.
+#
+# The bucket keeps each backup 30 days through its own lifecycle rule, and a
+# bucket lock stops anyone deleting one sooner — this token included. Both are
+# set in the Cloudflare dashboard; docs/05-deployment.md section 6 has them.
+#
+# The repository is public and so are these logs. Nothing below prints a row:
+# the drill runs with --quiet, and a failure names a table, never its contents.
+name: Backups
+
+on:
+  schedule:
+    - cron: '30 21 * * *' # backup, nightly: 03:00 in India, 05:30 in Singapore
+    - cron: '0 23 * * 0' # drill, Sundays, on the newest backup
+  workflow_dispatch:
+    inputs:
+      job:
+        description: What to run
+        required: true
+        type: choice
+        options: [backup, drill]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backups-${{ github.event.schedule || inputs.job }}
+  cancel-in-progress: false
+
+env:
+  # Prisma Postgres is 17, and pg_dump refuses a server newer than itself. A
+  # dump from 17 restores into 17 or newer, so the drill's server is 17 too.
+  PG_MAJOR: '17'
+  AWS_DEFAULT_REGION: auto
+  # R2 speaks S3 but not every checksum newer AWS CLIs send by default.
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+jobs:
+  backup:
+    if: >-
+      vars.BACKUP_BUCKET != '' &&
+      (github.event.schedule == '30 21 * * *' || inputs.job == 'backup')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: PostgreSQL ${{ env.PG_MAJOR }} client tools
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq "postgresql-client-$PG_MAJOR" >/dev/null
+          "/usr/lib/postgresql/$PG_MAJOR/bin/pg_dump" --version
+
+      - name: Dump, check, encrypt
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$BACKUP_DATABASE_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "BACKUP_DATABASE_URL and BACKUP_PASSPHRASE must both be set."
+            exit 1
+          fi
+          # Check the server's certificate against the system's roots (libpq
+          # 16+), whatever sslmode the stored string says: libpq takes the last
+          # value of a repeated parameter, so appending overrides it.
+          case "$BACKUP_DATABASE_URL" in *\?*) sep='&' ;; *) sep='?' ;; esac
+          export BACKUP_DATABASE_URL="${BACKUP_DATABASE_URL}${sep}sslmode=verify-full&sslrootcert=system"
+          PG_BIN="/usr/lib/postgresql/$PG_MAJOR/bin" \
+            bash packages/db/scripts/backup.sh "$RUNNER_TEMP/backup.dump.gpg"
+
+      - name: Upload, then read the size back
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
+          BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+        run: |
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          # One name per run, to the minute: a bucket lock refuses overwrites,
+          # and a second run the same day should add a backup, not fail.
+          key="nightly/$(date -u +%Y-%m-%dT%H%MZ).dump.gpg"
+          file="$RUNNER_TEMP/backup.dump.gpg"
+          aws s3 cp --only-show-errors --endpoint-url "$endpoint" "$file" "s3://$BACKUP_BUCKET/$key"
+          stored=$(aws s3api head-object --endpoint-url "$endpoint" \
+            --bucket "$BACKUP_BUCKET" --key "$key" --query ContentLength --output text)
+          if [ "$stored" != "$(stat -c %s "$file")" ]; then
+            echo "The bucket holds $stored bytes for $key; the backup was $(stat -c %s "$file")."
+            exit 1
+          fi
+          echo "Backed up to \`$key\`, $stored bytes." >>"$GITHUB_STEP_SUMMARY"
+
+  drill:
+    if: >-
+      vars.BACKUP_BUCKET != '' &&
+      (github.event.schedule == '0 23 * * 0' || inputs.job == 'drill')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: drill
+          POSTGRES_PASSWORD: drill
+          POSTGRES_DB: drill
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U drill"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DRILL_URL: postgresql://drill:drill@localhost:5432/drill
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: PostgreSQL ${{ env.PG_MAJOR }} client tools
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq "postgresql-client-$PG_MAJOR" >/dev/null
+
+      - name: Fetch the newest backup
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
+          BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+        run: |
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          # Names sort by time. An empty bucket lists as "None".
+          key=$(aws s3api list-objects-v2 --endpoint-url "$endpoint" --bucket "$BACKUP_BUCKET" \
+            --prefix nightly/ --query 'Contents[].Key' --output text | tr '\t' '\n' | sort | tail -n 1)
+          if [ -z "$key" ] || [ "$key" = "None" ]; then
+            echo "The bucket holds no backups."
+            exit 1
+          fi
+          # The drill doubles as the alarm for a backup that quietly stopped:
+          # a week-old newest backup passes every check and protects nothing.
+          taken=$(date -u -d "$(sed -E 's|nightly/([0-9-]+)T([0-9]{2})([0-9]{2})Z.*|\1 \2:\3|' <<<"$key")" +%s)
+          age_hours=$(( ($(date -u +%s) - taken) / 3600 ))
+          if [ "$age_hours" -gt 36 ]; then
+            echo "The newest backup, $key, is $age_hours hours old. The nightly job has stopped."
+            exit 1
+          fi
+          aws s3 cp --only-show-errors --endpoint-url "$endpoint" "s3://$BACKUP_BUCKET/$key" "$RUNNER_TEMP/backup.dump.gpg"
+          echo "BACKUP_KEY=$key" >>"$GITHUB_ENV"
+
+      - name: Restore into an empty PostgreSQL ${{ env.PG_MAJOR }}
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          PG_BIN="/usr/lib/postgresql/$PG_MAJOR/bin" \
+            bash packages/db/scripts/restore.sh "$RUNNER_TEMP/backup.dump.gpg" "$DRILL_URL"
+
+      - name: Drill
+        run: pnpm db:drill --quiet "$DRILL_URL"
+
+      - name: Record
+        run: echo "Restored \`$BACKUP_KEY\` and the drill passed, $(date -u +%F)." >>"$GITHUB_STEP_SUMMARY"
