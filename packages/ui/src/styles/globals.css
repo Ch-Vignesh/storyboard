@@ -55,7 +55,7 @@
   --color-input: var(--color-rule);
   --color-ring: var(--color-pencil);
 
-  /* type: apps load the faces with next/font and expose them on these variables */
+  /* type: the faces come from fonts.css, which also sets these variables */
   --font-ui: var(--font-archivo), 'Archivo', system-ui, sans-serif;
   --font-manuscript: var(--font-newsreader), 'Newsreader', Georgia, serif;
   --font-screenplay: var(--font-courier-prime), 'Courier Prime', ui-monospace, monospace;

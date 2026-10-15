@@ -1,22 +1,10 @@
 import type { Metadata } from 'next'
-import { Archivo, Newsreader } from 'next/font/google'
 
+// The typefaces, from this repository rather than fetched from Google on every
+// build (see the file). Courier Prime is in it too; nothing here uses it, so
+// the browser never downloads it.
+import '@storyboard/ui/fonts.css'
 import './globals.css'
-
-const archivo = Archivo({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  variable: '--font-archivo',
-  display: 'swap',
-})
-
-const newsreader = Newsreader({
-  subsets: ['latin'],
-  style: ['normal', 'italic'],
-  weight: ['400', '500'],
-  variable: '--font-newsreader',
-  display: 'swap',
-})
 
 export const metadata: Metadata = {
   title: 'Draftboard',
@@ -26,7 +14,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${archivo.variable} ${newsreader.variable}`}>
+    <html lang="en">
       <body>{children}</body>
     </html>
   )

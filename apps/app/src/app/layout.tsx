@@ -1,32 +1,13 @@
 import type { Metadata } from 'next'
 import { SessionProvider } from 'next-auth/react'
-import { Archivo, Courier_Prime, Newsreader } from 'next/font/google'
 
 import { TRPCReactProvider } from '@/trpc/client'
 
+// The typefaces, from this repository rather than fetched from Google on every
+// build, which failed whenever Google answered in a shape Turbopack could not
+// read (phase 12, task 5). See the file for what it is and why.
+import '@storyboard/ui/fonts.css'
 import './globals.css'
-
-const archivo = Archivo({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  variable: '--font-archivo',
-  display: 'swap',
-})
-
-const newsreader = Newsreader({
-  subsets: ['latin'],
-  style: ['normal', 'italic'],
-  weight: ['400', '500'],
-  variable: '--font-newsreader',
-  display: 'swap',
-})
-
-const courierPrime = Courier_Prime({
-  subsets: ['latin'],
-  weight: ['400', '700'],
-  variable: '--font-courier-prime',
-  display: 'swap',
-})
 
 /**
  * The price of a nonce-based Content-Security-Policy (decision 0025).
@@ -60,10 +41,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html
-      lang="en"
-      className={`${archivo.variable} ${newsreader.variable} ${courierPrime.variable}`}
-    >
+    <html lang="en">
       <body>
         {/* SessionProvider so onboarding can refresh the token after steps 3
             and 4 (FR-1.3); server components still read the session directly. */}

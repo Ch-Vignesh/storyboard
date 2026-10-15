@@ -44,7 +44,8 @@ export function contentSecurityPolicy(nonce: string, { isDev }: { isDev: boolean
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
     // See the note above. Not an oversight.
     `style-src 'self' 'unsafe-inline'`,
-    // `next/font` self-hosts at build time, so no font host is needed.
+    // The typefaces are served from this site (`@storyboard/ui/fonts.css`), so
+    // no font host is needed.
     `font-src 'self'`,
     // No remote images anywhere in the product; data: and blob: are what an
     // export preview and a file picker use.

@@ -9,6 +9,7 @@
   ],
   "exports": {
     "./globals.css": "./src/styles/globals.css",
+    "./fonts.css": "./src/styles/fonts.css",
     "./cn": "./src/lib/cn.ts",
     "./components/*": "./src/components/*.tsx"
   },
