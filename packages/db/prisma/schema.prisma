@@ -162,25 +162,28 @@ enum ImportState {
 // ---------------------------------------------------------------- people
 
 model User {
-  id              String     @id @default(cuid())
-  email           String     @unique
-  emailVerifiedAt DateTime?
+  id                  String     @id @default(cuid())
+  email               String     @unique
+  emailVerifiedAt     DateTime?
   /// Null until the "set password" onboarding step (FR-1.3).
-  passwordHash    String?
+  passwordHash        String?
+  /// FR-1.7 — when the password was last reset. A session that signed in
+  /// before this is refused (decision 0036), so a reset signs out every device.
+  passwordChangedAt   DateTime?
   /// Null until chosen during onboarding; immutable afterwards and printed in
   /// every credit line forever (FR-1.3).
-  username        String?    @unique
-  displayName     String?
-  bio             String?    @db.VarChar(280)
-  avatarUrl       String?
-  status          UserStatus @default(ACTIVE)
-  isAdmin         Boolean    @default(false)
+  username            String?    @unique
+  displayName         String?
+  bio                 String?    @db.VarChar(280)
+  avatarUrl           String?
+  status              UserStatus @default(ACTIVE)
+  isAdmin             Boolean    @default(false)
   /// FR-13.5 — when the account was suspended, and by whom. The work stays
   /// readable (decision 0018); what stops is signing in and writing.
-  suspendedAt     DateTime?
-  suspendedById   String?
-  suspendedBy     User?      @relation("UserSuspender", fields: [suspendedById], references: [id])
-  suspendedUsers  User[]     @relation("UserSuspender")
+  suspendedAt         DateTime?
+  suspendedById       String?
+  suspendedBy         User?      @relation("UserSuspender", fields: [suspendedById], references: [id])
+  suspendedUsers      User[]     @relation("UserSuspender")
   /// OD-3 second half, decision 0024 — when this person asked to be deleted.
   /// The account is frozen from that moment and the row is stripped of every
   /// identifying column once the grace period passes. The row itself stays: it
@@ -189,46 +192,63 @@ model User {
   deletionRequestedAt DateTime?
   /// FR-13.4 — the community rules are shown once, at sign-up. This records
   /// that they were, so nobody is shown them twice or misses them once.
-  rulesSeenAt     DateTime?
+  rulesSeenAt         DateTime?
   /// Set when the four onboarding steps are complete (FR-1.3, FR-1.5).
-  onboardedAt     DateTime?
+  onboardedAt         DateTime?
   /// FR-9.4 — whether suggestions this person wrote that were passed on are
   /// shown to anyone but them. False by default: defaulting to public would
   /// make being passed on feel punitive, which FR-6.10 is at pains to avoid.
-  showPassedWork    Boolean  @default(false)
+  showPassedWork      Boolean    @default(false)
   /// NFR-5 — reading comfort, persisted per user rather than per browser.
   /// Percentages of the manuscript defaults (19px / 1.68) so they stay integers
   /// and the bounds in lib/schemas/constants.ts are exact. Decision 0009.
-  readingTypeScale  Int      @default(100)
-  readingLineHeight Int      @default(168)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  readingTypeScale    Int        @default(100)
+  readingLineHeight   Int        @default(168)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
-  featureFlagsSet    FeatureFlag[]
-  pinnedGenres       UserGenre[]
-  storyboards        Storyboard[]             @relation("StoryboardOwner")
-  collaborations     Collaborator[]           @relation("CollaboratorUser")
-  invitationsSent    Collaborator[]           @relation("CollaboratorInviter")
-  versionsCreated    Version[]
-  revisionsAuthored  Revision[]               @relation("RevisionAuthor")
-  revisionsAccepted  Revision[]               @relation("RevisionAcceptor")
-  drafts             SectionDraft[]
-  requestsOpened     ContributionRequest[]
-  suggestions        Suggestion[]             @relation("SuggestionContributor")
-  suggestionsDecided Suggestion[]             @relation("SuggestionDecider")
-  ideas              Idea[]
-  credits            Credit[]
-  notifications      Notification[]
-  notificationPrefs  NotificationPreference[]
-  reportsMade        Report[]                 @relation("Reporter")
-  reportsResolved    Report[]                 @relation("ReportResolver")
-  activity           ActivityDay[]
-  importJobs         ImportJob[]
-  verificationTokens EmailVerificationToken[]
+  featureFlagsSet     FeatureFlag[]
+  pinnedGenres        UserGenre[]
+  storyboards         Storyboard[]             @relation("StoryboardOwner")
+  collaborations      Collaborator[]           @relation("CollaboratorUser")
+  invitationsSent     Collaborator[]           @relation("CollaboratorInviter")
+  versionsCreated     Version[]
+  revisionsAuthored   Revision[]               @relation("RevisionAuthor")
+  revisionsAccepted   Revision[]               @relation("RevisionAcceptor")
+  drafts              SectionDraft[]
+  requestsOpened      ContributionRequest[]
+  suggestions         Suggestion[]             @relation("SuggestionContributor")
+  suggestionsDecided  Suggestion[]             @relation("SuggestionDecider")
+  ideas               Idea[]
+  credits             Credit[]
+  notifications       Notification[]
+  notificationPrefs   NotificationPreference[]
+  reportsMade         Report[]                 @relation("Reporter")
+  reportsResolved     Report[]                 @relation("ReportResolver")
+  activity            ActivityDay[]
+  importJobs          ImportJob[]
+  verificationTokens  EmailVerificationToken[]
+  passwordResetTokens PasswordResetToken[]
 }
 
 /// FR-1.4 — single-use, hashed at rest, 24 h expiry, 60 s resend cooldown
 /// (the cooldown is computed from the newest row's createdAt).
+/// FR-1.7 — a link to choose a new password. Its own table rather than a kind
+/// of verification token: it lives an hour, not a day, and a link sent to
+/// confirm an address must never be able to change a password (decision 0036).
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// sha256 of the token that was emailed. The plaintext is never stored.
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
 model EmailVerificationToken {
   id         String    @id @default(cuid())
   userId     String
@@ -365,18 +385,18 @@ model Version {
 }
 
 model Chapter {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   versionId String
-  version   Version  @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  version   Version   @relation(fields: [versionId], references: [id], onDelete: Cascade)
   /// Shared across versions that descend from the same original (architecture §2.2).
   lineageId String
   order     Int
-  title     String   @db.VarChar(200)
+  title     String    @db.VarChar(200)
   /// Removed from the reading order. Never a hard delete: the revisions below
   /// stay permanently addressable (FR-8.2). See decision 0008.
   deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   sections Section[]
 

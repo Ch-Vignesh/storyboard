@@ -104,6 +104,7 @@ async function purgeOne(db: PrismaClient, userId: string): Promise<void> {
     // their contribution to somebody else's work or somebody else's record of
     // theirs, and "all their work stays" is the decision (0024).
     await tx.emailVerificationToken.deleteMany({ where: { userId } }) // credentials
+    await tx.passwordResetToken.deleteMany({ where: { userId } }) // FR-1.7 links
     await tx.notification.deleteMany({ where: { userId } }) // addressed to them
     await tx.notificationPreference.deleteMany({ where: { userId } }) // a preference
     await tx.sectionDraft.deleteMany({ where: { userId } }) // unsaved, unshared

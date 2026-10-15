@@ -160,4 +160,7 @@ export const key = {
   verificationResend: (email: string) => `auth:resend:${email.toLowerCase()}`,
   // The one-minute rhythm for an address with no link to send (auth router).
   addressCooldown: (email: string) => `auth:cooldown:${email.toLowerCase()}`,
+  // FR-1.7: reset links asked for, per hour, and the one-minute rhythm for them.
+  passwordReset: (email: string) => `auth:reset:${email.toLowerCase()}`,
+  resetCooldown: (email: string) => `auth:reset-cooldown:${email.toLowerCase()}`,
 } as const

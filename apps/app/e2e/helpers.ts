@@ -25,13 +25,14 @@ export function uniqueUsername(): string {
 }
 
 /**
- * The verification link, read from the message the console mailer appended to
- * `MAIL_LOG_FILE`. Polls because the mail is written while the sign-up request
- * is still in flight.
+ * A link to `route`, read from the newest message the console mailer appended
+ * to `MAIL_LOG_FILE` for this recipient that carries one. Polls because the
+ * mail is written while the request that sends it is still in flight.
  */
-export async function readVerificationLink(email: string): Promise<string> {
+export async function readEmailedLink(email: string, route: string): Promise<string> {
   const path = process.env.MAIL_LOG_FILE
   if (!path) throw new Error('MAIL_LOG_FILE is not set; the flow cannot read its email.')
+  const link = new RegExp(`https?://\\S*${route}\\?token=[A-Za-z0-9_-]+`, 'u')
 
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
@@ -41,14 +42,21 @@ export async function readVerificationLink(email: string): Promise<string> {
     } catch {
       // Not written yet.
     }
-    // Messages are appended, so the last one addressed to this recipient is ours.
+    // Messages are appended, so the newest one to this recipient comes last.
     const blocks = contents.split('MAIL (not sent').filter((block) => block.includes(email))
-    const last = blocks.at(-1)
-    const match = last?.match(/https?:\/\/\S*\/verify\?token=[A-Za-z0-9_-]+/)
+    const match = blocks
+      .reverse()
+      .find((block) => link.test(block))
+      ?.match(link)
     if (match) return match[0]
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
-  throw new Error(`No verification link for ${email} appeared in ${path}`)
+  throw new Error(`No ${route} link for ${email} appeared in ${path}`)
+}
+
+/** FR-1.3 — the sign-up verification link. */
+export function readVerificationLink(email: string): Promise<string> {
+  return readEmailedLink(email, '/verify')
 }
 
 /** Sign up, verify, and complete both onboarding steps. Leaves you signed in. */

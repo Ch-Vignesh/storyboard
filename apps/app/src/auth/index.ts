@@ -6,7 +6,7 @@ import Google from 'next-auth/providers/google'
 import { env } from '@/env'
 import { credentialsSchema } from '@/lib/schemas/auth'
 
-import { authConfig } from './config'
+import { authConfig, signedInBeforeReset } from './config'
 import { googleConfigured, resolveGoogleUser, type GoogleProfile } from './google'
 import { hashPassword, verifyPassword } from './password'
 
@@ -79,6 +79,18 @@ const callbacks: NextAuthConfig['callbacks'] = {
         token.username = outcome.username
         token.onboarded = outcome.onboarded
       }
+    }
+
+    // FR-1.7, decision 0036 — a session from before the last password reset
+    // is over. Every read of a session on the server comes through here, and
+    // `null` makes Auth.js treat it as signed out and clear its cookie. One
+    // lookup by primary key; skipped at sign-in, when the token is brand new.
+    if (!params.user && typeof token.id === 'string') {
+      const account = await prisma.user.findUnique({
+        where: { id: token.id },
+        select: { passwordChangedAt: true },
+      })
+      if (signedInBeforeReset(token.authAt, account?.passwordChangedAt ?? null)) return null
     }
 
     return token

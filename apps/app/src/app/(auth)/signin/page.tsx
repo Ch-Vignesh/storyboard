@@ -16,7 +16,7 @@ export const metadata: Metadata = { title: 'Sign in' }
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> }
 
 export default async function SignInPage({ searchParams }: Props) {
-  const { error, next } = await searchParams
+  const { error, next, reset, ended } = await searchParams
   // proxy.ts puts the page they were trying to reach here. Validated, because
   // a sign-in page that redirects wherever a URL says is an open redirect.
   const destination = safeNext(next)
@@ -42,13 +42,31 @@ export default async function SignInPage({ searchParams }: Props) {
   return (
     <div>
       <h1 className="font-manuscript text-2xl font-medium">Sign in</h1>
+      {reset === '1' ? (
+        // FR-1.7 — the end of a reset. Every session was signed out by it.
+        <p
+          role="status"
+          className="mt-4 rounded-control border border-moss-wash bg-moss-wash p-3 text-[13.5px] text-moss"
+        >
+          Your password has been changed. Sign in with the new one.
+        </p>
+      ) : ended === '1' ? (
+        <p role="status" className="mt-4 text-[13.5px] text-ink-soft">
+          You have been signed out. Sign in again to carry on.
+        </p>
+      ) : null}
       <form action={signInAction} className="mt-8 space-y-5">
         <div className="space-y-1.5">
           <Label htmlFor="email">Email</Label>
           <Input id="email" name="email" type="email" autoComplete="email" required />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="password">Password</Label>
+          <div className="flex items-baseline justify-between gap-3">
+            <Label htmlFor="password">Password</Label>
+            <Link href="/forgot-password" className="text-[12.5px]">
+              Forgot your password?
+            </Link>
+          </div>
           <PasswordInput id="password" name="password" autoComplete="current-password" required />
         </div>
         {error ? (

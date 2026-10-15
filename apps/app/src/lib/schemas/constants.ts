@@ -62,7 +62,16 @@ export const DAILY_LIMITS = {
 export const AUTH_LIMITS = {
   signUpsPerAddress: 5,
   resendsPerAddress: 5,
+  /** FR-1.7, per hour: a reset link asked for again and again is somebody else asking. */
+  resetsPerAddress: 5,
 } as const
+
+/**
+ * FR-1.7 — how long a password reset link works. An hour, where a sign-up link
+ * has a day: this one changes the password of an account that already exists,
+ * so it should not sit in an inbox for long.
+ */
+export const PASSWORD_RESET_TTL_MINUTES = 60
 
 /** FR-13.5 */
 export const REPORTS_TO_SUSPEND = 10

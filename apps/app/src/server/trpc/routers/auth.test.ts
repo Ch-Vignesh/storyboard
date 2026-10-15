@@ -68,6 +68,8 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
       `auth:signup:${address}`,
       `auth:resend:${address}`,
       `auth:cooldown:${address}`,
+      `auth:reset:${address}`,
+      `auth:reset-cooldown:${address}`,
     ])
     await db.rateLimitHit.deleteMany({ where: { key: { in: keys } } })
     await db.emailVerificationToken.deleteMany({ where: { user: { email: { in: addresses } } } })
@@ -118,5 +120,137 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
 
     expect(await call.resendVerification({ email: address })).toEqual({ status: 'sent' })
     expect(sent.map((mail) => mail.subject)).toEqual(['You already have a Draftboard account'])
+  })
+
+  // ── FR-1.7: a forgotten password ───────────────────────────────────────────
+
+  async function aWriterWithAPassword(label: string, password = 'the original password') {
+    const { hashPassword } = await import('@/auth/password')
+    const email = anAddress(label)
+    const user = await db.user.create({
+      data: { email, emailVerifiedAt: new Date(), passwordHash: await hashPassword(password) },
+      select: { id: true },
+    })
+    return { email, id: user.id }
+  }
+
+  /** The token out of the last reset email, as the person would click it. */
+  function tokenFromResetMail(): string {
+    const mail = sent.findLast((each) => each.subject === 'Reset your Draftboard password')
+    const token = mail?.text.match(/\/reset-password\?token=([\w-]+)/u)?.[1]
+    if (!token) throw new Error('No reset link was sent.')
+    return token
+  }
+
+  it('sends an account a reset link, and answers in the one-minute rhythm', async () => {
+    const { email } = await aWriterWithAPassword('reset-asks')
+
+    expect(await call.requestPasswordReset({ email })).toEqual({ status: 'sent' })
+    expect(await call.requestPasswordReset({ email })).toEqual({ status: 'cooldown' })
+
+    expect(sent.map((mail) => mail.subject)).toEqual(['Reset your Draftboard password'])
+    expect(sent[0]?.to).toBe(email)
+    expect(await db.passwordResetToken.count({ where: { user: { email } } })).toBe(1)
+  })
+
+  it('answers an address with no account exactly the same, and sends nothing', async () => {
+    const email = anAddress('reset-nobody')
+
+    expect(await call.requestPasswordReset({ email })).toEqual({ status: 'sent' })
+    expect(await call.requestPasswordReset({ email })).toEqual({ status: 'cooldown' })
+    expect(sent).toHaveLength(0)
+  })
+
+  it('sends an address that never finished signing up its confirmation link instead', async () => {
+    const email = anAddress('reset-unverified')
+    await db.user.create({ data: { email } })
+
+    expect(await call.requestPasswordReset({ email })).toEqual({ status: 'sent' })
+    expect(sent.map((mail) => mail.subject)).toEqual(['Confirm your email for Draftboard'])
+  })
+
+  it('resets the password once, closes every other link, ends earlier sessions, and says so', async () => {
+    const { verifyPassword } = await import('@/auth/password')
+    const { email, id } = await aWriterWithAPassword('reset-does')
+    await call.requestPasswordReset({ email })
+    const first = tokenFromResetMail()
+    // A second link, as if they asked twice a few minutes apart.
+    await db.rateLimitHit.deleteMany({ where: { key: `auth:reset-cooldown:${email}` } })
+    await call.requestPasswordReset({ email })
+    const second = tokenFromResetMail()
+    expect(second).not.toBe(first)
+
+    const before = Date.now()
+    expect(await call.checkPasswordReset({ token: second })).toEqual({ email })
+    await call.resetPassword({
+      token: second,
+      password: 'a brand new passphrase',
+      confirm: 'a brand new passphrase',
+    })
+
+    const user = await db.user.findUniqueOrThrow({ where: { id } })
+    expect(await verifyPassword(String(user.passwordHash), 'a brand new passphrase')).toBe(true)
+    expect(await verifyPassword(String(user.passwordHash), 'the original password')).toBe(false)
+    expect(user.passwordChangedAt?.getTime()).toBeGreaterThanOrEqual(before)
+    expect(await db.passwordResetToken.count({ where: { userId: id, consumedAt: null } })).toBe(0)
+    expect(sent.at(-1)?.subject).toBe('Your Draftboard password was changed')
+
+    // Used, and the other one closed with it.
+    await expect(call.checkPasswordReset({ token: second })).rejects.toThrow(/expired/u)
+    await expect(
+      call.resetPassword({
+        token: first,
+        password: 'one more attempt',
+        confirm: 'one more attempt',
+      }),
+    ).rejects.toThrow(/expired/u)
+  })
+
+  it('refuses an expired link, and two passwords that do not match', async () => {
+    const { email, id } = await aWriterWithAPassword('reset-refuses')
+    await call.requestPasswordReset({ email })
+    const token = tokenFromResetMail()
+
+    await expect(
+      call.resetPassword({
+        token,
+        password: 'a brand new passphrase',
+        confirm: 'a different one!!',
+      }),
+    ).rejects.toThrow(/do not match/u)
+
+    await db.passwordResetToken.updateMany({
+      where: { userId: id },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    })
+    await expect(call.checkPasswordReset({ token })).rejects.toThrow(/expired/u)
+    const user = await db.user.findUniqueOrThrow({ where: { id } })
+    expect(user.passwordChangedAt).toBeNull()
+  })
+
+  it('changes the password once per link, even for a request that saw it unused a moment before', async () => {
+    // Two requests can both pass the first look at a link before either has
+    // changed anything, and nothing makes that happen on demand in a test. So
+    // this goes straight to the step that decides: the second claim of the same
+    // link must lose, whatever the request before it saw.
+    const { applyPasswordReset } = await import('./auth')
+    const { hashPassword, verifyPassword } = await import('@/auth/password')
+    const { email, id } = await aWriterWithAPassword('reset-twice')
+    await call.requestPasswordReset({ email })
+    const record = await db.passwordResetToken.findFirstOrThrow({
+      where: { userId: id },
+      include: { user: { select: { id: true, emailVerifiedAt: true } } },
+    })
+
+    const now = new Date()
+    expect(
+      await applyPasswordReset(db, record, await hashPassword('the first one wins'), now),
+    ).toBe(true)
+    expect(
+      await applyPasswordReset(db, record, await hashPassword('the second one loses'), now),
+    ).toBe(false)
+
+    const user = await db.user.findUniqueOrThrow({ where: { id } })
+    expect(await verifyPassword(String(user.passwordHash), 'the first one wins')).toBe(true)
   })
 })

@@ -17,7 +17,14 @@ import { type ComponentProps, useState } from 'react'
  * autocorrect or capitalise it: spelling services send what they check to a
  * dictionary, and a corrected password is a wrong one.
  */
-export function PasswordInput({ className, ...props }: Omit<ComponentProps<'input'>, 'type'>) {
+export function PasswordInput({
+  className,
+  reveals = 'password',
+  ...props
+}: Omit<ComponentProps<'input'>, 'type'> & {
+  /** What the button shows, in its full name: two fields on one form need two names. */
+  reveals?: string
+}) {
   const [visible, setVisible] = useState(false)
 
   return (
@@ -37,7 +44,7 @@ export function PasswordInput({ className, ...props }: Omit<ComponentProps<'inpu
         className="absolute inset-y-0 right-0 rounded-control px-3 text-[12.5px] text-ink-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pencil"
       >
         {visible ? 'Hide' : 'Show'}
-        <span className="sr-only"> password</span>
+        <span className="sr-only"> {reveals}</span>
       </button>
     </div>
   )

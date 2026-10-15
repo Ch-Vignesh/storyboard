@@ -1,3 +1,6 @@
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+
 import Link from '@/components/link'
 
 import { auth, signOut } from '@/auth'
@@ -9,6 +12,18 @@ import { auth, signOut } from '@/auth'
  */
 export default async function AppLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const session = await auth()
+
+  // A session cookie the server has refused: one that signed in before a
+  // password reset (decision 0036). The proxy let it through because it never
+  // reads the database; this is the first place that can tell, so it sends the
+  // person to sign in again instead of rendering the app for nobody. The
+  // browser's own session check clears the cookie on the next page.
+  if (!session) {
+    const cookieStore = await cookies()
+    if (cookieStore.getAll().some((cookie) => cookie.name.includes('authjs.session-token'))) {
+      redirect('/signin?ended=1')
+    }
+  }
 
   return (
     <div className="min-h-screen">

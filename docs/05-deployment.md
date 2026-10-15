@@ -88,6 +88,14 @@ pnpm db:seed        # idempotent: safe on every deploy, and on an existing datab
 product's invariants forbid.
 
 Do this before the first deployment, not after it: the build reads the database.
+
+**Every later migration goes first, too.** Nothing applies migrations on a
+deploy, so the order is yours: `pnpm db:deploy` against production, then push the
+code that needs it. The migrations are written to be additive for exactly this
+reason, so the code already live keeps working against the new schema while the
+new code is on its way. Push first and the new code meets a database without
+its columns: for the password reset (decision 0036) that is every signed-in
+page, because the session check reads `passwordChangedAt` on each one.
 The sitemap is prerendered from the published storyboards, so a build with no
 `DATABASE_URL`, or with one whose tables do not exist yet, fails.
 

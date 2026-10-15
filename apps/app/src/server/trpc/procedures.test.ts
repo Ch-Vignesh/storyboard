@@ -64,8 +64,19 @@ describe('how procedures are built', () => {
     expect(all.length).toBeGreaterThan(50)
   })
 
-  /** The three a person reaches before they have an account at all (FR-1.4). */
-  const BEFORE_YOU_HAVE_A_SESSION = new Set(['signUp', 'resendVerification', 'setPassword'])
+  /**
+   * What a person reaches with no session: getting one in the first place
+   * (FR-1.4), and getting back in after a forgotten password (FR-1.7). A
+   * suspended account can reset its password too, and that is harmless: signing
+   * in still refuses it, which is where FR-13.5 is enforced.
+   */
+  const BEFORE_YOU_HAVE_A_SESSION = new Set([
+    'signUp',
+    'resendVerification',
+    'setPassword',
+    'requestPasswordReset',
+    'resetPassword',
+  ])
 
   /**
    * The one mutation that must be reachable by an account this rule freezes.

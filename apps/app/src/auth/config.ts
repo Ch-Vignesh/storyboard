@@ -19,6 +19,11 @@ export const authConfig = {
         token.id = user.id
         token.username = user.username ?? null
         token.onboarded = user.onboarded ?? false
+        // When this session signed in (decision 0036). Not `iat`: Auth.js
+        // re-issues the token as it is used, and `iat` moves with it, so it
+        // says when the cookie was last written rather than when anybody
+        // proved who they were. A claim of our own is copied unchanged.
+        token.authAt = Date.now()
       }
       // Onboarding steps 3 and 4 change facts the token carries. Without this
       // the proxy would keep redirecting a user who has just finished, until
@@ -40,6 +45,18 @@ export const authConfig = {
     },
   },
 } satisfies NextAuthConfig
+
+/**
+ * FR-1.7, decision 0036 — whether a session signed in before the account's
+ * password was last reset, and so must not be honoured any more. A token from
+ * before `authAt` existed counts as the oldest possible, which matters only on
+ * an account that has been reset since.
+ */
+export function signedInBeforeReset(authAt: unknown, passwordChangedAt: Date | null): boolean {
+  if (!passwordChangedAt) return false
+  const signedIn = typeof authAt === 'number' ? authAt : 0
+  return signedIn < passwordChangedAt.getTime()
+}
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
