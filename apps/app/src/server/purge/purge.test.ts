@@ -138,6 +138,74 @@ describe.skipIf(!databaseUrl)('purging a deleted storyboard (FR-2.6)', () => {
     expect(await db.revision.findUnique({ where: { id: revision.id } })).toBeNull()
   })
 
+  /**
+   * Found in the phase 12 audit: every storyboard that had ever accepted a
+   * suggestion failed its purge, every night, for ever. Deleting the suggestion
+   * made Postgres null `Revision.suggestionId` on the accepted revision, which
+   * is an UPDATE, which NFR-3's trigger refuses even inside the hard-delete
+   * hatch. The prose a writer deleted was kept indefinitely (FR-2.6).
+   */
+  it('removes one that accepted a suggestion, with its history chain', async () => {
+    const { user, storyboard, section, revision } = await writeSomething('accepted')
+    const run = randomUUID().replaceAll('-', '').slice(0, 8)
+
+    const request = await db.contributionRequest.create({
+      data: {
+        publicId: `rq${run}`,
+        storyboardId: storyboard.id,
+        sectionId: section.id,
+        kind: 'REWRITE',
+        title: 'Tighten the opening',
+        ask: 'Shorter, please.',
+        state: 'RESOLVED',
+        openedById: user.id,
+      },
+      select: { id: true },
+    })
+    const suggestion = await db.suggestion.create({
+      data: {
+        publicId: `sg${run}`,
+        requestId: request.id,
+        contributorId: user.id,
+        baseRevisionId: revision.id,
+        contentJson: { type: 'doc', content: [] },
+        contentText: 'The harbour was empty.',
+        wordCount: 4,
+        state: 'ACCEPTED',
+      },
+      select: { id: true },
+    })
+    // What `suggestion.accept` leaves behind: a revision made from it, on top
+    // of the one it was written against.
+    const accepted = await db.revision.create({
+      data: {
+        sectionId: section.id,
+        parentId: revision.id,
+        contentJson: { type: 'doc', content: [] },
+        contentText: 'The harbour was empty.',
+        wordCount: 4,
+        contentHash: randomUUID().replaceAll('-', '').padEnd(64, '1'),
+        source: 'ACCEPTED',
+        authorId: user.id,
+        acceptedById: user.id,
+        suggestionId: suggestion.id,
+      },
+      select: { id: true },
+    })
+    await db.section.update({
+      where: { id: section.id },
+      data: { currentRevisionId: accepted.id },
+    })
+    await deleteAndAge(storyboard.id)
+
+    const result = await purgeDeletedStoryboards(db)
+
+    expect(await db.storyboard.findUnique({ where: { id: storyboard.id } })).toBeNull()
+    expect(await db.revision.findUnique({ where: { id: accepted.id } })).toBeNull()
+    expect(await db.suggestion.findUnique({ where: { id: suggestion.id } })).toBeNull()
+    expect(result.purged).toBeGreaterThanOrEqual(1)
+  })
+
   it('does not touch a storyboard nobody deleted', async () => {
     const { storyboard } = await writeSomething('alive')
     await purgeDeletedStoryboards(db)

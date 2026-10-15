@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { signInErrorMessage } from './sign-in-error'
+import { signInErrorMessage, TOO_MANY_SIGN_INS } from './sign-in-error'
 
 describe('signInErrorMessage (FR-1.6)', () => {
   it('blames the password only when the password was refused', () => {
@@ -17,6 +17,12 @@ describe('signInErrorMessage (FR-1.6)', () => {
       expect(message).not.toMatch(/do not match/u)
     },
   )
+
+  it('says a refused attempt was the limit, not the password', () => {
+    const message = signInErrorMessage('CredentialsSignin', TOO_MANY_SIGN_INS)
+    expect(message).toMatch(/too many sign-in attempts/iu)
+    expect(message).not.toMatch(/do not match/u)
+  })
 
   it('does not tell a Google sign-in its password was wrong', () => {
     expect(signInErrorMessage('AccessDenied')).not.toMatch(/password/u)

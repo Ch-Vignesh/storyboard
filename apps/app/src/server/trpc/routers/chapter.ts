@@ -6,6 +6,9 @@ import { z } from 'zod'
 import { loadChapter, loadVersion } from '@/lib/authz/guard'
 import { emptyDoc, flavourForStoryType } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
+import { TITLE_MAX_CHARS } from '@/lib/schemas/constants'
+import { afterCommit } from '@/server/after-commit'
+import { closeRequestsOnSections } from '@/server/close-requests'
 
 import { activeProcedure, actorFrom, createTRPCRouter } from '../init'
 
@@ -13,7 +16,7 @@ const titleSchema = z
   .string()
   .trim()
   .min(1, 'Give the chapter a name.')
-  .max(200, 'That name is too long.')
+  .max(TITLE_MAX_CHARS, 'That name is too long.')
 
 export const chapterRouter = createTRPCRouter({
   /** FR-2.3 — a new chapter goes to the end and arrives with one empty section. */
@@ -187,6 +190,18 @@ export const chapterRouter = createTRPCRouter({
         for (const [order, chapter] of remaining.entries()) {
           await tx.chapter.update({ where: { id: chapter.id }, data: { order } })
         }
+      })
+
+      // Requests on the chapter's sections have nothing left to be about.
+      await afterCommit('chapter.delete.close_requests', async () => {
+        const sections = await ctx.db.section.findMany({
+          where: { chapterId },
+          select: { id: true },
+        })
+        await closeRequestsOnSections(
+          ctx.db,
+          sections.map((section) => section.id),
+        )
       })
 
       return { ok: true }

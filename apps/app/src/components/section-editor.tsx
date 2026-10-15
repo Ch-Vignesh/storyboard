@@ -7,11 +7,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { DocFlavour } from '@/lib/doc/schema'
 import { extensionsFor } from '@/lib/doc/tiptap'
-import { SECTION_WORDS } from '@/lib/schemas/constants'
+import {
+  DRAFT_IDLE_SECONDS,
+  REVISION_INTERVAL_MINUTES,
+  SECTION_WORDS,
+} from '@/lib/schemas/constants'
 import { useTRPC } from '@/trpc/client'
 
-const DRAFT_IDLE_MS = 3_000
-const REVISION_INTERVAL_MS = 5 * 60 * 1000
+const DRAFT_IDLE_MS = DRAFT_IDLE_SECONDS * 1000
+const REVISION_INTERVAL_MS = REVISION_INTERVAL_MINUTES * 60 * 1000
 
 type Props = {
   sectionId: string
@@ -49,17 +53,26 @@ export function SectionEditor({
   const [state, setState] = useState<SaveState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [words, setWords] = useState(0)
-  const [head, setHead] = useState(baseRevisionId)
+  // The revision this editor's text is written on. A ref, not state: two saves
+  // in a row must each see the head the one before it made, not the value from
+  // the last render.
+  const head = useRef(baseRevisionId)
 
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const revisionTimer = useRef<ReturnType<typeof setInterval> | null>(null)
-  const dirty = useRef(false)
-  // Clicking "Save now" blurs the editor, so the blur handler and the click
-  // handler fire together. Two saves of the same section open two transactions
-  // on the same row and deadlock, so only one runs at a time. The second is
-  // dropped rather than queued: it would be writing identical content, and
-  // anything typed since stays dirty for the next save.
-  const saving = useRef(false)
+  // A count of changes, and the count each kind of save last captured. A
+  // single "dirty" flag, cleared when a save came back, also cleared whatever
+  // was typed while that save was on its way: the last edit before leaving
+  // (an Italic click, which blurs the editor and so starts a save first) was
+  // reported as saved and never was (phase 12 audit).
+  const edits = useRef(0)
+  const committed = useRef(0)
+  const drafted = useRef(0)
+  const unsaved = () => edits.current !== committed.current
+  // Two saves of the same section at once open two transactions on one row and
+  // deadlock, so one runs at a time. A second caller waits for the first and
+  // then saves whatever is still unsaved, rather than being dropped.
+  const inFlight = useRef<Promise<boolean> | null>(null)
   const savingDraft = useRef(false)
 
   const saveDraft = useMutation(trpc.section.saveDraft.mutationOptions())
@@ -73,18 +86,20 @@ export function SectionEditor({
     immediatelyRender: false,
     editorProps: { attributes: { 'aria-label': 'Section text', role: 'textbox' } },
     onUpdate: ({ editor: instance }) => {
-      dirty.current = true
+      edits.current += 1
       setWords(countWordsIn(instance.getText()))
     },
   })
 
   /** Write the draft. Cheap, frequent, private. */
   const writeDraft = useCallback(async () => {
-    if (!editor || !dirty.current || savingDraft.current) return
+    if (!editor || edits.current === drafted.current || savingDraft.current) return
     savingDraft.current = true
+    const at = edits.current
     setState('draft-saving')
     try {
       await saveDraft.mutateAsync({ sectionId, contentJson: editor.getJSON() })
+      drafted.current = at
       setState('draft-saved')
       setError(null)
     } catch (caught) {
@@ -95,37 +110,57 @@ export function SectionEditor({
     }
   }, [editor, saveDraft, sectionId])
 
-  /** Cut a durable revision. */
-  const commit = useCallback(async () => {
-    if (!editor || !canCommit || !dirty.current || saving.current) return
-    saving.current = true
-    setState('saving')
-    try {
-      const result = await commitRevision.mutateAsync({
-        sectionId,
-        contentJson: editor.getJSON(),
-        baseRevisionId: head,
-      })
-      if (result.revisionId) setHead(result.revisionId)
-      dirty.current = false
-      setState('saved')
-      setError(null)
-    } catch (caught) {
-      setState('error')
-      setError(caught instanceof Error ? caught.message : 'Could not save.')
-    } finally {
-      saving.current = false
+  /**
+   * Cut a durable revision of whatever is unsaved. True when, afterwards,
+   * nothing is: either it saved, or there was nothing to save.
+   */
+  const commit = useCallback(async (): Promise<boolean> => {
+    if (!editor || !canCommit) return false
+    while (inFlight.current) {
+      if (!(await inFlight.current)) return false
     }
-  }, [canCommit, commitRevision, editor, head, sectionId])
+    if (!unsaved()) return true
+
+    const at = edits.current
+    const run = (async () => {
+      setState('saving')
+      try {
+        const result = await commitRevision.mutateAsync({
+          sectionId,
+          contentJson: editor.getJSON(),
+          baseRevisionId: head.current,
+        })
+        if (result.revisionId) head.current = result.revisionId
+        // What this save captured, not whatever has been typed since.
+        committed.current = at
+        drafted.current = Math.max(drafted.current, at)
+        setState(unsaved() ? 'idle' : 'saved')
+        setError(null)
+        return true
+      } catch (caught) {
+        setState('error')
+        setError(caught instanceof Error ? caught.message : 'Could not save.')
+        return false
+      }
+    })()
+    inFlight.current = run
+    try {
+      return await run
+    } finally {
+      inFlight.current = null
+    }
+  }, [canCommit, commitRevision, editor, sectionId])
 
   /**
    * FR-2.4 — split at the cursor. The text has to be durable before it can be
    * divided, so this commits first and then asks the server to cut the document
-   * at the top-level block the caret sits in.
+   * at the top-level block the caret sits in. If it could not be saved, there
+   * is nothing safe to split: the server would cut the last saved text and
+   * leave this person's latest words out of both halves (phase 12 audit).
    */
   const splitHere = useCallback(async () => {
     if (!editor || !canCommit) return
-    await commit()
+    if (!(await commit())) return
     const { $from } = editor.state.selection
     // depth 1 is the top-level block; its index is the cut point.
     const atBlockIndex = $from.index(0)
@@ -169,22 +204,38 @@ export function SectionEditor({
     }
   }, [canCommit, commit, editor])
 
-  // FR-4.4 — and on navigation away.
+  // FR-4.4 — and on navigation away. With anything unsaved, the browser also
+  // asks before the tab closes: the beacon below is a best effort, and a
+  // refused save (somebody else changed the section) cannot be shown to a
+  // page that has gone.
   useEffect(() => {
     const onHide = () => {
-      if (!dirty.current || !editor) return
+      if (!unsaved() || !editor || !canCommit) return
       // A keepalive beacon: the page may be gone before a promise settles.
       navigator.sendBeacon?.(
         '/api/section/save-beacon',
         new Blob(
-          [JSON.stringify({ sectionId, contentJson: editor.getJSON(), baseRevisionId: head })],
+          [
+            JSON.stringify({
+              sectionId,
+              contentJson: editor.getJSON(),
+              baseRevisionId: head.current,
+            }),
+          ],
           { type: 'application/json' },
         ),
       )
     }
+    const onLeave = (event: BeforeUnloadEvent) => {
+      if (unsaved() && edits.current !== drafted.current) event.preventDefault()
+    }
     window.addEventListener('pagehide', onHide)
-    return () => window.removeEventListener('pagehide', onHide)
-  }, [editor, head, sectionId])
+    window.addEventListener('beforeunload', onLeave)
+    return () => {
+      window.removeEventListener('pagehide', onHide)
+      window.removeEventListener('beforeunload', onLeave)
+    }
+  }, [canCommit, editor, sectionId])
 
   if (!editor) return <p className="text-[13.5px] text-ink-faint">Loading the editor…</p>
 

@@ -21,7 +21,7 @@ export async function createTRPCContext(opts: { headers: Headers }) {
   const account = session?.user
     ? await prisma.user.findUnique({
         where: { id: session.user.id },
-        select: { status: true, isAdmin: true, deletionRequestedAt: true },
+        select: { status: true, isAdmin: true, deletionRequestedAt: true, username: true },
       })
     : null
 
@@ -44,7 +44,12 @@ const t = initTRPC.context<Context>().create({
   transformer: superjson,
   errorFormatter({ shape, error }) {
     // The real error is not lost: the route's `onError` logs it before this runs.
-    const message = error.code === 'INTERNAL_SERVER_ERROR' ? SERVER_FAULT_MESSAGE : shape.message
+    // Input that failed validation says the first thing wrong with it, in the
+    // words the schema gave it; tRPC's own message is the issue list as JSON,
+    // which the forms were showing to people (phase 12 audit).
+    const invalid = error.cause instanceof ZodError ? error.cause.issues[0]?.message : undefined
+    const message =
+      error.code === 'INTERNAL_SERVER_ERROR' ? SERVER_FAULT_MESSAGE : (invalid ?? shape.message)
     return {
       ...shape,
       message,
@@ -98,13 +103,11 @@ export function actorFrom(
 }
 
 /**
- * Refuses a suspended or deleted account before a procedure runs (FR-13.5).
- *
- * `can()` already refuses every capability for such an actor, but not every
- * mutation goes through a storyboard — reporting, profile edits and account
- * settings do not — so the gate is here as well as there.
+ * Refuses a suspended or deleted account before a procedure runs (FR-13.5),
+ * without asking for a username. Only for the two things somebody must be
+ * able to do before they have one: choose it, and leave.
  */
-export const activeProcedure = timedProcedure.use(({ ctx, next }) => {
+export const accountProcedure = timedProcedure.use(({ ctx, next }) => {
   if (!ctx.session?.user) {
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Sign in first.' })
   }
@@ -127,14 +130,40 @@ export const activeProcedure = timedProcedure.use(({ ctx, next }) => {
   return next({ ctx: { ...ctx, session: { ...ctx.session, user: ctx.session.user } } })
 })
 
-/** Requires a signed-in administrator (FR-15.5). */
+/**
+ * `accountProcedure`, and a username: everything that writes. Whatever
+ * somebody writes is credited to that name (FR-1.3), and onboarding used to
+ * be enforced only by `proxy.ts`, which does not cover `/api/` — so an
+ * account with no username could write, and showed as "a former contributor"
+ * (phase 12 audit).
+ */
+export const activeProcedure = accountProcedure.use(({ ctx, next }) => {
+  if (ctx.account && !ctx.account.username) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Choose a username first.' })
+  }
+  return next()
+})
+
+/**
+ * Requires a signed-in administrator (FR-15.5) whose own account is in good
+ * standing. Until the phase 12 audit only `isAdmin` was checked, so a
+ * suspended admin, or one whose account was being deleted, kept every power
+ * for as long as their session lasted.
+ */
 export const adminProcedure = timedProcedure.use(({ ctx, next }) => {
   // Not FORBIDDEN: an admin screen is not a thing to be told about.
-  if (!ctx.session?.user || !ctx.account?.isAdmin) {
+  if (!ctx.session?.user || !isActiveAdmin(ctx.account)) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found.' })
   }
   return next({ ctx: { ...ctx, session: { ...ctx.session, user: ctx.session.user } } })
 })
+
+/** The admin test, shared by `adminProcedure` and the admin page. */
+export function isActiveAdmin(
+  account: { isAdmin: boolean; status: string; deletionRequestedAt: Date | null } | null,
+): boolean {
+  return Boolean(account?.isAdmin && account.status === 'ACTIVE' && !account.deletionRequestedAt)
+}
 
 export const createTRPCRouter = t.router
 export const createCallerFactory = t.createCallerFactory

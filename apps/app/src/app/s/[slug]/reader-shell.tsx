@@ -242,6 +242,19 @@ export function ReaderShell({
 
               {chapter.isPending ? (
                 <p className="mt-6 text-[13.5px] text-ink-faint">Loading…</p>
+              ) : chapter.isError ? (
+                // A chapter that would not load showed its title over nothing,
+                // which reads as a chapter with no text (phase 12 audit).
+                <p role="alert" className="mt-6 text-[13.5px] text-crimson">
+                  This chapter could not be loaded.{' '}
+                  <button
+                    type="button"
+                    className="text-pencil underline"
+                    onClick={() => void chapter.refetch()}
+                  >
+                    Try again
+                  </button>
+                </p>
               ) : (
                 <div className="manuscript mt-6 max-w-measure">
                   {(chapter.data ?? []).map((section) => (

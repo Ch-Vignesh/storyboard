@@ -4,6 +4,8 @@ import { NextResponse } from 'next/server'
 
 import { auth } from '@/auth'
 import { env } from '@/env'
+import { loadStoryboard } from '@/lib/authz/guard'
+import { actorFrom } from '@/server/trpc/init'
 import { nameOf } from '@/lib/people'
 import { logger } from '@/lib/logger'
 
@@ -50,7 +52,7 @@ export async function GET(_request: Request, { params }: Params): Promise<NextRe
               title: true,
               order: true,
               version: {
-                select: { storyboard: { select: { slug: true, title: true } } },
+                select: { storyboard: { select: { id: true, slug: true, title: true } } },
               },
             },
           },
@@ -65,6 +67,21 @@ export async function GET(_request: Request, { params }: Params): Promise<NextRe
 
   const { section } = revision
   const storyboard = section.chapter.version.storyboard
+
+  // And only while they can still read the story. The document carries its
+  // current title, chapter and address, so a story that has since gone
+  // private, or been deleted, handed those to a former contributor (phase 12
+  // audit). The proof is of the words; a story they cannot see is not theirs
+  // to describe.
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { status: true, isAdmin: true, deletionRequestedAt: true },
+  })
+  try {
+    await loadStoryboard(prisma, actorFrom(session, account), { id: storyboard.id })
+  } catch {
+    return NextResponse.json({ error: 'Not found.' }, { status: 404 })
+  }
 
   const file = await exportAuthorshipProof({
     storyboardTitle: storyboard.title,

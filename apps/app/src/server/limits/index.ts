@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { createHash } from 'node:crypto'
+
 import type { Prisma, PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 
@@ -156,11 +158,27 @@ export const key = {
   // FR-1.4's surfaces have no signed-in person to key on, so they key on the
   // address being used. An address is not an identity, but it is what the
   // action is about, and it is what somebody abusing it has to keep changing.
-  signUp: (email: string) => `auth:signup:${email.toLowerCase()}`,
-  verificationResend: (email: string) => `auth:resend:${email.toLowerCase()}`,
-  // The one-minute rhythm for an address with no link to send (auth router).
-  addressCooldown: (email: string) => `auth:cooldown:${email.toLowerCase()}`,
-  // FR-1.7: reset links asked for, per hour, and the one-minute rhythm for them.
-  passwordReset: (email: string) => `auth:reset:${email.toLowerCase()}`,
-  resetCooldown: (email: string) => `auth:reset-cooldown:${email.toLowerCase()}`,
+  signUp: (email: string) => `auth:signup:${addressDigest(email)}`,
+  verificationResend: (email: string) => `auth:resend:${addressDigest(email)}`,
+  // The one-minute rhythm for confirmation links, sign-up and resend alike.
+  addressCooldown: (email: string) => `auth:cooldown:${addressDigest(email)}`,
+  // ...and its own, for reset links (auth router, beforeAuthEmail).
+  resetCooldown: (email: string) => `auth:reset-cooldown:${addressDigest(email)}`,
+  // FR-1.7: reset links asked for, per hour.
+  passwordReset: (email: string) => `auth:reset:${addressDigest(email)}`,
+  // ...and, because a script changes the address every time, per client too.
+  authEmailsFrom: (client: string) => `auth:mail-from:${client}`,
+  // Sign-in attempts: an address from one client, and one client in all.
+  signIn: (email: string, client: string) => `auth:signin:${client}:${addressDigest(email)}`,
+  signInsFrom: (client: string) => `auth:signin-from:${client}`,
 } as const
+
+/**
+ * An email address as a key fragment. Hashed, because an address may be 254
+ * characters and `RateLimitHit.key` holds 200 (a long address was a server
+ * error on sign-up until the phase 12 audit), and because the table has no
+ * business holding people's addresses in the clear for a day.
+ */
+function addressDigest(email: string): string {
+  return createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 40)
+}

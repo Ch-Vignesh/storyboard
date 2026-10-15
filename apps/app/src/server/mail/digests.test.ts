@@ -178,12 +178,81 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
   it('never emails a suspended account (FR-13.5)', async () => {
     await seedOneOfEach()
     await db.user.update({ where: { id: userId }, data: { status: 'SUSPENDED' } })
+    try {
+      const mailer = recordingMailer()
+      await runImmediate(db, { mailer })
+      expect(mineIn(mailer)).toHaveLength(0)
 
-    const mailer = recordingMailer()
-    await runImmediate(db, { mailer })
-    expect(mineIn(mailer)).toHaveLength(0)
+      // Phase 12 audit: and the rows leave the queue. Left unmarked at its
+      // head, 500 of them stopped every run from reaching anybody else.
+      const stuck = await db.notification.count({
+        where: { userId, emailedAt: null, type: { in: [...IMMEDIATE_TYPES] } },
+      })
+      expect(stuck).toBe(0)
+    } finally {
+      await db.user.update({ where: { id: userId }, data: { status: 'ACTIVE' } })
+    }
+  })
 
-    await db.user.update({ where: { id: userId }, data: { status: 'ACTIVE' } })
+  /**
+   * Phase 12 audit. Every send sat in one loop with one mark at the end, so
+   * one failure left every row unmarked and the next run sent them all again.
+   */
+  it('sends the rest when one fails, and sends nothing twice', async () => {
+    await seedOneOfEach()
+    let failedOnce = false
+    const sent: Mail[] = []
+    const flaky: Mailer = {
+      send(mail) {
+        if (mail.to === email && !failedOnce) {
+          failedOnce = true
+          return Promise.reject(new Error('421 try again later'))
+        }
+        sent.push(mail)
+        return Promise.resolve()
+      },
+    }
+
+    await runImmediate(db, { mailer: flaky })
+    expect(mineIn({ sent })).toHaveLength(IMMEDIATE_TYPES.length - 1)
+
+    // The next run sends the one that failed, and only that one.
+    const next = recordingMailer()
+    await runImmediate(db, { mailer: next })
+    expect(mineIn(next)).toHaveLength(1)
+  })
+
+  it('stops a run the provider is refusing outright, and marks nothing it did not send', async () => {
+    const { DIGEST_FAILURES_BEFORE_STOPPING } = await import('@/lib/schemas/constants')
+    await seedOneOfEach()
+    let attempts = 0
+    const refusing: Mailer = {
+      send() {
+        attempts += 1
+        return Promise.reject(new Error('550 daily sending quota exceeded'))
+      },
+    }
+
+    const result = await runImmediate(db, { mailer: refusing })
+
+    expect(result.sent).toBe(0)
+    expect(attempts).toBe(DIGEST_FAILURES_BEFORE_STOPPING)
+    const unsent = await db.notification.count({
+      where: { userId, emailedAt: null, type: { in: [...IMMEDIATE_TYPES] } },
+    })
+    expect(unsent).toBe(IMMEDIATE_TYPES.length)
+  })
+
+  it('never queues mail for an address nobody confirmed', async () => {
+    await seedOneOfEach()
+    await db.user.update({ where: { id: userId }, data: { emailVerifiedAt: null } })
+    try {
+      const mailer = recordingMailer()
+      await runImmediate(db, { mailer })
+      expect(mineIn(mailer)).toHaveLength(0)
+    } finally {
+      await db.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() } })
+    }
   })
 
   it('sends no weekly digest when the week was empty (FR-15.1)', async () => {

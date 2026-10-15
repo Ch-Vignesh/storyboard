@@ -42,6 +42,37 @@ function isCharacterCue(line: string, next: string | undefined): boolean {
   return trimmed === trimmed.toUpperCase() && !/[.!?]$/u.test(trimmed.replace(/\([^)]*\)$/u, ''))
 }
 
+/**
+ * How many characters a Fountain title page takes, its closing blank line
+ * included, or `null` when the file does not open with one that has a title.
+ *
+ * Key lines (`Author: …`) and their indented continuation lines, up to the
+ * first blank line. Read a line at a time: the regular expression this
+ * replaced could read each indented line two ways, and backtracked through
+ * every combination, so 160 bytes of `a:` followed by `\n b:` lines kept an
+ * import busy until the platform killed it (phase 12 audit).
+ */
+export function titlePageLength(source: string): number | null {
+  let length = 0
+  let keys = 0
+  let titled = false
+  for (const line of source.split(/(?<=\n)/u)) {
+    const content = line.replace(/\r?\n$/u, '')
+    if (content.trim().length === 0) {
+      // The blank line that ends it must really be a line, not the end of the file.
+      return keys > 0 && titled && line.endsWith('\n') ? length + line.length : null
+    }
+    if (/^[\w ]+:/u.test(content)) {
+      keys += 1
+      if (/^title\s*:/iu.test(content)) titled = true
+    } else if (keys === 0 || !/^[ \t]/u.test(content)) {
+      return null
+    }
+    length += line.length
+  }
+  return null
+}
+
 export function extractFountain(source: string): NormalisedDoc {
   const blocks: Block[] = []
   const dropped = new Set<string>()
@@ -49,9 +80,9 @@ export function extractFountain(source: string): NormalisedDoc {
   // Title page: `Title: …` key/value lines before the first blank line. The
   // values are metadata, not script, so they are noted and not imported.
   let body = source
-  const titlePage = /^(?:[\w ]+:.*(?:\r?\n(?:[ \t]+.*)?)*\r?\n)+\r?\n/u.exec(source)
-  if (titlePage && /^title\s*:/imu.test(titlePage[0])) {
-    body = source.slice(titlePage[0].length)
+  const titlePage = titlePageLength(source)
+  if (titlePage !== null) {
+    body = source.slice(titlePage)
     dropped.add('the title page')
   }
 

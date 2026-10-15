@@ -13,7 +13,7 @@ export const authConfig = {
     authorized({ auth }) {
       return Boolean(auth?.user)
     },
-    jwt({ token, user, trigger, session }) {
+    jwt({ token, user }) {
       // `user` is only present on sign-in; copy what the session needs into the token.
       if (user) {
         token.id = user.id
@@ -25,14 +25,11 @@ export const authConfig = {
         // proved who they were. A claim of our own is copied unchanged.
         token.authAt = Date.now()
       }
-      // Onboarding steps 3 and 4 change facts the token carries. Without this
-      // the proxy would keep redirecting a user who has just finished, until
-      // their token expired. The client calls `update()` after each step.
-      if (trigger === 'update' && session && typeof session === 'object') {
-        const patch = session as { username?: unknown; onboarded?: unknown }
-        if (typeof patch.username === 'string') token.username = patch.username
-        if (typeof patch.onboarded === 'boolean') token.onboarded = patch.onboarded
-      }
+      // Onboarding steps 3 and 4 change facts the token carries, and the
+      // client calls `update()` after each. What it sends is ignored: the
+      // server half (`auth/index.ts`) reads them from the database on every
+      // request, `update()` included. Copying the client's values let anyone
+      // mark themselves onboarded with no username (phase 12 audit).
       return token
     },
     session({ session, token }) {

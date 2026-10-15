@@ -316,23 +316,50 @@ describe('the whole proposal (FR-3.2)', () => {
 })
 
 describe('a zip that is not a manuscript', () => {
-  it('refuses an archive that declares far more than it can hold', async () => {
-    const { assertReasonableArchive, MAX_UNCOMPRESSED_BYTES } = await import('./extract/zip-guard')
-    const { zipSync } = await import('fflate')
-
-    // A megabyte of one repeated byte compresses to almost nothing, which is
-    // the shape of the problem: small on the wire, enormous in memory.
-    const filler = new Uint8Array(1024 * 1024)
-    const archive = Buffer.from(
-      zipSync(
-        Object.fromEntries(
-          Array.from({ length: 100 }, (_, index) => [`part-${String(index)}.bin`, filler]),
+  // A megabyte of one repeated byte compresses to almost nothing, which is the
+  // shape of the problem: small on the wire, enormous in memory. Compressing a
+  // hundred of them is the slow part of these tests, so it is done once, and
+  // the tests allow for a busy machine: under the whole suite's load it took
+  // over Vitest's five-second default.
+  const FILLER_BYTES = 1024 * 1024
+  const MEMBERS = 100
+  let bomb: Buffer | undefined
+  async function aBomb(): Promise<Buffer> {
+    if (!bomb) {
+      const { zipSync } = await import('fflate')
+      const filler = new Uint8Array(FILLER_BYTES)
+      bomb = Buffer.from(
+        zipSync(
+          Object.fromEntries(
+            Array.from({ length: MEMBERS }, (_, index) => [`part-${String(index)}.bin`, filler]),
+          ),
         ),
-      ),
-    )
+      )
+    }
+    return Buffer.from(bomb)
+  }
+  const SLOW = { timeout: 30_000 }
+
+  it('refuses an archive that declares far more than it can hold', SLOW, async () => {
+    const { assertReasonableArchive, MAX_UNCOMPRESSED_BYTES } = await import('./extract/zip-guard')
+    const archive = await aBomb()
 
     expect(archive.byteLength).toBeLessThan(5 * 1024 * 1024)
-    expect(100 * filler.byteLength).toBeGreaterThan(MAX_UNCOMPRESSED_BYTES)
+    expect(MEMBERS * FILLER_BYTES).toBeGreaterThan(MAX_UNCOMPRESSED_BYTES)
+    expect(() => assertReasonableArchive(archive)).toThrow(/not what a manuscript looks like/iu)
+  })
+
+  /**
+   * Phase 12 audit. The sizes in a zip's headers are written by whoever made
+   * it, and the guard believed them; the libraries after it inflate first and
+   * notice later. Here every header says a kilobyte, and the members inflate to
+   * 100 MB between them.
+   */
+  it('refuses an archive whose headers understate what it holds', SLOW, async () => {
+    const { assertReasonableArchive } = await import('./extract/zip-guard')
+    const archive = await aBomb()
+    lieAboutSizes(archive, 1024)
+
     expect(() => assertReasonableArchive(archive)).toThrow(/not what a manuscript looks like/iu)
   })
 
@@ -348,5 +375,65 @@ describe('a zip that is not a manuscript', () => {
   it('says nothing about a file that is not a zip at all', async () => {
     const { assertReasonableArchive } = await import('./extract/zip-guard')
     expect(() => assertReasonableArchive(Buffer.from('plain text', 'utf8'))).not.toThrow()
+  })
+})
+
+/** Rewrites every member's declared size, in its local header and the directory. */
+function lieAboutSizes(zip: Buffer, size: number): void {
+  let offset = 0
+  while (zip.readUInt32LE(offset) === 0x04034b50) {
+    zip.writeUInt32LE(size, offset + 22)
+    const compressed = zip.readUInt32LE(offset + 18)
+    offset += 30 + zip.readUInt16LE(offset + 26) + zip.readUInt16LE(offset + 28) + compressed
+  }
+  const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+  let entry = zip.readUInt32LE(end + 16)
+  for (let index = 0; index < zip.readUInt16LE(end + 10); index += 1) {
+    zip.writeUInt32LE(size, entry + 24)
+    entry +=
+      46 +
+      zip.readUInt16LE(entry + 28) +
+      zip.readUInt16LE(entry + 30) +
+      zip.readUInt16LE(entry + 32)
+  }
+}
+
+/**
+ * Phase 12 audit: input shapes that used to keep an import busy until the
+ * platform killed it. Each must finish in well under a second.
+ */
+describe('a file built to make the reader work for ever', () => {
+  it('reads a Fountain title page a line at a time', () => {
+    // Each `\n b:` could be read as a continuation or as a new key, and the
+    // old pattern tried every combination: 2^40 here.
+    const started = performance.now()
+    const doc = extractFountain('a:' + '\n b:'.repeat(40))
+    expect(performance.now() - started).toBeLessThan(500)
+    expect(doc.dropped).not.toContain('the title page')
+  })
+
+  it('still finds a title page where there is one', async () => {
+    const { titlePageLength } = await import('./extract/screenplay')
+    const titled = 'Title: The Ship\n  a subtitle\nAuthor: J Rivera\n\nFADE IN:'
+    expect(titlePageLength(titled)).toBe(titled.indexOf('FADE IN:'))
+    expect(titlePageLength('Author: J Rivera\n\nFADE IN:')).toBeNull()
+    expect(titlePageLength('FADE IN:\n\nA harbour.')).toBeNull()
+    expect(titlePageLength('Title: never ends')).toBeNull()
+  })
+
+  it('reads page breaks in one pass over self-closing paragraphs', async () => {
+    const { readPageStarts } = await import('./extract/page-breaks')
+    const { zipSync } = await import('fflate')
+    const xml =
+      '<w:document><w:body>' +
+      '<w:p w:rsidR="00A1"/>'.repeat(200_000) +
+      '<w:p><w:r><w:br w:type="page"/></w:r></w:p><w:p><w:r><w:t>Chapter two</w:t></w:r></w:p>' +
+      '</w:body></w:document>'
+    const file = Buffer.from(zipSync({ 'word/document.xml': new TextEncoder().encode(xml) }))
+
+    const started = performance.now()
+    const starts = readPageStarts(file)
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(starts).toEqual(['chapter two'])
   })
 })

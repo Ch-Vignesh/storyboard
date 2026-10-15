@@ -8,13 +8,18 @@ import {
   NOTIFICATIONS,
   type NotificationType,
 } from '@/lib/schemas/notifications'
-import { QUIET_REQUEST_NUDGE_DAYS } from '@/lib/schemas/constants'
+import {
+  DIGEST_FAILURES_BEFORE_STOPPING,
+  DIGEST_RUN_BUDGET_SECONDS,
+  QUIET_REQUEST_NUDGE_DAYS,
+  WEEKLY_DIGEST_DAYS,
+} from '@/lib/schemas/constants'
 import { pruneRateLimits } from '@/server/limits'
 import { purgeDeletedAccounts } from '@/server/purge/accounts'
 import { purgeAbandonedImports } from '@/server/purge/imports'
 import { purgeDeletedStoryboards } from '@/server/purge'
 
-import { getMailer, type Mailer } from './mailer'
+import { getMailer, type Mail, type Mailer } from './mailer'
 import {
   digestMail,
   notificationMail,
@@ -78,27 +83,101 @@ type Pending = {
   user: { id: string; email: string }
 }
 
-async function pendingOfTypes(db: Db, types: readonly NotificationType[]): Promise<Pending[]> {
+/**
+ * Whether an account can be emailed at all. Not a suspended or deleted one
+ * (FR-13.5), not an address nobody has confirmed, and not the seed's
+ * `.invalid` addresses: the platform account owns every example request, so
+ * every suggestion sent to one queued mail to an address that can only bounce.
+ */
+function reachable(user: {
+  email: string
+  status: string
+  deletionRequestedAt: Date | null
+  emailVerifiedAt: Date | null
+}): boolean {
+  return (
+    user.status === 'ACTIVE' &&
+    !user.deletionRequestedAt &&
+    user.emailVerifiedAt !== null &&
+    !user.email.endsWith('.invalid')
+  )
+}
+
+const RECIPIENT = {
+  id: true,
+  email: true,
+  status: true,
+  deletionRequestedAt: true,
+  emailVerifiedAt: true,
+} as const
+
+/**
+ * The oldest unsent rows of these types: the ones to send, and the ones that
+ * can never be sent. The second are marked, not left: rows for a suspended
+ * account used to stay at the head of the queue, and once there were 500 of
+ * them no run ever reached anyone else (phase 12 audit). Their in-app delivery
+ * has already happened.
+ */
+async function pendingOfTypes(
+  db: Db,
+  types: readonly NotificationType[],
+): Promise<{ pending: Pending[]; unreachable: string[] }> {
   const rows = await db.notification.findMany({
     where: { emailedAt: null, type: { in: [...types] } },
     orderBy: { createdAt: 'asc' },
     take: 500,
-    select: {
-      id: true,
-      type: true,
-      payload: true,
-      user: { select: { id: true, email: true, status: true, deletionRequestedAt: true } },
-    },
+    select: { id: true, type: true, payload: true, user: { select: RECIPIENT } },
   })
-  // A suspended or deleted account is not emailed (FR-13.5).
-  return rows
-    .filter((row) => row.user.status === 'ACTIVE' && !row.user.deletionRequestedAt)
-    .map((row) => ({
-      id: row.id,
-      type: row.type,
-      payload: row.payload,
-      user: { id: row.user.id, email: row.user.email },
-    }))
+  return {
+    pending: rows
+      .filter((row) => reachable(row.user))
+      .map((row) => ({
+        id: row.id,
+        type: row.type,
+        payload: row.payload,
+        user: { id: row.user.id, email: row.user.email },
+      })),
+    unreachable: rows.filter((row) => !reachable(row.user)).map((row) => row.id),
+  }
+}
+
+/**
+ * One run's sending, made to survive a bad address and a bad minute.
+ *
+ * Every send used to sit in one loop with one `markEmailed` at the end, so a
+ * single failure, or the platform stopping a slow run, left every row unmarked
+ * and the next run sent them all again; every ten minutes, for as long as it
+ * kept happening (phase 12 audit). Now each send stands alone, the caller
+ * marks what it sent as it goes, and the run stops while it still can: when
+ * its time is spent, or when the provider has refused several in a row.
+ */
+function deliveryRun(mailer: Mailer) {
+  const started = Date.now()
+  let failuresInARow = 0
+  return {
+    /** False once the run should stop and leave the rest for the next one. */
+    get open(): boolean {
+      return (
+        Date.now() - started < DIGEST_RUN_BUDGET_SECONDS * 1000 &&
+        failuresInARow < DIGEST_FAILURES_BEFORE_STOPPING
+      )
+    },
+    /** True if it went. A failure is logged and never thrown. */
+    async send(mail: Mail, context: Record<string, unknown>): Promise<boolean> {
+      try {
+        await mailer.send(mail)
+        failuresInARow = 0
+        return true
+      } catch (error) {
+        failuresInARow += 1
+        log.error(
+          { event: 'digest.send_failed', ...context, error: String(error) },
+          'one email was not sent; the run goes on, and the next run tries it again',
+        )
+        return false
+      }
+    },
+  }
 }
 
 async function markEmailed(db: Db, ids: readonly string[]): Promise<void> {
@@ -126,18 +205,19 @@ export type RunOptions = { mailer?: Mailer }
  */
 export async function runImmediate(db: Db, options: RunOptions = {}): Promise<RunResult> {
   const appUrl = env.NEXT_PUBLIC_APP_URL
-  const pending = await pendingOfTypes(db, IMMEDIATE_TYPES)
-  const mailer = options.mailer ?? getMailer()
+  const { pending, unreachable } = await pendingOfTypes(db, IMMEDIATE_TYPES)
+  const run = deliveryRun(options.mailer ?? getMailer())
+  await markEmailed(db, unreachable)
 
   let sent = 0
-  let skipped = 0
-  const done: string[] = []
+  let skipped = unreachable.length
 
   for (const row of pending) {
+    if (!run.open) break
     if (!(await emailAllowed(db, row.user.id, row.type))) {
       // Not emailed, but still marked: the in-app row is the delivery that
       // cannot be disabled, and leaving it pending would retry forever.
-      done.push(row.id)
+      await markEmailed(db, [row.id])
       skipped += 1
       continue
     }
@@ -147,12 +227,14 @@ export async function runImmediate(db: Db, options: RunOptions = {}): Promise<Ru
       url: urlFor(row.type, row.payload, appUrl),
       subject: subjectFor(row.payload),
     }
-    await mailer.send(notificationMail({ to: row.user.email, line, appUrl }))
-    done.push(row.id)
-    sent += 1
+    const mail = notificationMail({ to: row.user.email, line, appUrl })
+    if (await run.send(mail, { notificationId: row.id, userId: row.user.id })) {
+      // Marked the moment it went, so nothing after this can send it twice.
+      await markEmailed(db, [row.id])
+      sent += 1
+    }
   }
 
-  await markEmailed(db, done)
   log.info(
     { event: 'digest.immediate', considered: pending.length, sent, skipped },
     'immediate run',
@@ -163,8 +245,9 @@ export async function runImmediate(db: Db, options: RunOptions = {}): Promise<Ru
 /** FR-12.3 — hourly digest for everything that is not about your own work. */
 export async function runHourlyDigest(db: Db, options: RunOptions = {}): Promise<RunResult> {
   const appUrl = env.NEXT_PUBLIC_APP_URL
-  const pending = await pendingOfTypes(db, HOURLY_TYPES)
-  const mailer = options.mailer ?? getMailer()
+  const { pending, unreachable } = await pendingOfTypes(db, HOURLY_TYPES)
+  const run = deliveryRun(options.mailer ?? getMailer())
+  await markEmailed(db, unreachable)
 
   // One message per person, however many things happened.
   const byUser = new Map<string, { email: string; rows: Pending[] }>()
@@ -175,21 +258,21 @@ export async function runHourlyDigest(db: Db, options: RunOptions = {}): Promise
   }
 
   let sent = 0
-  let skipped = 0
-  const done: string[] = []
+  let skipped = unreachable.length
 
   for (const [userId, entry] of byUser) {
+    if (!run.open) break
     const allowed: Pending[] = []
+    const switchedOff: string[] = []
     for (const row of entry.rows) {
       if (await emailAllowed(db, userId, row.type)) allowed.push(row)
-      else {
-        done.push(row.id)
-        skipped += 1
-      }
+      else switchedOff.push(row.id)
     }
+    await markEmailed(db, switchedOff)
+    skipped += switchedOff.length
     if (allowed.length === 0) continue
 
-    await mailer.send(
+    const went = await run.send(
       digestMail({
         to: entry.email,
         heading:
@@ -207,12 +290,17 @@ export async function runHourlyDigest(db: Db, options: RunOptions = {}): Promise
         })),
         appUrl,
       }),
+      { userId },
     )
-    done.push(...allowed.map((row) => row.id))
-    sent += 1
+    if (went) {
+      await markEmailed(
+        db,
+        allowed.map((row) => row.id),
+      )
+      sent += 1
+    }
   }
 
-  await markEmailed(db, done)
   log.info({ event: 'digest.hourly', considered: pending.length, sent, skipped }, 'hourly run')
   return { considered: pending.length, sent, skipped }
 }
@@ -230,14 +318,16 @@ export async function runWeeklyDigest(
   options: RunOptions = {},
 ): Promise<RunResult> {
   const appUrl = env.NEXT_PUBLIC_APP_URL
-  const mailer = options.mailer ?? getMailer()
-  const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const run = deliveryRun(options.mailer ?? getMailer())
+  const since = new Date(now.getTime() - WEEKLY_DIGEST_DAYS * 24 * 60 * 60 * 1000)
 
   const readers = await db.user.findMany({
     where: {
       status: 'ACTIVE',
       deletionRequestedAt: null,
       onboardedAt: { not: null },
+      emailVerifiedAt: { not: null },
+      email: { not: { endsWith: '.invalid' } },
       pinnedGenres: { some: {} },
     },
     select: {
@@ -251,6 +341,7 @@ export async function runWeeklyDigest(
   let skipped = 0
 
   for (const reader of readers) {
+    if (!run.open) break
     if (!(await emailAllowed(db, reader.id, 'WEEKLY_DIGEST'))) {
       skipped += 1
       continue
@@ -285,7 +376,7 @@ export async function runWeeklyDigest(
       continue
     }
 
-    await mailer.send(
+    const went = await run.send(
       digestMail({
         to: reader.email,
         heading: 'This week in your genres',
@@ -299,8 +390,9 @@ export async function runWeeklyDigest(
         })),
         appUrl,
       }),
+      { userId: reader.id },
     )
-    sent += 1
+    if (went) sent += 1
   }
 
   log.info({ event: 'digest.weekly', considered: readers.length, sent, skipped }, 'weekly run')
@@ -319,7 +411,7 @@ export async function runQuietNudge(
   options: RunOptions = {},
 ): Promise<RunResult> {
   const appUrl = env.NEXT_PUBLIC_APP_URL
-  const mailer = options.mailer ?? getMailer()
+  const run = deliveryRun(options.mailer ?? getMailer())
   const cutoff = new Date(now.getTime() - QUIET_REQUEST_NUDGE_DAYS * 24 * 60 * 60 * 1000)
 
   const quiet = await db.contributionRequest.findMany({
@@ -336,7 +428,7 @@ export async function runQuietNudge(
       title: true,
       openedById: true,
       storyboard: { select: { slug: true } },
-      openedBy: { select: { email: true, status: true, deletionRequestedAt: true } },
+      openedBy: { select: RECIPIENT },
     },
   })
 
@@ -344,6 +436,7 @@ export async function runQuietNudge(
   let skipped = 0
 
   for (const request of quiet) {
+    if (!run.open) break
     const already = await db.notification.findFirst({
       where: {
         userId: request.openedById,
@@ -352,7 +445,7 @@ export async function runQuietNudge(
       },
       select: { id: true },
     })
-    if (already || request.openedBy.status !== 'ACTIVE' || request.openedBy.deletionRequestedAt) {
+    if (already || !reachable(request.openedBy)) {
       skipped += 1
       continue
     }
@@ -376,7 +469,7 @@ export async function runQuietNudge(
     })
 
     if (await emailAllowed(db, request.openedById, 'REQUEST_QUIET_SEVEN_DAYS')) {
-      await mailer.send(
+      const went = await run.send(
         quietRequestMail({
           to: request.openedBy.email,
           requestTitle: request.title,
@@ -384,8 +477,9 @@ export async function runQuietNudge(
           widenUrl: `${requestUrl}?widen=1`,
           appUrl,
         }),
+        { requestId: request.id },
       )
-      sent += 1
+      if (went) sent += 1
     } else {
       skipped += 1
     }

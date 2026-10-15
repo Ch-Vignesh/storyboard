@@ -68,7 +68,7 @@ export default async function ProfilePage({ params }: Params) {
         ) : null}
         {user.suspended ? (
           <p className="mt-4 border-l-2 border-crimson bg-paper-sunk px-4 py-2.5 text-[13.5px] text-ink">
-            This account is suspended while a report is reviewed.
+            Your account is suspended while a report is reviewed. Only you can see this.
           </p>
         ) : null}
       </header>

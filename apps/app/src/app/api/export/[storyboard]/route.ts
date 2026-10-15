@@ -37,7 +37,10 @@ export async function GET(request: Request, { params }: Params): Promise<NextRes
   const account = session?.user
     ? await prisma.user.findUnique({
         where: { id: session.user.id },
-        select: { status: true, isAdmin: true },
+        // `deletionRequestedAt` too: without it `can()` took an account in its
+        // deletion grace (decision 0024) for an active one, and let it export
+        // (phase 12 audit).
+        select: { status: true, isAdmin: true, deletionRequestedAt: true },
       })
     : null
   const actor = actorFrom(session, account)

@@ -33,8 +33,12 @@ on:
 permissions: {}
 
 # One run of a job at a time; a slow one is waited for, never cancelled halfway.
+# Grouped by job name, from the schedule or the choice, so a run by hand waits
+# for the scheduled one. Grouped by the schedule string, as it was until the
+# phase 12 audit, the two were different groups and could send the same mail
+# at once.
 concurrency:
-  group: cron-${{ github.event.schedule || inputs.job }}
+  group: cron-${{ github.event.schedule == '*/10 * * * *' && 'immediate' || github.event.schedule == '0 * * * *' && 'hourly' || github.event.schedule == '0 9 * * 1' && 'weekly' || github.event.schedule == '30 8 * * *' && 'nudge' || github.event.schedule == '15 3 * * *' && 'prune' || github.event.schedule == '45 3 * * *' && 'purge' || inputs.job }}
   cancel-in-progress: false
 
 jobs:
@@ -67,7 +71,16 @@ jobs:
             exit 1
           fi
           echo "Running $job against $APP_URL"
-          curl --fail-with-body --silent --show-error --max-time 300 \
+          # The status only. The body says how many accounts were erased and
+          # how many people were emailed, and this repository's Actions logs
+          # are public (the backup drill runs --quiet for the same reason). The
+          # deployment logs the full result where only its owner can read it.
+          body="$RUNNER_TEMP/cron-body"
+          status=$(curl --silent --show-error --max-time 300 -o "$body" -w '%{http_code}' \
             -X POST -H "Authorization: Bearer $CRON_SECRET" \
-            "${APP_URL%/}/api/cron/$job"
-          echo
+            "${APP_URL%/}/api/cron/$job") || { echo "Could not reach $APP_URL"; exit 1; }
+          if [ "$status" -ge 300 ]; then
+            echo "$job failed: HTTP $status $(head -c 100 "$body")"
+            exit 1
+          fi
+          echo "$job finished: HTTP $status"

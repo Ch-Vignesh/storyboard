@@ -3,7 +3,11 @@ import { z } from 'zod'
 
 import { visibleStoryboardsWhere } from '@/lib/authz/guard'
 import { AGE_FILTERS, browseFiltersSchema } from '@/lib/schemas/browse'
-import { QUIET_REQUEST_NUDGE_DAYS } from '@/lib/schemas/constants'
+import {
+  BROWSE_LIMITS,
+  GENRE_SELECTION_MAX,
+  QUIET_REQUEST_NUDGE_DAYS,
+} from '@/lib/schemas/constants'
 
 import { actorFrom, createTRPCRouter, publicProcedure } from '../init'
 
@@ -107,9 +111,9 @@ export const browseRouter = createTRPCRouter({
   storyboards: publicProcedure
     .input(
       z.object({
-        query: z.string().trim().max(100).optional(),
-        genreIds: z.array(z.string().min(1)).max(24).optional(),
-        take: z.number().int().min(1).max(50).default(24),
+        query: z.string().trim().max(BROWSE_LIMITS.queryMaxChars).optional(),
+        genreIds: z.array(z.string().min(1)).max(GENRE_SELECTION_MAX).optional(),
+        take: z.number().int().min(1).max(BROWSE_LIMITS.pageMax).default(BROWSE_LIMITS.pageDefault),
       }),
     )
     .query(async ({ ctx, input }) => {

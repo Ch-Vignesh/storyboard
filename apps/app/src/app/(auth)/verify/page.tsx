@@ -15,12 +15,27 @@ export default async function VerifyPage({ searchParams }: Props) {
   const tokenValue = typeof token === 'string' ? token : ''
 
   let email: string | null = null
+  let hasPassword = false
   if (tokenValue) {
     try {
-      email = (await caller.auth.verifyEmail({ token: tokenValue })).email
+      ;({ email, hasPassword } = await caller.auth.verifyEmail({ token: tokenValue }))
     } catch (caught) {
       if (!(caught instanceof TRPCError)) throw caught
     }
+  }
+
+  // An older link, opened after the account was finished with a newer one. A
+  // confirmation link never changes a password (decision 0036).
+  if (email && hasPassword) {
+    return (
+      <div>
+        <h1 className="font-manuscript text-2xl font-medium">Your account is ready</h1>
+        <p className="mt-3 text-[14px] text-ink-soft">
+          {email} already has a password. <Link href="/signin">Sign in</Link>, or use{' '}
+          <Link href="/forgot-password">Forgot your password?</Link> to change it.
+        </p>
+      </div>
+    )
   }
 
   if (!email) {

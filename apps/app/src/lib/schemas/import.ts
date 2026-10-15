@@ -1,6 +1,8 @@
 import { FORMATS, STRATEGIES } from '@storyboard/import/types'
 import { z } from 'zod'
 
+import { TITLE_MAX_CHARS } from './constants'
+
 /**
  * What a writer may send back after reviewing a proposal (FR-3.2).
  *
@@ -18,11 +20,11 @@ export const confirmedSectionSchema = z.object({
   /** Indices into the parsed block list, both inclusive. */
   from: z.number().int().min(0),
   to: z.number().int().min(0),
-  title: z.string().trim().max(200).optional(),
+  title: z.string().trim().max(TITLE_MAX_CHARS).optional(),
 })
 
 export const confirmedChapterSchema = z.object({
-  title: z.string().trim().min(1, 'Every chapter needs a name.').max(200),
+  title: z.string().trim().min(1, 'Every chapter needs a name.').max(TITLE_MAX_CHARS),
   sections: z
     .array(confirmedSectionSchema)
     .min(1, 'A chapter needs at least one section.')

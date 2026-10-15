@@ -33,6 +33,18 @@ describe('usernameSchema (FR-1.3)', () => {
     }
   })
 
+  // Phase 12 audit: a person holding one of these broke every later seed run.
+  it('rejects the names the seed’s own accounts use, the old one included', () => {
+    for (const reserved of [
+      'draftboard-examples',
+      'storyboard-examples',
+      'example-helper-1',
+      'example-helper-2',
+    ]) {
+      expect(usernameSchema.safeParse(reserved).success, reserved).toBe(false)
+    }
+  })
+
   it('rejects reserved names that collide with routes', () => {
     for (const reserved of ['admin', 'settings', 'signin', 'browse']) {
       expect(usernameSchema.safeParse(reserved).success, reserved).toBe(false)

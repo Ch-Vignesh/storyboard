@@ -3,8 +3,10 @@ import { z } from 'zod'
 import {
   IDEA_WORDS,
   REQUEST_ASK_WORDS,
+  REQUEST_EXTRAS,
   REQUEST_PRE_CONTEXT_WORDS,
   REQUEST_TITLE_MAX_CHARS,
+  SUGGESTION_NOTE_MAX_CHARS,
   SUGGESTION_NOTE_MAX_WORDS,
   SUGGESTION_WORDS,
 } from './constants'
@@ -91,10 +93,38 @@ export const createRequestSchema = z
     /** FR-5.4 — required for the two prose kinds, meaningless for UNBLOCK. */
     preContext: z.string().trim().optional(),
     /** FR-5.6 */
-    toneNotes: z.string().trim().max(2000).optional(),
-    constraints: z.array(z.string().trim().min(1).max(200)).max(10).optional(),
+    toneNotes: z
+      .string()
+      .trim()
+      .max(
+        REQUEST_EXTRAS.toneNotesMaxChars,
+        `Keep the tone notes under ${String(REQUEST_EXTRAS.toneNotesMaxChars)} characters.`,
+      )
+      .optional(),
+    constraints: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(
+            REQUEST_EXTRAS.constraintMaxChars,
+            `Keep each rule under ${String(REQUEST_EXTRAS.constraintMaxChars)} characters.`,
+          ),
+      )
+      .max(
+        REQUEST_EXTRAS.constraintsMax,
+        `Keep it to ${String(REQUEST_EXTRAS.constraintsMax)} rules or fewer.`,
+      )
+      .optional(),
     /** FR-5.5 — section lineage ids, rendered inline in order. */
-    readingList: z.array(z.string().min(1)).max(20).optional(),
+    readingList: z
+      .array(z.string().min(1))
+      .max(
+        REQUEST_EXTRAS.readingListMax,
+        `Point to ${String(REQUEST_EXTRAS.readingListMax)} sections or fewer.`,
+      )
+      .optional(),
     /** FR-5.8 */
     minWords: z.number().int().min(SUGGESTION_WORDS.floor).max(SUGGESTION_WORDS.ceiling),
     maxWords: z.number().int().min(SUGGESTION_WORDS.floor).max(SUGGESTION_WORDS.ceiling),
@@ -121,6 +151,10 @@ export const createRequestSchema = z
 export const suggestionNoteSchema = z
   .string()
   .trim()
+  .max(
+    SUGGESTION_NOTE_MAX_CHARS,
+    `Keep the note under ${String(SUGGESTION_NOTE_MAX_CHARS)} characters.`,
+  )
   .refine(
     (value) => countWords(value) <= SUGGESTION_NOTE_MAX_WORDS,
     `Keep the note under ${String(SUGGESTION_NOTE_MAX_WORDS)} words.`,

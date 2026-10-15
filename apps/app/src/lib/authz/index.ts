@@ -254,3 +254,29 @@ export function revisionVisibilityWhere(
   if (isAuthor(actor, resource)) return {}
   return { createdAt: { gte: resource.publicFrom ?? NEVER } }
 }
+
+/**
+ * Decision 0007 for suggestions, as `revisionVisibilityWhere` is for
+ * revisions. Anything sent while the story was private can only have come
+ * from its authors, and it stays theirs: until the phase 12 audit it became
+ * readable to anyone, through the request page, the suggestion's own page and
+ * the writer's profile, the moment the story went public. Unsent drafts have
+ * no send time and are governed by who wrote them, not by this.
+ */
+export function suggestionVisibilityWhere(
+  actor: Actor,
+  resource: StoryboardResource & { publicFrom: Date | null },
+): { OR?: Array<{ submittedAt: null | { gte: Date } }> } {
+  if (isAuthor(actor, resource)) return {}
+  return { OR: [{ submittedAt: null }, { submittedAt: { gte: resource.publicFrom ?? NEVER } }] }
+}
+
+/** The same rule for one suggestion already in hand. */
+export function canReadSuggestionSentAt(
+  actor: Actor,
+  resource: StoryboardResource & { publicFrom: Date | null },
+  submittedAt: Date | null,
+): boolean {
+  if (isAuthor(actor, resource) || !submittedAt) return true
+  return submittedAt >= (resource.publicFrom ?? NEVER)
+}

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { SOFT_DELETE_GRACE_DAYS, STORYBOARD_GENRES } from './constants'
+import { SOFT_DELETE_GRACE_DAYS, STORYBOARD_GENRES, TITLE_MAX_CHARS } from './constants'
 
 /**
  * FR-2.1 — everything required to create a storyboard, and nothing else.
@@ -52,7 +52,7 @@ export const titleSchema = z
   .string()
   .trim()
   .min(1, 'Give it a title. You can change it later.')
-  .max(200, 'That title is too long.')
+  .max(TITLE_MAX_CHARS, 'That title is too long.')
 
 export const createStoryboardSchema = z.object({
   title: titleSchema,

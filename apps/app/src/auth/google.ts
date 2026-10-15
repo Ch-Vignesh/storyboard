@@ -71,12 +71,26 @@ export async function resolveGoogleUser(profile: GoogleProfile): Promise<GoogleO
 
   const existing = await prisma.user.findUnique({
     where: { email },
-    select: { id: true, username: true, onboardedAt: true, status: true },
+    select: { id: true, username: true, onboardedAt: true, status: true, emailVerifiedAt: true },
   })
 
   if (existing) {
     if (existing.status === 'SUSPENDED') return { ok: false, reason: 'suspended' }
     if (existing.status === 'DELETED') return { ok: false, reason: 'deleted' }
+
+    // A sign-up that was never confirmed, now confirmed by Google. Without
+    // this the address went on receiving "choose a password" links for an
+    // account already in use (phase 12 audit).
+    if (!existing.emailVerifiedAt) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { emailVerifiedAt: new Date() },
+      })
+      await prisma.emailVerificationToken.updateMany({
+        where: { userId: existing.id, consumedAt: null },
+        data: { consumedAt: new Date() },
+      })
+    }
 
     // An account inside its deletion grace period signs in on purpose
     // (decision 0024) — that is how somebody stops a deletion they did not ask

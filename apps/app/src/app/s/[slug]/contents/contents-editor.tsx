@@ -53,6 +53,16 @@ export function ContentsEditor({
   const trpc = useTRPC()
   const router = useRouter()
   const [chapters, setChapters] = useState(initialChapters)
+  // `router.refresh()` brings the server's new list as a new prop, and state
+  // seeded from a prop never looks at it again. So after a join, an added
+  // section or a new chapter the screen showed nothing new, and people did it
+  // again: a second "Join with the one above" put the same text in twice
+  // (phase 12 audit). Take the server's list whenever it changes.
+  const [shown, setShown] = useState(initialChapters)
+  if (initialChapters !== shown) {
+    setShown(initialChapters)
+    setChapters(initialChapters)
+  }
   const [newChapterTitle, setNewChapterTitle] = useState('')
 
   const sensors = useSensors(
@@ -81,11 +91,15 @@ export function ContentsEditor({
     trpc.section.joinWithPrevious.mutationOptions({ onSuccess: refresh }),
   )
 
+  // Every action's failure, not most of them: renaming a chapter and adding a
+  // section used to fail without a word (phase 12 audit).
   const error =
     reorderChapters.error ??
     reorderSections.error ??
     createChapter.error ??
+    renameChapter.error ??
     deleteChapter.error ??
+    createSection.error ??
     deleteSection.error ??
     joinSection.error
 

@@ -6,7 +6,11 @@
  * hour or standing up a scheduler. The tests call them the same way.
  *
  * Run through `tsx`, like the seed: the workspace packages ship TypeScript
- * source and expect their consumer to compile it.
+ * source and expect their consumer to compile it. With the `react-server`
+ * condition, which is how Next itself resolves the server: the jobs reach
+ * modules marked `server-only`, and that package throws under any other
+ * condition. Without it this script had stopped working by phase 9, and
+ * nobody had run it since (phase 12 audit).
  */
 import { loadRootEnv } from '@storyboard/config/env'
 
@@ -19,6 +23,20 @@ const job = process.argv[2] as Job | undefined
 
 if (!job || !JOBS.includes(job)) {
   console.error(`Usage: pnpm cron <${JOBS.join('|')}>`)
+  process.exit(1)
+}
+
+// The root `.env` names the live database and the real mail account, so a
+// job run from a laptop would email real people: a weekly digest a second
+// time, since nothing records who had one (phase 12 audit). Seed-demo, the
+// tests and the browser flows already refuse a hosted database; so does this,
+// unless the person running it says they mean it.
+const { isLocalDatabase } = await import('@storyboard/config/env')
+if (!isLocalDatabase(process.env.DATABASE_URL ?? '') && !process.argv.includes('--production')) {
+  console.error(
+    'DATABASE_URL is not a local database, so this would email real people.\n' +
+      `Run against a local one, or add --production if that is what you mean: pnpm cron ${job} --production`,
+  )
   process.exit(1)
 }
 

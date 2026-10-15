@@ -41,4 +41,17 @@ describe('which sessions a password reset ends', () => {
     const later = authConfig.callbacks.jwt({ token: { ...signedIn } } as never)
     expect(later.authAt).toBe(signedIn.authAt)
   })
+
+  // Phase 12 audit: `update()` copied whatever the browser sent, so anyone
+  // could mark themselves onboarded, with any username, and skip onboarding.
+  it('takes nothing about onboarding from what the browser sends', () => {
+    const token = { id: 'user-1', username: null, onboarded: false }
+    const after = authConfig.callbacks.jwt({
+      token: { ...token },
+      trigger: 'update',
+      session: { username: 'somebody-else', onboarded: true },
+    } as never)
+    expect(after.username).toBeNull()
+    expect(after.onboarded).toBe(false)
+  })
 })

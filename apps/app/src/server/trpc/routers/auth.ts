@@ -7,7 +7,6 @@ import {
   createPasswordResetToken,
   createVerificationToken,
   hashToken,
-  isWithinResendCooldown,
 } from '@/auth/tokens'
 import { env } from '@/env'
 import { logger } from '@/lib/logger'
@@ -20,21 +19,58 @@ import { passwordResetMail } from '@/server/mail/templates/password-reset'
 import { verifyEmailMail } from '@/server/mail/templates/verify-email'
 
 import { AUTH_LIMITS } from '@/lib/schemas/constants'
+import { clientAddress } from '@/server/client-address'
 import { DAY_MS, HOUR_MS, consume, enforce, key, whenToRetry } from '@/server/limits'
 
 import { type Context, createTRPCRouter, publicProcedure } from '../init'
 
 const tokenInput = z.object({ token: z.string().min(20).max(200) })
 
-/** Issue a fresh verification link unless one was issued in the last minute (FR-1.4). */
-async function issueVerification(db: Context['db'], user: { id: string; email: string }) {
-  const latest = await db.emailVerificationToken.findFirst({
-    where: { userId: user.id },
-    orderBy: { createdAt: 'desc' },
-    select: { createdAt: true },
-  })
-  if (isWithinResendCooldown(latest?.createdAt)) return 'cooldown' as const
+/**
+ * What every form that sends an auth email does first, in this order and
+ * before the address is looked up, so nothing about the answer depends on
+ * whether it has an account (FR-1.3):
+ *
+ * 1. a daily limit per client, whatever addresses it types. The per-address
+ *    limits do nothing against a script that changes the address each time,
+ *    and Gmail stops sending at about 500 a day (phase 12 audit);
+ * 2. the endpoint's own limit for this address;
+ * 3. the one-minute rhythm, kept the same way for every kind of address. Two
+ *    families, each one key: confirmation links (sign-up and resend, FR-1.4's
+ *    cooldown between links) and reset links. Until the phase 12 audit an
+ *    address with an account kept the rhythm on one key and an address without
+ *    one on another, so asking two forms in turn told a stranger which kind it
+ *    was. Taken before the lookup, every kind now answers alike; kept as two
+ *    families so that somebody who signs up and at once forgets their password
+ *    is not told to wait.
+ *
+ * Returns `'cooldown'` when 3 says wait; 1 and 2 throw.
+ */
+async function beforeAuthEmail(
+  ctx: Pick<Context, 'db' | 'headers'>,
+  rhythm: string,
+  perAddress: {
+    key: string
+    limit: number
+    windowMs: number
+    message: (retryAt: Date | null) => string
+  },
+): Promise<'cooldown' | null> {
+  const client = clientAddress(ctx.headers)
+  if (client) {
+    await enforce(
+      ctx.db,
+      key.authEmailsFrom(client),
+      { limit: AUTH_LIMITS.emailsPerClientPerDay, windowMs: DAY_MS },
+      () => 'Too many emails have been asked for from here today. Try again tomorrow.',
+    )
+  }
+  await enforce(ctx.db, perAddress.key, perAddress, perAddress.message)
+  return (await inQuietCooldown(ctx.db, rhythm)) ? 'cooldown' : null
+}
 
+/** Issue a fresh verification link. The caller has already kept FR-1.4's rhythm. */
+async function issueVerification(db: Context['db'], user: { id: string; email: string }) {
   const { token, tokenHash, expiresAt } = createVerificationToken()
   await db.emailVerificationToken.create({ data: { userId: user.id, tokenHash, expiresAt } })
   const url = `${env.NEXT_PUBLIC_APP_URL}/verify?token=${token}`
@@ -59,14 +95,8 @@ async function issueVerification(db: Context['db'], user: { id: string; email: s
 }
 
 /**
- * FR-1.4's one-minute rhythm, for an address with no link to issue: one that
- * already has an account, or none at all.
- *
- * An address waiting for its link answers "cooldown" when asked twice inside a
- * minute, because `issueVerification` says so. Every other address used to
- * answer "sent" every time, so two requests told a stranger which kind an
- * address was. This gives them the same rhythm. It records a hit when it lets
- * one through, so the second request inside the minute is the one refused.
+ * FR-1.4's one-minute rhythm. It records a hit when it lets one through, so
+ * the second request inside the minute is the one refused.
  */
 async function inQuietCooldown(db: Context['db'], cooldownKey: string): Promise<boolean> {
   const verdict = await consume(db, cooldownKey, {
@@ -82,9 +112,7 @@ async function inQuietCooldown(db: Context['db'], cooldownKey: string): Promise<
  * read that. Before the note, they were told a link was on its way and nothing
  * came (2026-10-15, the first sign-up attempt on production).
  */
-async function noticeExistingAccount(db: Context['db'], user: { id: string; email: string }) {
-  if (await inQuietCooldown(db, key.addressCooldown(user.email))) return 'cooldown' as const
-
+async function noticeExistingAccount(user: { id: string; email: string }) {
   const mailer = getMailer()
   // After the response, like the verification email, so neither path is the
   // slower one: the time an answer takes must not say which kind it was.
@@ -119,6 +147,50 @@ function findLiveToken(db: Context['db'], token: string) {
     },
   })
 }
+
+/**
+ * FR-1.3 step two, once per account. Exported for its test.
+ *
+ * A confirmation link chooses the first password and never changes one:
+ * changing a password is a reset, which ends every other session and tells
+ * the owner (decision 0036). Until the phase 12 audit, an older confirmation
+ * link still sitting in an inbox set a new password silently, with neither.
+ * The link is claimed conditionally, every other one for the account closes
+ * with it, and the password is written only where there is none, so two
+ * submissions cannot both win.
+ */
+export async function applyFirstPassword(
+  db: Context['db'],
+  record: { id: string; user: { id: string; emailVerifiedAt: Date | null } },
+  passwordHash: string,
+  now: Date,
+): Promise<boolean> {
+  return db.$transaction(async (tx) => {
+    const claimed = await tx.emailVerificationToken.updateMany({
+      where: { id: record.id, consumedAt: null, expiresAt: { gt: now } },
+      data: { consumedAt: now },
+    })
+    if (claimed.count !== 1) return false
+    await tx.emailVerificationToken.updateMany({
+      where: { userId: record.user.id, consumedAt: null },
+      data: { consumedAt: now },
+    })
+    const set = await tx.user.updateMany({
+      where: { id: record.user.id, passwordHash: null },
+      data: { passwordHash, emailVerifiedAt: record.user.emailVerifiedAt ?? now },
+    })
+    if (set.count !== 1) throw new PasswordAlreadySet()
+    return true
+  })
+}
+
+class PasswordAlreadySet extends Error {}
+
+const passwordAlreadySet = () =>
+  new TRPCError({
+    code: 'CONFLICT',
+    message: 'This account already has a password. Sign in, or use “Forgot your password?”.',
+  })
 
 const expiredLink = () =>
   new TRPCError({
@@ -206,17 +278,18 @@ export const authRouter = createTRPCRouter({
       // Keyed on the address rather than the person: there is no person yet.
       // An address is not an identity, but it is what the action is about, and
       // it is what somebody abusing this has to keep changing.
-      await enforce(
-        ctx.db,
-        key.signUp(input.email),
-        { limit: AUTH_LIMITS.signUpsPerAddress, windowMs: DAY_MS },
-        () => 'That address has been used to sign up several times today.',
-      )
+      const wait = await beforeAuthEmail(ctx, key.addressCooldown(input.email), {
+        key: key.signUp(input.email),
+        limit: AUTH_LIMITS.signUpsPerAddress,
+        windowMs: DAY_MS,
+        message: () => 'That address has been used to sign up several times today.',
+      })
+      if (wait) return { status: wait }
 
       const existing = await ctx.db.user.findUnique({ where: { email: input.email } })
       if (existing?.emailVerifiedAt) {
         logger.info({ event: 'auth.signup.existing' }, 'sign-up attempted for a verified address')
-        return { status: await noticeExistingAccount(ctx.db, existing) }
+        return { status: await noticeExistingAccount(existing) }
       }
       // FR-13.4 — the rules are on the screen that produced this call, so
       // this records that they were shown rather than claiming they were read.
@@ -230,52 +303,50 @@ export const authRouter = createTRPCRouter({
   resendVerification: publicProcedure
     .input(z.object({ email: emailSchema }))
     .mutation(async ({ ctx, input }) => {
-      // The 60-second cooldown below is about not spamming one person; this is
-      // about not letting this endpoint be used to send mail all day.
-      await enforce(
-        ctx.db,
-        key.verificationResend(input.email),
-        { limit: AUTH_LIMITS.resendsPerAddress, windowMs: HOUR_MS },
-        (retryAt) =>
+      // The one-minute rhythm is about not spamming one person; the hourly
+      // limit is about not letting this endpoint send mail all day.
+      const wait = await beforeAuthEmail(ctx, key.addressCooldown(input.email), {
+        key: key.verificationResend(input.email),
+        limit: AUTH_LIMITS.resendsPerAddress,
+        windowMs: HOUR_MS,
+        message: (retryAt) =>
           `That link has been sent several times already. Try again ${whenToRetry(retryAt)}.`,
-      )
+      })
+      if (wait) return { status: wait }
 
       const user = await ctx.db.user.findUnique({ where: { email: input.email } })
-      if (user?.emailVerifiedAt) return { status: await noticeExistingAccount(ctx.db, user) }
-      if (!user) {
-        return {
-          status: (await inQuietCooldown(ctx.db, key.addressCooldown(input.email)))
-            ? 'cooldown'
-            : 'sent',
-        } as const
-      }
+      if (user?.emailVerifiedAt) return { status: await noticeExistingAccount(user) }
+      if (!user) return { status: 'sent' as const }
       return { status: await issueVerification(ctx.db, user) }
     }),
 
-  /** Checks a link without consuming it, so the set-password screen can render. */
+  /**
+   * Checks a link without consuming it, so the set-password screen can render.
+   * `hasPassword`: the account was finished with another link, and this one
+   * cannot change its password (decision 0036), so the screen says to sign in.
+   */
   verifyEmail: publicProcedure.input(tokenInput).query(async ({ ctx, input }) => {
     const record = await findLiveToken(ctx.db, input.token)
     if (!record) throw expiredLink()
-    return { email: record.user.email }
+    return { email: record.user.email, hasPassword: record.user.passwordHash !== null }
   }),
 
-  /** FR-1.3 step two: consumes the link, marks the email verified and stores the password. */
+  /** FR-1.3 step two: consumes the link, marks the email verified and stores the first password. */
   setPassword: publicProcedure
     .input(tokenInput.extend({ password: passwordSchema }))
     .mutation(async ({ ctx, input }) => {
       const record = await findLiveToken(ctx.db, input.token)
       if (!record) throw expiredLink()
+      if (record.user.passwordHash) throw passwordAlreadySet()
       const passwordHash = await hashPassword(input.password)
-      await ctx.db.$transaction([
-        ctx.db.emailVerificationToken.update({
-          where: { id: record.id },
-          data: { consumedAt: new Date() },
-        }),
-        ctx.db.user.update({
-          where: { id: record.user.id },
-          data: { passwordHash, emailVerifiedAt: record.user.emailVerifiedAt ?? new Date() },
-        }),
-      ])
+      try {
+        if (!(await applyFirstPassword(ctx.db, record, passwordHash, new Date()))) {
+          throw expiredLink()
+        }
+      } catch (error) {
+        if (error instanceof PasswordAlreadySet) throw passwordAlreadySet()
+        throw error
+      }
       logger.info({ event: 'auth.password.set', userId: record.user.id }, 'password set')
       return { email: record.user.email }
     }),
@@ -288,17 +359,15 @@ export const authRouter = createTRPCRouter({
   requestPasswordReset: publicProcedure
     .input(z.object({ email: emailSchema }))
     .mutation(async ({ ctx, input }) => {
-      await enforce(
-        ctx.db,
-        key.passwordReset(input.email),
-        { limit: AUTH_LIMITS.resetsPerAddress, windowMs: HOUR_MS },
-        (retryAt) =>
-          `A reset link has been asked for several times already. Try again ${whenToRetry(retryAt)}.`,
-      )
       // Before the address is looked up, so every kind keeps the same rhythm.
-      if (await inQuietCooldown(ctx.db, key.resetCooldown(input.email))) {
-        return { status: 'cooldown' as const }
-      }
+      const wait = await beforeAuthEmail(ctx, key.resetCooldown(input.email), {
+        key: key.passwordReset(input.email),
+        limit: AUTH_LIMITS.resetsPerAddress,
+        windowMs: HOUR_MS,
+        message: (retryAt) =>
+          `A reset link has been asked for several times already. Try again ${whenToRetry(retryAt)}.`,
+      })
+      if (wait) return { status: wait }
 
       const user = await ctx.db.user.findUnique({
         where: { email: input.email },

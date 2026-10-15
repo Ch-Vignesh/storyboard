@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { logger } from '@/lib/logger'
+import { USERNAME_CHARS } from '@/lib/schemas/constants'
 import { activityCalendar } from '@/server/activity'
 
 import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
@@ -22,7 +23,7 @@ const log = logger.child({ router: 'profile' })
 
 export const profileRouter = createTRPCRouter({
   byUsername: publicProcedure
-    .input(z.object({ username: z.string().min(1).max(30) }))
+    .input(z.object({ username: z.string().min(1).max(USERNAME_CHARS.max) }))
     .query(async ({ ctx, input }) => {
       const user = await ctx.db.user.findUnique({
         where: { username: input.username },
@@ -83,12 +84,15 @@ export const profileRouter = createTRPCRouter({
             isLive: true,
             createdAt: true,
             sectionLineage: true,
-            suggestion: { select: { publicId: true, wordCount: true, contentText: true } },
+            suggestion: {
+              select: { publicId: true, wordCount: true, contentText: true, submittedAt: true },
+            },
             idea: { select: { body: true } },
             storyboard: {
               select: {
                 slug: true,
                 title: true,
+                publicFrom: true,
                 owner: { select: { username: true, displayName: true } },
               },
             },
@@ -139,7 +143,11 @@ export const profileRouter = createTRPCRouter({
           bio: user.bio,
           avatarUrl: user.avatarUrl,
           createdAt: user.createdAt,
-          suspended: user.status === 'SUSPENDED',
+          // To the account holder only. Decision 0018 rejected telling anyone
+          // else: it publishes an accusation nobody has upheld, on a page with
+          // other people's names on it. Every visitor was told until the
+          // phase 12 audit.
+          suspended: isSelf && user.status === 'SUSPENDED',
         },
         isSelf,
         /** FR-9.3 — the four counts the profile leads with. */
@@ -150,7 +158,18 @@ export const profileRouter = createTRPCRouter({
           spinOffs,
         },
         authored,
-        credits,
+        // Decision 0007: a contribution sent while its story was private is
+        // still credited here, but its words stay private to the people who
+        // could read them then. Shown to everyone until the phase 12 audit.
+        credits: credits.map((credit) => {
+          const sent = credit.suggestion?.submittedAt
+          const publicFrom = credit.storyboard.publicFrom
+          // No `publicFrom` on a public story is bad data; hide rather than leak.
+          const privateThen = !isSelf && sent && (!publicFrom || sent < publicFrom)
+          return privateThen && credit.suggestion
+            ? { ...credit, suggestion: { ...credit.suggestion, contentText: '' } }
+            : credit
+        }),
         passed,
         showPassed,
         canTogglePassed: isSelf,
@@ -197,15 +216,30 @@ export const profileRouter = createTRPCRouter({
 
       // Inherited copies in spin-offs are the same contribution (FR-9.5), so
       // they are erased together. Anything else would leave the name standing
-      // in a copy of the storyboard the person has never seen.
-      const inherited = await ctx.db.credit.findMany({
-        where: { inheritedFromId: credit.id },
-        select: { id: true, revisionId: true },
-      })
-      const creditIds = [credit.id, ...inherited.map((entry) => entry.id)]
-      const revisionIds = [credit.revisionId, ...inherited.map((entry) => entry.revisionId)].filter(
-        (id): id is string => id !== null,
-      )
+      // in a copy of the storyboard the person has never seen. The whole
+      // family, not one step of it: up to the original, then every copy of
+      // it, however many spin-offs deep. Until the phase 12 audit only direct
+      // copies went, so a spin-off of a spin-off kept the name, and erasing
+      // from a copy left the original named.
+      const family = await ctx.db.$queryRaw<Array<{ id: string; revisionId: string | null }>>`
+        WITH RECURSIVE up AS (
+          SELECT id, "inheritedFromId" FROM "Credit" WHERE id = ${credit.id}
+          UNION
+          SELECT c.id, c."inheritedFromId" FROM "Credit" c JOIN up ON c.id = up."inheritedFromId"
+        ),
+        down AS (
+          SELECT id, "revisionId", "contributorId" FROM "Credit"
+          WHERE id IN (SELECT id FROM up WHERE "inheritedFromId" IS NULL) OR id = ${credit.id}
+          UNION
+          SELECT c.id, c."revisionId", c."contributorId" FROM "Credit" c
+          JOIN down ON c."inheritedFromId" = down.id
+        )
+        SELECT id, "revisionId" FROM down WHERE "contributorId" = ${userId}`
+      const inherited = family.filter((entry) => entry.id !== credit.id)
+      const creditIds = family.map((entry) => entry.id)
+      const revisionIds = family
+        .map((entry) => entry.revisionId)
+        .filter((id): id is string => id !== null)
 
       const now = new Date()
       await ctx.db.$transaction(async (tx) => {
@@ -239,13 +273,24 @@ export const profileRouter = createTRPCRouter({
    * document, and the permanent URL is the part that matters.
    */
   creditLines: publicProcedure
-    .input(z.object({ username: z.string().min(1).max(30) }))
+    .input(z.object({ username: z.string().min(1).max(USERNAME_CHARS.max) }))
     .query(async ({ ctx, input }) => {
       const user = await ctx.db.user.findUnique({
         where: { username: input.username },
-        select: { id: true, username: true, displayName: true },
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          status: true,
+          deletionRequestedAt: true,
+        },
       })
-      if (!user) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such profile.' })
+      // The same answer as the profile itself (decision 0024): an account
+      // being deleted has no profile, so it has no credit lines either. This
+      // went on serving them until the phase 12 audit.
+      if (!user || user.status === 'DELETED' || user.deletionRequestedAt) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'No such profile.' })
+      }
 
       const credits = await ctx.db.credit.findMany({
         where: {

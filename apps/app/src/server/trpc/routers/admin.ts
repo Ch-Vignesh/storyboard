@@ -146,6 +146,17 @@ export const adminRouter = createTRPCRouter({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'You cannot suspend yourself.' })
       }
 
+      // An erased account stays erased (decision 0024). Restoring one to
+      // ACTIVE would let a session it still had write again, as nobody.
+      const target = await ctx.db.user.findUnique({
+        where: { id: input.userId },
+        select: { status: true },
+      })
+      if (!target) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such account.' })
+      if (target.status === 'DELETED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That account has been deleted.' })
+      }
+
       const user = await ctx.db.user.update({
         where: { id: input.userId },
         data:

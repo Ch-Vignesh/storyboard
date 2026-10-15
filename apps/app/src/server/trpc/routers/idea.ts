@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 import { loadStoryboard } from '@/lib/authz/guard'
 import { recordActivity } from '@/server/activity'
+import { afterCommit } from '@/server/after-commit'
 import { logger } from '@/lib/logger'
 import { DAILY_LIMITS } from '@/lib/schemas/constants'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
@@ -68,20 +69,12 @@ export const ideaRouter = createTRPCRouter({
         }
       }
 
-      // FR-13.3 — twenty in any twenty-four hours (decision 0017).
-      await enforce(
-        ctx.db,
-        key.ideasPosted(userId),
-        { limit: DAILY_LIMITS.ideasPosted, windowMs: DAY_MS },
-        (retryAt) =>
-          `You can post ${String(DAILY_LIMITS.ideasPosted)} ideas a day. Try again ${whenToRetry(retryAt)}.`,
-      )
-
-      // And three per request — which is a cap on a conversation rather than a
+      // Three per request — which is a cap on a conversation rather than a
       // rate, so it counts the ideas themselves and has no window at all. A
       // reply to somebody else's idea is not one of the three: the limit is
       // there to stop one person filling a request with openings, not to stop
-      // them talking.
+      // them talking. Checked before the daily limit is spent: a refusal here
+      // used to cost one of the day's twenty (phase 12 audit).
       const onThisRequest = await ctx.db.idea.count({
         where: { authorId: userId, requestId: request.id, parentId: null },
       })
@@ -91,6 +84,15 @@ export const ideaRouter = createTRPCRouter({
           message: `You have posted ${String(DAILY_LIMITS.ideasPerRequest)} ideas here already. Reply to one of them instead.`,
         })
       }
+
+      // FR-13.3 — twenty in any twenty-four hours (decision 0017).
+      await enforce(
+        ctx.db,
+        key.ideasPosted(userId),
+        { limit: DAILY_LIMITS.ideasPosted, windowMs: DAY_MS },
+        (retryAt) =>
+          `You can post ${String(DAILY_LIMITS.ideasPosted)} ideas a day. Try again ${whenToRetry(retryAt)}.`,
+      )
 
       const idea = await ctx.db.idea.create({
         data: {
@@ -138,9 +140,17 @@ export const ideaRouter = createTRPCRouter({
       await loadStoryboard(ctx.db, actor, { id: idea.request.storyboardId }, 'suggestion:decide')
       if (idea.markedHelpful) return { ideaId: idea.id, markedHelpful: true }
 
+      let marked = false
       try {
-        await ctx.db.$transaction(async (tx) => {
-          await tx.idea.update({ where: { id: idea.id }, data: { markedHelpful: true } })
+        marked = await ctx.db.$transaction(async (tx) => {
+          // Only the first of two at once. Marking the same idea twice set the
+          // same flag twice, which the partial index does not see, and made
+          // two credits (phase 12 audit).
+          const flipped = await tx.idea.updateMany({
+            where: { id: idea.id, markedHelpful: false },
+            data: { markedHelpful: true },
+          })
+          if (flipped.count !== 1) return false
           await tx.credit.create({
             data: {
               storyboardId: idea.request.storyboardId,
@@ -151,6 +161,7 @@ export const ideaRouter = createTRPCRouter({
               isLive: true,
             },
           })
+          return true
         })
       } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -163,13 +174,18 @@ export const ideaRouter = createTRPCRouter({
         throw error
       }
 
-      await ctx.db.notification.create({
-        data: {
-          userId: idea.authorId,
-          type: 'IDEA_MARKED_HELPFUL',
-          payload: { ideaId: idea.id, requestId: idea.request.id },
-        },
-      })
+      // Somebody else marked it a moment ago; that one made the credit.
+      if (!marked) return { ideaId: idea.id, markedHelpful: true }
+
+      await afterCommit('idea.markHelpful.notify', () =>
+        ctx.db.notification.create({
+          data: {
+            userId: idea.authorId,
+            type: 'IDEA_MARKED_HELPFUL',
+            payload: { ideaId: idea.id, requestId: idea.request.id },
+          },
+        }),
+      )
 
       log.info(
         { event: 'idea.markedHelpful', ideaId: idea.id, requestId: idea.request.id },

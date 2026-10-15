@@ -58,9 +58,15 @@ test.describe('what a machine can check (NFR-4)', () => {
 
     test('an open request, the thing the product exists to show', async ({ page }) => {
       await page.goto('/s/pride-and-prejudice-seedpride01')
-      const request = page.getByRole('link', { name: /stuck|help|suggest/i }).first()
+      // A link to a request itself. Chosen by its name ("stuck", "help",
+      // "suggest") this used to pick the first such action, which for a guest
+      // goes to sign-in: the test scanned the sign-in page, sometimes half way
+      // through the redirect, and failed for a missing <title> (2026-10-15).
+      const request = page.locator('a[href*="/help/"]:not([href$="/help/new"])').first()
       if (await request.count()) {
         await request.click()
+        await page.waitForURL(/\/help\/(?!new)/u)
+        await expect(page).toHaveTitle(/\S/u)
         await scan(page, 'the request page has accessibility violations')
       }
     })

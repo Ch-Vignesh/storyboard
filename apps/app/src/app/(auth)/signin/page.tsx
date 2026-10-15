@@ -2,7 +2,7 @@ import { Button } from '@storyboard/ui/components/button'
 import { Input } from '@storyboard/ui/components/input'
 import { Label } from '@storyboard/ui/components/label'
 import type { Metadata } from 'next'
-import { AuthError } from 'next-auth'
+import { AuthError, CredentialsSignin } from 'next-auth'
 import Link from '@/components/link'
 import { PasswordInput } from '@/components/password-input'
 import { redirect } from 'next/navigation'
@@ -17,11 +17,11 @@ export const metadata: Metadata = { title: 'Sign in' }
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> }
 
 export default async function SignInPage({ searchParams }: Props) {
-  const { error, next, reset, ended } = await searchParams
+  const { error, code, next, reset, ended } = await searchParams
   // proxy.ts puts the page they were trying to reach here. Validated, because
   // a sign-in page that redirects wherever a URL says is an open redirect.
   const destination = safeNext(next)
-  const errorMessage = signInErrorMessage(error)
+  const errorMessage = signInErrorMessage(error, code)
 
   async function signInAction(formData: FormData) {
     'use server'
@@ -36,6 +36,9 @@ export default async function SignInPage({ searchParams }: Props) {
         // The type, not a flag: a refused password and a database that is down
         // both arrive here, and only one of them is the person's to fix.
         const back = new URLSearchParams({ error: caught.type })
+        // A refused password and a refused limit are both `CredentialsSignin`;
+        // the code says which, as it does on Auth.js's own redirect.
+        if (caught instanceof CredentialsSignin) back.set('code', caught.code)
         if (destination !== '/') back.set('next', destination)
         redirect(`/signin?${back.toString()}`)
       }

@@ -62,6 +62,12 @@ export function NotificationList() {
           </Button>
         </div>
       ) : null}
+      {/* It failed without a word until the phase 12 audit. */}
+      {markAllRead.error ? (
+        <p role="alert" className="mt-2 text-[13px] text-crimson">
+          {markAllRead.error.message}
+        </p>
+      ) : null}
 
       <ul className="divide-y divide-rule">
         {notifications.map((notification) => {

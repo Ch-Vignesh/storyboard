@@ -95,6 +95,13 @@ describe('how procedures are built', () => {
     expect(all.some((procedure) => procedure.name === 'cancelDeletion')).toBe(true)
   })
 
+  /**
+   * `accountProcedure` refuses a suspended account but not one without a
+   * username, so it is for the things somebody must do before they have one,
+   * and nothing else: everything that writes is credited to that name.
+   */
+  const BEFORE_YOU_HAVE_A_USERNAME = new Set(['chooseUsername', 'requestDeletion'])
+
   it('never lets a suspended account reach a mutation (FR-13.5, decision 0018)', () => {
     const wrong = all
       .filter((procedure) => procedure.kind === 'mutation')
@@ -102,11 +109,23 @@ describe('how procedures are built', () => {
       .filter((procedure) => !MUST_WORK_WHILE_FROZEN.has(procedure.name))
       .filter(
         (procedure) =>
-          procedure.builder !== 'activeProcedure' && procedure.builder !== 'adminProcedure',
+          procedure.builder !== 'activeProcedure' &&
+          procedure.builder !== 'adminProcedure' &&
+          !(
+            procedure.builder === 'accountProcedure' &&
+            BEFORE_YOU_HAVE_A_USERNAME.has(procedure.name)
+          ),
       )
       .map((procedure) => `${procedure.file}: ${procedure.name} is ${procedure.builder}`)
 
     expect(wrong).toEqual([])
+  })
+
+  it('uses accountProcedure only where there may be no username yet (phase 12 audit)', () => {
+    const lenient = all.filter((procedure) => procedure.builder === 'accountProcedure')
+    expect(lenient.map((procedure) => procedure.name).sort()).toEqual(
+      [...BEFORE_YOU_HAVE_A_USERNAME].sort(),
+    )
   })
 
   it('has no mutation a signed-out person can reach, except the ones sign-up needs', () => {

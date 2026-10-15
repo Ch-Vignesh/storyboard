@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { SUGGESTION_WORDS } from './constants'
+import { BROWSE_LIMITS, GENRE_SELECTION_MAX, SUGGESTION_WORDS } from './constants'
 import { requestKindSchema } from './help'
 import { storyTypeSchema } from './storyboard'
 
@@ -49,15 +49,15 @@ export const browseFiltersSchema = z.object({
   /** FR-11.6 — title and author name only. Full-text over manuscripts is
    * deferred: it has privacy implications on unpublished work that need a
    * policy first. */
-  query: z.string().trim().max(100).optional(),
-  genreIds: z.array(z.string().min(1)).max(24).optional(),
+  query: z.string().trim().max(BROWSE_LIMITS.queryMaxChars).optional(),
+  genreIds: z.array(z.string().min(1)).max(GENRE_SELECTION_MAX).optional(),
   types: z.array(storyTypeSchema).max(9).optional(),
   kinds: z.array(requestKindSchema).max(3).optional(),
   minWords: z.number().int().min(SUGGESTION_WORDS.floor).max(SUGGESTION_WORDS.ceiling).optional(),
   maxWords: z.number().int().min(SUGGESTION_WORDS.floor).max(SUGGESTION_WORDS.ceiling).optional(),
   age: ageFilterSchema.default('ANY'),
   sort: browseSortSchema.default('RECENT'),
-  take: z.number().int().min(1).max(50).default(24),
+  take: z.number().int().min(1).max(BROWSE_LIMITS.pageMax).default(BROWSE_LIMITS.pageDefault),
 })
 
 export type BrowseFilters = z.infer<typeof browseFiltersSchema>

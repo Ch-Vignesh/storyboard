@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@storyboard/db'
+import type { Prisma, PrismaClient } from '@storyboard/db'
 
 /**
  * Close every open request on a storyboard, and tell the people answering them.
@@ -24,11 +24,35 @@ import type { PrismaClient } from '@storyboard/db'
  * Returns how many requests were closed.
  */
 export async function closeOpenRequests(db: PrismaClient, storyboardId: string): Promise<number> {
+  // The denormalised column, not a walk up through section → chapter →
+  // version. Same rows either way, and this one is the indexed field the
+  // schema put there for the purpose.
+  return closeRequestsWhere(db, { storyboardId })
+}
+
+/**
+ * The same for requests on sections that have gone: deleted, joined into the
+ * one above, or in a deleted chapter. They stayed open, kept collecting
+ * suggestions, and one could be accepted into text that was no longer in the
+ * story (phase 12 audit).
+ */
+export async function closeRequestsOnSections(
+  db: PrismaClient,
+  sectionIds: readonly string[],
+): Promise<number> {
+  if (sectionIds.length === 0) return 0
+  return closeRequestsWhere(db, { sectionId: { in: [...sectionIds] } })
+}
+
+async function closeRequestsWhere(
+  db: PrismaClient,
+  where: Prisma.ContributionRequestWhereInput,
+): Promise<number> {
   const open = await db.contributionRequest.findMany({
-    // The denormalised column, not a walk up through section → chapter →
-    // version. Same rows either way, and this one is the indexed field the
-    // schema put there for the purpose.
-    where: { storyboardId, state: 'OPEN' },
+    // Answered as well as open: a request with a suggestion waiting is the one
+    // whose people most need telling, and it was the one left out until the
+    // phase 12 audit (FR-5.9's ANSWERED state).
+    where: { ...where, state: { in: ['OPEN', 'ANSWERED'] } },
     select: {
       id: true,
       suggestions: {
@@ -40,7 +64,7 @@ export async function closeOpenRequests(db: PrismaClient, storyboardId: string):
   if (open.length === 0) return 0
 
   await db.contributionRequest.updateMany({
-    where: { id: { in: open.map((request) => request.id) } },
+    where: { id: { in: open.map((request) => request.id) }, state: { in: ['OPEN', 'ANSWERED'] } },
     data: { state: 'CLOSED', closedAt: new Date() },
   })
 

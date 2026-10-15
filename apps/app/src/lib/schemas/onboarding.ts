@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { PINNED_GENRES_MIN } from './constants'
+import { GENRE_SELECTION_MAX, PINNED_GENRES_MIN } from './constants'
 
 /**
  * FR-1.3 steps 3 and 4. The username schema itself lives in `auth.ts` beside
@@ -13,7 +13,7 @@ export const pinGenresSchema = z.object({
   genreIds: z
     .array(z.string().min(1))
     .min(PINNED_GENRES_MIN, `Pick at least ${PINNED_GENRES_MIN} genres.`)
-    .max(24, 'That is more genres than exist.')
+    .max(GENRE_SELECTION_MAX, 'That is more genres than exist.')
     .refine((ids) => new Set(ids).size === ids.length, 'Pick each genre once.'),
 })
 

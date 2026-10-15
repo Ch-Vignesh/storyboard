@@ -245,6 +245,37 @@ describe.skipIf(!databaseUrl)('purging a deleted account (decision 0024)', () =>
     expect(second.purged).toBe(0)
   })
 
+  /**
+   * Phase 12 audit. The purge took "has a username" to mean "not yet erased",
+   * so somebody who asked to be deleted before choosing one was never erased:
+   * address, password and name kept for ever. And an admin's power outlived
+   * the person.
+   */
+  it('erases an account that never chose a username, and an admin’s power with it', async () => {
+    const run = randomUUID().replaceAll('-', '').slice(0, 8)
+    const user = await db.user.create({
+      data: {
+        email: `del-nameless-${run}@example.test`,
+        displayName: 'Nobody Yet',
+        passwordHash: 'argon2-placeholder',
+        emailVerifiedAt: new Date(),
+        isAdmin: true,
+      },
+      select: { id: true },
+    })
+    made.push(user.id)
+    await askAndAge(user.id)
+
+    await purgeDeletedAccounts(db)
+
+    const after = await db.user.findUniqueOrThrow({ where: { id: user.id } })
+    expect(after.status).toBe('DELETED')
+    expect(after.email).not.toContain('nameless')
+    expect(after.passwordHash).toBeNull()
+    expect(after.displayName).toBeNull()
+    expect(after.isAdmin).toBe(false)
+  })
+
   it('ignores an account that never asked', async () => {
     const { user } = await aPersonWhoHasWritten('innocent')
 

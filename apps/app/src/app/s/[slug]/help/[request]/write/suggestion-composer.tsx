@@ -8,11 +8,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { DocFlavour } from '@/lib/doc/schema'
 import { extensionsFor } from '@/lib/doc/tiptap'
-import { SUGGESTION_NOTE_MAX_WORDS } from '@/lib/schemas/constants'
+import {
+  DRAFT_IDLE_SECONDS,
+  SUGGESTION_NOTE_MAX_CHARS,
+  SUGGESTION_NOTE_MAX_WORDS,
+} from '@/lib/schemas/constants'
 import { countWords } from '@/lib/schemas/help'
 import { useTRPC } from '@/trpc/client'
 
-const AUTOSAVE_IDLE_MS = 3_000
+const AUTOSAVE_IDLE_MS = DRAFT_IDLE_SECONDS * 1000
 
 /**
  * The suggestion composer (screen 9, FR-6.1 and FR-6.2).
@@ -51,8 +55,12 @@ export function SuggestionComposer({
   const [checked, setChecked] = useState<Set<number>>(new Set())
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const dirty = useRef(false)
-  const saving = useRef(false)
+  // A count of changes and the count the last save captured, as in the section
+  // editor: a flag cleared when a save came back also cleared what was typed
+  // while it was on its way (phase 12 audit).
+  const edits = useRef(0)
+  const persisted = useRef(0)
+  const inFlight = useRef<Promise<boolean> | null>(null)
 
   const saveDraft = useMutation(trpc.suggestion.saveDraft.mutationOptions())
   const submit = useMutation(trpc.suggestion.submit.mutationOptions())
@@ -68,25 +76,39 @@ export function SuggestionComposer({
       setWords(countWords(instance.getText()))
     },
     onUpdate: ({ editor: instance }) => {
-      dirty.current = true
+      edits.current += 1
       setWords(countWords(instance.getText()))
     },
   })
 
-  const persist = useCallback(async () => {
-    if (!editor || !dirty.current || saving.current) return
-    saving.current = true
-    setSaved('saving')
+  /** Saves whatever is unsaved. True when, afterwards, nothing is. */
+  const persist = useCallback(async (): Promise<boolean> => {
+    if (!editor) return false
+    while (inFlight.current) {
+      if (!(await inFlight.current)) return false
+    }
+    if (edits.current === persisted.current) return true
+
+    const at = edits.current
+    const run = (async () => {
+      setSaved('saving')
+      try {
+        await saveDraft.mutateAsync({ suggestionId, contentJson: editor.getJSON() })
+        persisted.current = at
+        setSaved('saved')
+        setError(null)
+        return true
+      } catch (caught) {
+        setSaved('error')
+        setError(caught instanceof Error ? caught.message : 'Could not save.')
+        return false
+      }
+    })()
+    inFlight.current = run
     try {
-      await saveDraft.mutateAsync({ suggestionId, contentJson: editor.getJSON() })
-      dirty.current = false
-      setSaved('saved')
-      setError(null)
-    } catch (caught) {
-      setSaved('error')
-      setError(caught instanceof Error ? caught.message : 'Could not save.')
+      return await run
     } finally {
-      saving.current = false
+      inFlight.current = null
     }
   }, [editor, saveDraft, suggestionId])
 
@@ -111,7 +133,13 @@ export function SuggestionComposer({
   const canSend = inBounds && noteWords <= SUGGESTION_NOTE_MAX_WORDS && !submit.isPending && !sent
 
   async function send() {
-    await persist()
+    // What is sent is what is saved, so the latest words are saved first, and
+    // nothing goes if they could not be. `send` used to start the save and
+    // not wait for it, so the last seconds of typing could be missing from
+    // what the author read, and the word count checked was the old one
+    // (phase 12 audit).
+    if (timer.current) clearTimeout(timer.current)
+    if (!(await persist())) return
     try {
       await submit.mutateAsync({ suggestionId, note: note.trim() || undefined })
       setSent(true)
@@ -162,6 +190,7 @@ export function SuggestionComposer({
           <Textarea
             id="note"
             rows={3}
+            maxLength={SUGGESTION_NOTE_MAX_CHARS}
             value={note}
             onChange={(event) => setNote(event.target.value)}
           />

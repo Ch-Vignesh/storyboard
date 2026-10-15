@@ -5,8 +5,9 @@ import { z } from 'zod'
 import { canReadStoryboard, loadStoryboard } from '@/lib/authz/guard'
 import { publicId, slugify } from '@/lib/ids'
 import { logger } from '@/lib/logger'
-import { DAILY_LIMITS } from '@/lib/schemas/constants'
-import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
+import { BULK_WRITE_TRANSACTION, DAILY_LIMITS } from '@/lib/schemas/constants'
+import { DAY_MS, consume, key, used } from '@/server/limits'
+import { afterCommit } from '@/server/after-commit'
 import { titleSchema } from '@/lib/schemas/storyboard'
 
 import { copyTree } from '@/server/tree'
@@ -65,13 +66,17 @@ export const spinOffRouter = createTRPCRouter({
       })
 
       // FR-13.3 — one spin-off of a given storyboard per person per day.
-      await enforce(
-        ctx.db,
-        key.spinOff(userId, storyboardId),
-        { limit: DAILY_LIMITS.spinOffsPerStoryboard, windowMs: DAY_MS },
-        (retryAt) =>
-          `You have already started your own version of this story today. You can start another ${whenToRetry(retryAt)}.`,
-      )
+      // Counted here and recorded only once the copy exists: spent first, a
+      // copy that failed part-way used up the day's one, and the retry was
+      // told "already started" when nothing had been made (phase 12 audit).
+      const spinOffKey = key.spinOff(userId, storyboardId)
+      if ((await used(ctx.db, spinOffKey, DAY_MS)) >= DAILY_LIMITS.spinOffsPerStoryboard) {
+        throw new TRPCError({
+          code: 'TOO_MANY_REQUESTS',
+          message:
+            'You have already started your own version of this story today. You can start another tomorrow.',
+        })
+      }
 
       const source = await ctx.db.version.findFirst({
         where: input.versionId
@@ -182,20 +187,28 @@ export const spinOffRouter = createTRPCRouter({
         }
 
         return spinOff
+        // Every section copied with its revision: a long novel is too many
+        // rows for Prisma's default five seconds.
+      }, BULK_WRITE_TRANSACTION)
+      await consume(ctx.db, spinOffKey, {
+        limit: DAILY_LIMITS.spinOffsPerStoryboard,
+        windowMs: DAY_MS,
       })
 
       // FR-10.3 — the original author is told. After the transaction.
-      await ctx.db.notification.create({
-        data: {
-          userId: original.ownerId,
-          type: 'SPIN_OFF_CREATED',
-          payload: {
-            storyboardId: created.id,
-            slug: original.slug,
-            title: original.title,
+      await afterCommit('spinoff.create.notify', () =>
+        ctx.db.notification.create({
+          data: {
+            userId: original.ownerId,
+            type: 'SPIN_OFF_CREATED',
+            payload: {
+              storyboardId: created.id,
+              slug: original.slug,
+              title: original.title,
+            },
           },
-        },
-      })
+        }),
+      )
 
       log.info(
         { event: 'spinoff.created', spinOffId: created.id, originalId: original.id, userId },

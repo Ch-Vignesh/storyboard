@@ -6,7 +6,13 @@ import { usernameSchema } from '@/lib/schemas/auth'
 import { READING_LINE_HEIGHT, READING_TYPE_SCALE } from '@/lib/schemas/constants'
 import { pinGenresSchema } from '@/lib/schemas/onboarding'
 
-import { activeProcedure, createTRPCRouter, protectedProcedure, publicProcedure } from '../init'
+import {
+  accountProcedure,
+  activeProcedure,
+  createTRPCRouter,
+  protectedProcedure,
+  publicProcedure,
+} from '../init'
 
 /** What onboarding still wants from this user (FR-1.3). */
 function nextOnboardingStep(user: {
@@ -51,7 +57,7 @@ export const userRouter = createTRPCRouter({
    * credit line forever, so this refuses to overwrite one that is already set
    * rather than quietly updating it.
    */
-  chooseUsername: activeProcedure
+  chooseUsername: accountProcedure
     .input(z.object({ username: usernameSchema }))
     .mutation(async ({ ctx, input }) => {
       const current = await ctx.db.user.findUniqueOrThrow({

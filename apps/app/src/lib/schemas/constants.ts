@@ -29,6 +29,22 @@ export const SUGGESTION_WORDS = {
 /** FR-6.2 */
 export const SUGGESTION_NOTE_MAX_WORDS = 200
 
+/**
+ * FR-6.2 — the note's column holds 1500 characters. Words alone did not bound
+ * it: Chinese or Japanese has no spaces, so 3000 characters counted as a few
+ * words, Postgres refused the row, and the refusal had already cost a send
+ * (phase 12 audit).
+ */
+export const SUGGESTION_NOTE_MAX_CHARS = 1500
+
+/** FR-5.6 and FR-5.5 — the request form's free text and lists. */
+export const REQUEST_EXTRAS = {
+  toneNotesMaxChars: 2000,
+  constraintsMax: 10,
+  constraintMaxChars: 200,
+  readingListMax: 20,
+} as const
+
 /** FR-6.9 */
 export const IDEA_WORDS = { min: 20, max: 400 } as const
 
@@ -64,7 +80,85 @@ export const AUTH_LIMITS = {
   resendsPerAddress: 5,
   /** FR-1.7, per hour: a reset link asked for again and again is somebody else asking. */
   resetsPerAddress: 5,
+  /**
+   * Emails the sign-up, resend and reset forms may send for one client in a
+   * day, whatever addresses it types. The per-address limits above do nothing
+   * against a script that changes the address every time, and Gmail stops
+   * sending for a day at about 500 (decision 0029): every real sign-up and
+   * reset with it (phase 12 audit).
+   */
+  emailsPerClientPerDay: 20,
+  /**
+   * Sign-in attempts for one address from one client in `SIGN_IN_WINDOW_MINUTES`.
+   * Keyed on both, so a stranger guessing at somebody's password cannot lock
+   * the real owner out from their own device.
+   */
+  signInsPerAddressAndClient: 10,
+  /** Sign-in attempts from one client, whatever addresses it tries. */
+  signInsPerClient: 30,
 } as const
+
+/** The window `AUTH_LIMITS`' sign-in counts are taken over. */
+export const SIGN_IN_WINDOW_MINUTES = 15
+
+/**
+ * Prisma's interactive-transaction limits for the few writes that are many
+ * rows at once: committing an import, purging a storyboard. Its defaults (2 s
+ * to get a connection, 5 s to finish) suit a request; a novel is thousands of
+ * rows (phase 12 audit). Kept under the platform's own function limit.
+ */
+export const BULK_WRITE_TRANSACTION = { maxWait: 10_000, timeout: 55_000 } as const
+
+/**
+ * FR-12.3 — how long one digest run may spend sending before it stops and
+ * leaves the rest for the next. Under the platform's own five-minute function
+ * limit, so a run that is cut short has already marked what it sent: a run
+ * killed by the platform used to mark nothing, and everyone it had reached was
+ * emailed again ten minutes later (phase 12 audit).
+ */
+export const DIGEST_RUN_BUDGET_SECONDS = 240
+
+/**
+ * Failed sends in a row after which a digest run stops. One bad address is
+ * one failure and the run goes on; several in a row is the provider refusing
+ * everything (a daily quota, an outage), and hammering it helps nobody.
+ */
+export const DIGEST_FAILURES_BEFORE_STOPPING = 3
+
+/**
+ * How many genre ids one request may carry, in onboarding, settings and the
+ * browse filters. A bound on input size, not a product rule, so it sits well
+ * above the number of genres. It was 24, written in three places, while the
+ * seed has 25: picking every genre was refused as "more genres than exist"
+ * (phase 12 audit).
+ */
+export const GENRE_SELECTION_MAX = 50
+
+/** FR-11.3, FR-11.6 — the browse surfaces' search and page sizes. */
+export const BROWSE_LIMITS = { queryMaxChars: 100, pageMax: 50, pageDefault: 24 } as const
+
+/** A story's, chapter's or section's title. The columns hold 200 (`VarChar(200)`). */
+export const TITLE_MAX_CHARS = 200
+
+/** FR-1.3 — usernames: 3 to 30 characters. Passwords: 10 to 128. */
+export const USERNAME_CHARS = { min: 3, max: 30 } as const
+export const PASSWORD_CHARS = { min: 10, max: 128 } as const
+
+/**
+ * FR-4.4 — a private draft after this many seconds without typing, and a
+ * durable revision every this many minutes of continuous editing.
+ */
+export const DRAFT_IDLE_SECONDS = 3
+export const REVISION_INTERVAL_MINUTES = 5
+
+/** FR-12.3 — how far back the weekly digest looks. */
+export const WEEKLY_DIGEST_DAYS = 7
+
+/** FR-1.4 — how long a confirmation link works. */
+export const VERIFICATION_TOKEN_TTL_HOURS = 24
+
+/** FR-1.4 — the wait between two auth emails to one address, of any kind. */
+export const VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
 
 /**
  * FR-1.7 — how long a password reset link works. An hour, where a sign-up link

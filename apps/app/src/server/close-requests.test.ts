@@ -49,7 +49,7 @@ describe.skipIf(!databaseUrl)('closing the open requests on a storyboard', () =>
   })
 
   /** An author with one open request, and contributors at various stages. */
-  async function aStoryboardBeingHelped() {
+  async function aStoryboardBeingHelped(state: 'OPEN' | 'ANSWERED' = 'OPEN') {
     const run = randomUUID().replaceAll('-', '').slice(0, 8)
 
     const person = async (label: string) => {
@@ -113,9 +113,9 @@ describe.skipIf(!databaseUrl)('closing the open requests on a storyboard', () =>
         kind: 'REWRITE',
         title: 'This paragraph is flat',
         ask: 'Make it land.',
-        state: 'OPEN',
+        state,
       },
-      select: { id: true },
+      select: { id: true, sectionId: true },
     })
 
     const suggestion = async (contributorId: string, state: 'DRAFT' | 'SUBMITTED' | 'PASSED') => {
@@ -156,6 +156,42 @@ describe.skipIf(!databaseUrl)('closing the open requests on a storyboard', () =>
     })
     expect(after.state).toBe('CLOSED')
     expect(after.closedAt).not.toBeNull()
+  })
+
+  /**
+   * Phase 12 audit. A request with a suggestion sent is ANSWERED, not OPEN,
+   * and only OPEN ones were closed: the request with somebody waiting on it,
+   * the one whose people most need telling, stayed open after the story went
+   * private or was finished, and kept taking suggestions.
+   */
+  it('closes an answered request too, and tells the people waiting on it', async () => {
+    const { storyboard, request, submitted } = await aStoryboardBeingHelped('ANSWERED')
+
+    expect(await close(storyboard.id)).toBe(1)
+
+    const after = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: request.id },
+      select: { state: true },
+    })
+    expect(after.state).toBe('CLOSED')
+    expect(
+      await db.notification.count({ where: { userId: submitted, type: 'REQUEST_CLOSED' } }),
+    ).toBe(1)
+  })
+
+  it('closes the requests on sections that have gone, and only those', async () => {
+    const { closeRequestsOnSections } = await import('./close-requests')
+    const gone = await aStoryboardBeingHelped('ANSWERED')
+    const kept = await aStoryboardBeingHelped()
+
+    expect(await closeRequestsOnSections(db, [gone.request.sectionId])).toBe(1)
+
+    const states = await db.contributionRequest.findMany({
+      where: { id: { in: [gone.request.id, kept.request.id] } },
+      select: { id: true, state: true },
+    })
+    expect(states.find((row) => row.id === gone.request.id)?.state).toBe('CLOSED')
+    expect(states.find((row) => row.id === kept.request.id)?.state).toBe('OPEN')
   })
 
   it('tells everybody with a suggestion still in flight', async () => {

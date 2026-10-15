@@ -6,6 +6,8 @@ import { z } from 'zod'
 
 import { loadChapter, loadSection } from '@/lib/authz/guard'
 import { recordActivity } from '@/server/activity'
+import { afterCommit } from '@/server/after-commit'
+import { closeRequestsOnSections } from '@/server/close-requests'
 import { isAuthor, revisionVisibilityWhere } from '@/lib/authz'
 import {
   emptyDoc,
@@ -15,13 +17,14 @@ import {
   type StoryboardDoc,
 } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
+import { TITLE_MAX_CHARS } from '@/lib/schemas/constants'
 import { logger } from '@/lib/logger'
 
 import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
 
 const log = logger.child({ router: 'section' })
 
-const titleSchema = z.string().trim().max(200, 'That name is too long.').nullish()
+const titleSchema = z.string().trim().max(TITLE_MAX_CHARS, 'That name is too long.').nullish()
 
 /** Untrusted document JSON. Shape is checked against the flavour on arrival. */
 const docInput = z.unknown()
@@ -266,6 +269,10 @@ export const sectionRouter = createTRPCRouter({
           await tx.section.update({ where: { id: section.id }, data: { order } })
         }
       })
+      // Requests on a deleted section have nothing left to be about.
+      await afterCommit('section.delete.close_requests', () =>
+        closeRequestsOnSections(ctx.db, [sectionId]),
+      )
 
       return { ok: true }
     }),
@@ -347,10 +354,13 @@ export const sectionRouter = createTRPCRouter({
           },
           select: { id: true },
         })
-        await tx.section.update({
-          where: { id: sectionId },
-          data: { currentRevisionId: headRevision.id, wordCount: headDerived.wordCount },
-        })
+        await moveHead(
+          tx,
+          sectionId,
+          section.currentRevisionId,
+          headRevision.id,
+          headDerived.wordCount,
+        )
 
         const created = await tx.section.create({
           data: {
@@ -437,7 +447,7 @@ export const sectionRouter = createTRPCRouter({
       const derived = derive(joined)
       const userId = ctx.session.user.id
 
-      return ctx.db.$transaction(async (tx) => {
+      const result = await ctx.db.$transaction(async (tx) => {
         const revision = await tx.revision.create({
           data: {
             sectionId: previous.id,
@@ -451,14 +461,14 @@ export const sectionRouter = createTRPCRouter({
           },
           select: { id: true },
         })
-        await tx.section.update({
-          where: { id: previous.id },
-          data: { currentRevisionId: revision.id, wordCount: derived.wordCount },
-        })
-        await tx.section.update({
-          where: { id: sectionId },
+        await moveHead(tx, previous.id, previous.currentRevisionId, revision.id, derived.wordCount)
+        // Only once: a second join of the same section, from a second click or
+        // a second tab, finds it already joined (phase 12 audit).
+        const absorbed = await tx.section.updateMany({
+          where: { id: sectionId, mergedIntoId: null, deletedAt: null },
           data: { mergedIntoId: previous.id },
         })
+        if (absorbed.count !== 1) throw changedUnderfoot()
 
         // The absorbed section leaves the reading order; close the gap.
         const remaining = await tx.section.findMany({
@@ -472,6 +482,11 @@ export const sectionRouter = createTRPCRouter({
 
         return { sectionId: previous.id }
       })
+      // Requests on the absorbed section have nothing left to be about.
+      await afterCommit('section.join.close_requests', () =>
+        closeRequestsOnSections(ctx.db, [sectionId]),
+      )
+      return result
     }),
 
   /**
@@ -586,10 +601,7 @@ export const sectionRouter = createTRPCRouter({
           },
           select: { id: true },
         })
-        await tx.section.update({
-          where: { id: sectionId },
-          data: { currentRevisionId: revision.id, wordCount: derived.wordCount },
-        })
+        await moveHead(tx, sectionId, currentRevisionId, revision.id, derived.wordCount)
         // The draft has become the text; it has done its job.
         await tx.sectionDraft.deleteMany({ where: { sectionId, userId } })
         return revision.id
@@ -718,10 +730,7 @@ export const sectionRouter = createTRPCRouter({
           },
           select: { id: true },
         })
-        await tx.section.update({
-          where: { id: sectionId },
-          data: { currentRevisionId: revision.id, wordCount: source.wordCount },
-        })
+        await moveHead(tx, sectionId, currentRevisionId, revision.id, source.wordCount)
 
         // Anything credited on a revision of this section that is *not* an
         // ancestor of what we just restored is no longer in the main draft.
@@ -751,13 +760,15 @@ export const sectionRouter = createTRPCRouter({
           credit.contributorId !== null,
       )
       if (toNotify.length > 0) {
-        await ctx.db.notification.createMany({
-          data: toNotify.map((credit) => ({
-            userId: credit.contributorId,
-            type: 'CONTRIBUTION_REMOVED' as const,
-            payload: { sectionId, revisionId, creditId: credit.id },
-          })),
-        })
+        await afterCommit('section.restore.notify', () =>
+          ctx.db.notification.createMany({
+            data: toNotify.map((credit) => ({
+              userId: credit.contributorId,
+              type: 'CONTRIBUTION_REMOVED' as const,
+              payload: { sectionId, revisionId, creditId: credit.id },
+            })),
+          }),
+        )
       }
 
       await recordActivity(ctx.db, userId)
@@ -805,4 +816,35 @@ async function ancestorIds(
   }
 
   return ids
+}
+
+const changedUnderfoot = () =>
+  new TRPCError({
+    code: 'CONFLICT',
+    message: 'This section changed a moment ago. Reload to see the current text.',
+  })
+
+/**
+ * Moves a section's head from the revision the caller started from to a new
+ * one, or throws if somebody moved it first.
+ *
+ * Every write that moves a head checked "is it still where I left it?" before
+ * its transaction and then updated unconditionally, so an autosave landing
+ * during a co-author's accept made the autosave the head and orphaned the
+ * accepted text, still credited and announced as accepted (phase 12 audit).
+ * The condition is in the update itself, so Postgres re-checks it against
+ * whatever committed in between.
+ */
+async function moveHead(
+  tx: Prisma.TransactionClient,
+  sectionId: string,
+  from: string | null,
+  to: string,
+  wordCount: number,
+): Promise<void> {
+  const moved = await tx.section.updateMany({
+    where: { id: sectionId, currentRevisionId: from, deletedAt: null, mergedIntoId: null },
+    data: { currentRevisionId: to, wordCount },
+  })
+  if (moved.count !== 1) throw changedUnderfoot()
 }

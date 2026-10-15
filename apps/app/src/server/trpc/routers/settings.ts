@@ -5,7 +5,7 @@ import { pinGenresSchema } from '@/lib/schemas/onboarding'
 import { NOTIFICATION_TYPES } from '@/lib/schemas/notifications'
 import { ACCOUNT_DELETION_GRACE_DAYS } from '@/lib/schemas/constants'
 
-import { activeProcedure, createTRPCRouter, protectedProcedure } from '../init'
+import { accountProcedure, activeProcedure, createTRPCRouter, protectedProcedure } from '../init'
 
 /**
  * Screen 16 — account, genres, notifications and reading preferences.
@@ -155,7 +155,7 @@ export const settingsRouter = createTRPCRouter({
    * credit is on it — so "delete my work too" is not the account holder's alone
    * to choose.
    */
-  requestDeletion: activeProcedure.mutation(async ({ ctx }) => {
+  requestDeletion: accountProcedure.mutation(async ({ ctx }) => {
     const requestedAt = new Date()
     await ctx.db.user.update({
       where: { id: ctx.session.user.id },

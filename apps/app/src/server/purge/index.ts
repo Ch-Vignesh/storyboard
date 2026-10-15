@@ -3,7 +3,7 @@ import 'server-only'
 import type { PrismaClient } from '@storyboard/db'
 
 import { logger } from '@/lib/logger'
-import { SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
+import { BULK_WRITE_TRANSACTION, SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
 
 /**
  * FR-2.6 — what happens after the thirty days.
@@ -15,9 +15,10 @@ import { SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
  *
  * The order below is the whole of the difficulty. Most references to a
  * revision are ON DELETE SET NULL and look after themselves;
- * `Suggestion.baseRevisionId` is RESTRICT, so suggestions must go first. The
- * one thing this must not do is unhook by hand: NFR-3's hatch permits a DELETE
- * on `Revision` and refuses every UPDATE, hatch or no hatch.
+ * `Suggestion.baseRevisionId` is RESTRICT, and `Revision.suggestionId` points
+ * back, so suggestions and revisions go together in one statement. The one
+ * thing this must not do is unhook by hand: NFR-3's hatch permits a DELETE on
+ * `Revision` and refuses every UPDATE, hatch or no hatch.
  *
  * What is *not* deleted: credits. A credit is somebody else's record of what
  * they did (principle 1.3.3), and an author deleting their storyboard does not
@@ -84,12 +85,23 @@ async function purgeOne(db: PrismaClient, storyboardId: string): Promise<void> {
       // NFR-3 hatch permits a DELETE on Revision, never an UPDATE.
 
       await tx.sectionDraft.deleteMany({ where: { sectionId: { in: sectionIds } } })
-      await tx.suggestion.deleteMany({
-        where: { request: { sectionId: { in: sectionIds } } },
-      })
+      // Suggestions and revisions in ONE statement. They point at each other:
+      // `Suggestion.baseRevisionId` is RESTRICT, so the revisions cannot go
+      // first, and `Revision.suggestionId` is SET NULL, so if the suggestions
+      // go first Postgres nulls it on every accepted revision, an UPDATE the
+      // trigger refuses. Until the phase 12 audit, that refusal kept every
+      // storyboard that had ever accepted a suggestion from being purged.
+      // Together, the referential actions run once both deletes are done,
+      // and find nothing left to update.
+      await tx.$executeRaw`
+        WITH gone AS (
+          DELETE FROM "Suggestion" AS s
+          USING "ContributionRequest" AS r
+          WHERE s."requestId" = r."id" AND r."sectionId" = ANY(${sectionIds})
+        )
+        DELETE FROM "Revision" WHERE "sectionId" = ANY(${sectionIds})`
       await tx.idea.deleteMany({ where: { request: { sectionId: { in: sectionIds } } } })
       await tx.contributionRequest.deleteMany({ where: { sectionId: { in: sectionIds } } })
-      await tx.revision.deleteMany({ where: { sectionId: { in: sectionIds } } })
       await tx.section.deleteMany({ where: { id: { in: sectionIds } } })
     }
 
@@ -101,5 +113,7 @@ async function purgeOne(db: PrismaClient, storyboardId: string): Promise<void> {
     // because there is no longer anything for them to be a credit *on*.
     await tx.credit.deleteMany({ where: { storyboardId } })
     await tx.storyboard.delete({ where: { id: storyboardId } })
-  })
+    // A novel's worth of revisions, each checked against every reference to
+    // it; Prisma's default five seconds was not going to be enough.
+  }, BULK_WRITE_TRANSACTION)
 }

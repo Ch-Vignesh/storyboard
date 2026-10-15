@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
   createVerificationToken,
   hashToken,
-  isWithinResendCooldown,
   VERIFICATION_RESEND_COOLDOWN_MS,
   VERIFICATION_TOKEN_TTL_MS,
 } from './tokens'
@@ -26,12 +25,9 @@ describe('verification tokens (FR-1.4)', () => {
     expect(createVerificationToken().token).not.toBe(createVerificationToken().token)
   })
 
-  it('enforces a 60-second resend cooldown', () => {
-    const issued = new Date('2026-09-12T10:00:00Z')
+  // The rhythm itself is the auth router's, one key for every kind of
+  // address; its behaviour is tested there (routers/auth.test.ts).
+  it('waits a minute between links', () => {
     expect(VERIFICATION_RESEND_COOLDOWN_MS).toBe(60_000)
-    expect(isWithinResendCooldown(issued, new Date(issued.getTime() + 30_000))).toBe(true)
-    expect(isWithinResendCooldown(issued, new Date(issued.getTime() + 60_000))).toBe(false)
-    expect(isWithinResendCooldown(null)).toBe(false)
-    expect(isWithinResendCooldown(undefined)).toBe(false)
   })
 })

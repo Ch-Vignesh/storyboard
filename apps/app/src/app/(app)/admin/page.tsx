@@ -3,6 +3,7 @@ import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
 import { auth } from '@/auth'
+import { isActiveAdmin } from '@/server/trpc/init'
 import { prisma } from '@storyboard/db'
 
 import { ReportQueue } from './report-queue'
@@ -24,9 +25,9 @@ export default async function AdminPage() {
 
   const account = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { isAdmin: true },
+    select: { isAdmin: true, status: true, deletionRequestedAt: true },
   })
-  if (!account?.isAdmin) notFound()
+  if (!isActiveAdmin(account)) notFound()
 
   return (
     <main id="main" className="mx-auto max-w-4xl px-6 py-12">

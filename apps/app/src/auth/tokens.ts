@@ -1,11 +1,15 @@
 import { createHash, randomBytes } from 'node:crypto'
 
-import { PASSWORD_RESET_TTL_MINUTES } from '@/lib/schemas/constants'
+import {
+  PASSWORD_RESET_TTL_MINUTES,
+  VERIFICATION_RESEND_COOLDOWN_SECONDS,
+  VERIFICATION_TOKEN_TTL_HOURS,
+} from '@/lib/schemas/constants'
 
 /** FR-1.4: verification links live for 24 hours. */
-export const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000
-/** FR-1.4: a new link can be requested once per minute. */
-export const VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000
+export const VERIFICATION_TOKEN_TTL_MS = VERIFICATION_TOKEN_TTL_HOURS * 60 * 60 * 1000
+/** FR-1.4: a new link can be requested once per minute, whatever kind of address. */
+export const VERIFICATION_RESEND_COOLDOWN_MS = VERIFICATION_RESEND_COOLDOWN_SECONDS * 1000
 
 export function generateToken(): string {
   return randomBytes(32).toString('base64url')
@@ -33,12 +37,4 @@ export function createPasswordResetToken(now = new Date()) {
     tokenHash: hashToken(token),
     expiresAt: new Date(now.getTime() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000),
   }
-}
-
-export function isWithinResendCooldown(
-  lastIssuedAt: Date | null | undefined,
-  now = new Date(),
-): boolean {
-  if (!lastIssuedAt) return false
-  return now.getTime() - lastIssuedAt.getTime() < VERIFICATION_RESEND_COOLDOWN_MS
 }

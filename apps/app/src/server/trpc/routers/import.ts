@@ -23,10 +23,17 @@ import {
 import { publicId, slugify } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import { confirmedOutlineSchema } from '@/lib/schemas/import'
-import { DAILY_LIMITS } from '@/lib/schemas/constants'
+import { BULK_WRITE_TRANSACTION, DAILY_LIMITS } from '@/lib/schemas/constants'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { createStoryboardSchema } from '@/lib/schemas/storyboard'
-import { createUploadTarget, deleteObject, getObject, uploadKey } from '@/server/storage'
+import { outlineProblem } from '@/server/import-outline'
+import {
+  createUploadTarget,
+  deleteObject,
+  getObject,
+  objectSize,
+  uploadKey,
+} from '@/server/storage'
 
 import { activeProcedure, createTRPCRouter, protectedProcedure } from '../init'
 
@@ -112,6 +119,26 @@ export const importRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const job = await load(ctx.db, ctx.session.user.id, input.jobId)
       const { analyse, SuspiciousArchiveError } = await importer()
+
+      if (job.state === 'COMMITTED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That import is already done.' })
+      }
+
+      // Asked of the store before anything is read: the upload URL cannot bind
+      // the size, so R2 holds whatever arrived (phase 12 audit).
+      const size = await objectSize(job.fileKey)
+      if (size === null) {
+        await fail(ctx.db, job.id, 'That file never finished uploading. Try choosing it again.')
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That file never finished uploading. Try choosing it again.',
+        })
+      }
+      if (size > IMPORT_LIMITS.bytes) {
+        await fail(ctx.db, job.id, 'That file is larger than 5 MB.')
+        await deleteObject(job.fileKey)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That file is larger than 5 MB.' })
+      }
 
       let file: Buffer
       try {
@@ -206,6 +233,15 @@ export const importRouter = createTRPCRouter({
       if (job.state === 'COMMITTED') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'That import is already done.' })
       }
+      // Only a file that was read and passed its limits. `commit` used to take
+      // a job straight from upload, or one that had failed for being too long
+      // (phase 12 audit).
+      if (job.state !== 'ANALYSED') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That file has not been read yet. Choose it again to start over.',
+        })
+      }
 
       const genres = await ctx.db.genre.findMany({
         where: { id: { in: input.genreIds } },
@@ -215,17 +251,52 @@ export const importRouter = createTRPCRouter({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown genre.' })
       }
 
-      // The prose, read again from the file rather than taken from the request.
+      // The prose, read again from the file rather than taken from the request,
+      // and so held to FR-3.1's limits again: the upload URL is still good for
+      // a while after `analyse`, and another file can be put under the same key
+      // (phase 12 audit).
+      const tooLarge = () =>
+        new TRPCError({ code: 'BAD_REQUEST', message: 'That file is larger than 5 MB.' })
+      const size = await objectSize(job.fileKey)
+      if (size === null) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That file is no longer here. Choose it again to start over.',
+        })
+      }
+      if (size > IMPORT_LIMITS.bytes) throw tooLarge()
       const file = await getObject(job.fileKey)
-      const { extract } = await importer()
+      if (file.byteLength > IMPORT_LIMITS.bytes) throw tooLarge()
+
+      const { extract, countWords } = await importer()
       const doc = await extract(job.format as Format, file)
       const blocks = doc.blocks
+      const words = blocks.reduce((total, block) => total + countWords(block.text), 0)
+      if (words > IMPORT_LIMITS.words) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `That manuscript is longer than ${IMPORT_LIMITS.words.toLocaleString('en-GB')} words.`,
+        })
+      }
+      const problem = outlineProblem(input.outline, blocks.length)
+      if (problem) throw new TRPCError({ code: 'BAD_REQUEST', message: problem })
 
       const flavour = flavourForStoryType(input.type)
       const id = publicId()
       const now = new Date()
 
       const created = await ctx.db.$transaction(async (tx) => {
+        // Claimed first: a second commit of the same job waits here on the
+        // row, then finds it taken. Both used to pass the check above and
+        // create two storyboards (phase 12 audit).
+        const claimed = await tx.importJob.updateMany({
+          where: { id: job.id, state: 'ANALYSED' },
+          data: { state: 'COMMITTED' },
+        })
+        if (claimed.count !== 1) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'That import is already done.' })
+        }
+
         const storyboard = await tx.storyboard.create({
           data: {
             publicId: id,
@@ -304,7 +375,9 @@ export const importRouter = createTRPCRouter({
         })
 
         return storyboard
-      })
+        // A 300,000-word manuscript is thousands of rows written one after
+        // another; Prisma's default five seconds undid it every time.
+      }, BULK_WRITE_TRANSACTION)
 
       // The file has done its work. Keeping somebody's whole manuscript in
       // object storage afterwards is a copy nobody asked us to hold.

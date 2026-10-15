@@ -185,6 +185,8 @@ export async function loadSection(
       chapterId: true,
       currentRevisionId: true,
       wordCount: true,
+      deletedAt: true,
+      mergedIntoId: true,
       chapter: {
         select: {
           versionId: true,
@@ -197,6 +199,15 @@ export async function loadSection(
 
   const resource = toResource(section.chapter.version.storyboard)
   assertCan(actor, action, resource)
+
+  // A section that was deleted, or joined into the one above, keeps its
+  // history for reading (FR-2.4) and takes nothing new. Until the phase 12
+  // audit it did: a second click on "Join with the one above" joined the same
+  // text in twice, and a co-author went on saving into a section that was no
+  // longer in the story.
+  if (action !== 'storyboard:read' && (section.deletedAt || section.mergedIntoId)) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'That section is no longer in this story.' })
+  }
 
   return {
     storyboardId: section.chapter.version.storyboard.id,

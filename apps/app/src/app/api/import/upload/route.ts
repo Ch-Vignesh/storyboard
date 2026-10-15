@@ -60,9 +60,11 @@ export async function PUT(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'That file is larger than 5 MB.' }, { status: 413 })
   }
 
-  const body = Buffer.from(await request.arrayBuffer())
-  // The header is a claim; the body is the fact.
-  if (body.byteLength > IMPORT_LIMITS.bytes) {
+  // The header is a claim, and a chunked upload makes none, so the body is
+  // read with a cap rather than whole: reading first and measuring after let
+  // an unannounced body fill the server's memory (phase 12 audit).
+  const body = await readCapped(request, IMPORT_LIMITS.bytes)
+  if (!body) {
     return NextResponse.json({ error: 'That file is larger than 5 MB.' }, { status: 413 })
   }
 
@@ -70,4 +72,23 @@ export async function PUT(request: Request): Promise<NextResponse> {
   log.info({ event: 'import.upload', userId, bytes: body.byteLength }, 'manuscript uploaded')
 
   return NextResponse.json({ ok: true })
+}
+
+/** The body, or `null` as soon as it passes `limit` bytes. Never holds more than that. */
+async function readCapped(request: Request, limit: number): Promise<Buffer | null> {
+  if (!request.body) return Buffer.alloc(0)
+  const chunks: Uint8Array[] = []
+  let total = 0
+  const reader = request.body.getReader()
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > limit) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks)
 }

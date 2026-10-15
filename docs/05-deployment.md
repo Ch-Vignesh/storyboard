@@ -351,7 +351,12 @@ curl -X POST https://app.your-domain/api/cron/hourly \
   -H "Authorization: Bearer $CRON_SECRET"
 ```
 
-And locally, without HTTP at all: `pnpm cron hourly`.
+And locally, without HTTP at all: `pnpm cron hourly`. It refuses a hosted
+database unless you add `--production`. The root `.env` names the live one and
+the real mail account, so a job run from a laptop would email real people.
+The scheduled workflow prints only each job's HTTP status. Its counts (how many
+people were emailed, how many accounts were erased) stay in the deployment's
+own logs, because this repository's Actions logs are public.
 
 ---
 

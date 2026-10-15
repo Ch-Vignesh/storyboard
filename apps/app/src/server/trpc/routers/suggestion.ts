@@ -2,9 +2,10 @@ import { Prisma, type PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
-import { loadStoryboard } from '@/lib/authz/guard'
+import { loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
 import { recordActivity, recordActivityFor } from '@/server/activity'
-import { quotaFor } from '@/lib/authz'
+import { afterCommit } from '@/server/after-commit'
+import { canReadSuggestionSentAt, quotaFor } from '@/lib/authz'
 import { emptyDoc, flavourForStoryType, parseDoc } from '@/lib/doc/schema'
 import { derive, hashContent } from '@/lib/doc/text'
 import { publicId } from '@/lib/ids'
@@ -71,6 +72,7 @@ export const suggestionRouter = createTRPCRouter({
       if (!storyboard.permissions.canSubmitSuggestion) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot suggest here.' })
       }
+      assertTakingSuggestions(request.state)
 
       const existing = await ctx.db.suggestion.findFirst({
         where: { requestId: request.id, contributorId: ctx.session.user.id, state: 'DRAFT' },
@@ -152,6 +154,7 @@ export const suggestionRouter = createTRPCRouter({
       const suggestion = await requireOwnDraft(ctx, input.suggestionId)
       const { request } = suggestion
       const userId = ctx.session.user.id
+      assertTakingSuggestions(request.state)
 
       // FR-13.1 — word bounds, enforced server-side as well as in the composer.
       if (suggestion.wordCount < request.minWords || suggestion.wordCount > request.maxWords) {
@@ -160,6 +163,34 @@ export const suggestionRouter = createTRPCRouter({
           message: `This request asks for between ${String(request.minWords)} and ${String(request.maxWords)} words. Yours is ${String(suggestion.wordCount)}.`,
         })
       }
+
+      const actor = actorFrom(ctx.session, ctx.account)
+      const storyboard = await loadStoryboard(ctx.db, actor, { id: request.storyboardId })
+      // FR-13.2 with OD-6 resolved (decision 0016): three tiers, not an
+      // exemption. The owner has no ceiling on their own storyboard; a
+      // co-author has a generous one, because the quota protects the owner's
+      // attention and a co-author is trusted with it, not exempt from it.
+      const quota = quotaFor(actor, storyboard.resource)
+      const overQuota = () =>
+        new TRPCError({
+          code: 'TOO_MANY_REQUESTS',
+          message: `You can have ${String(quota)} suggestions waiting on this story at once. Wait for a decision on one, or withdraw it.`,
+        })
+      const held = (db: Pick<PrismaClient, 'suggestion'>) =>
+        db.suggestion.count({
+          where: {
+            contributorId: userId,
+            state: 'SUBMITTED',
+            request: { storyboardId: request.storyboardId },
+          },
+        })
+
+      // Checked before the daily limit is spent, not after: a refusal here
+      // used to cost one of the day's ten sends, so clicking Send a few times
+      // on a story where three were already waiting locked somebody out of
+      // every story for a day (phase 12 audit). Checked again below, under a
+      // lock, because this read alone can race.
+      if (Number.isFinite(quota) && (await held(ctx.db)) >= quota) throw overQuota()
 
       // FR-13.3 — ten in any twenty-four hours, not ten since midnight.
       await enforce(
@@ -170,36 +201,30 @@ export const suggestionRouter = createTRPCRouter({
           `You can send ${String(DAILY_LIMITS.suggestionsSent)} suggestions a day. Try again ${whenToRetry(retryAt)}.`,
       )
 
-      const actor = actorFrom(ctx.session, ctx.account)
-      const storyboard = await loadStoryboard(ctx.db, actor, { id: request.storyboardId })
-      // FR-13.2 with OD-6 resolved (decision 0016): three tiers, not an
-      // exemption. The owner has no ceiling on their own storyboard; a
-      // co-author has a generous one, because the quota protects the owner's
-      // attention and a co-author is trusted with it, not exempt from it.
-      const quota = quotaFor(actor, storyboard.resource)
-
       const result = await ctx.db.$transaction(async (tx) => {
         if (Number.isFinite(quota)) {
-          // Counted inside the transaction, so two submissions racing cannot
-          // both read `quota - 1` and both be let through.
-          const held = await tx.suggestion.count({
-            where: {
-              contributorId: userId,
-              state: 'SUBMITTED',
-              request: { storyboardId: request.storyboardId },
-            },
-          })
-          if (held >= quota) {
-            throw new TRPCError({
-              code: 'TOO_MANY_REQUESTS',
-              message: `You can have ${String(quota)} suggestions waiting on this story at once. Wait for a decision on one, or withdraw it.`,
-            })
-          }
+          // One person's sends to one story, one at a time. A count inside a
+          // transaction is not enough by itself: at READ COMMITTED, five
+          // submissions at once all counted none held and all went through
+          // against a cap of three (phase 12 audit).
+          const lock = `suggestion-quota:${userId}:${request.storyboardId}`
+          await tx.$executeRaw`select pg_advisory_xact_lock(hashtextextended(${lock}, 0))`
+          if ((await held(tx)) >= quota) throw overQuota()
         }
 
-        const updated = await tx.suggestion.update({
-          where: { id: suggestion.id },
+        // Still a draft, still this person's: a second tab may have sent it.
+        const sent = await tx.suggestion.updateMany({
+          where: { id: suggestion.id, state: 'DRAFT' },
           data: { state: 'SUBMITTED', submittedAt: new Date(), note: input.note ?? null },
+        })
+        if (sent.count !== 1) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'That suggestion has already been sent.',
+          })
+        }
+        const updated = await tx.suggestion.findUniqueOrThrow({
+          where: { id: suggestion.id },
           select: { id: true, publicId: true, state: true },
         })
 
@@ -212,10 +237,12 @@ export const suggestionRouter = createTRPCRouter({
         return updated
       })
 
-      await notifyAuthors(ctx.db, request.storyboardId, 'SUGGESTION_RECEIVED', {
-        requestId: request.id,
-        suggestionId: suggestion.id,
-      })
+      await afterCommit('suggestion.submit.notify', () =>
+        notifyAuthors(ctx.db, request.storyboardId, 'SUGGESTION_RECEIVED', {
+          requestId: request.id,
+          suggestionId: suggestion.id,
+        }),
+      )
       await recordActivity(ctx.db, userId)
 
       log.info(
@@ -237,20 +264,26 @@ export const suggestionRouter = createTRPCRouter({
       if (suggestion?.contributorId !== userId) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
       }
-      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') {
-        throw new TRPCError({
+      const stillWaitingOnly = () =>
+        new TRPCError({
           code: 'BAD_REQUEST',
           message: 'Only a suggestion that is still waiting can be withdrawn.',
         })
-      }
+      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') throw stillWaitingOnly()
 
-      const updated = await ctx.db.suggestion.update({
-        where: { id: suggestion.id },
+      // Only if it is still waiting at the moment of writing: an author may be
+      // deciding on it right now (phase 12 audit).
+      const withdrawn = await ctx.db.suggestion.updateMany({
+        where: { id: suggestion.id, state: { in: ['SUBMITTED', 'STALE'] } },
         data: { state: 'WITHDRAWN' },
-        select: { id: true, state: true },
       })
+      if (withdrawn.count !== 1) throw stillWaitingOnly()
+      // FR-5.9 — the last one waiting is gone, so the request is open again.
+      // `pass` did this; `withdraw` did not (phase 12 audit).
+      await reopenIfNothingWaits(ctx.db, suggestion.requestId)
+
       log.info({ event: 'suggestion.withdraw', suggestionId: suggestion.id, userId }, 'withdrawn')
-      return updated
+      return { id: suggestion.id, state: 'WITHDRAWN' as const }
     }),
 
   /** One suggestion, with its prose. Public so a passed one stays readable (FR-6.11). */
@@ -294,9 +327,13 @@ export const suggestionRouter = createTRPCRouter({
       }
 
       const actor = actorFrom(ctx.session, ctx.account)
-      const { permissions } = await loadStoryboard(ctx.db, actor, {
+      const { permissions, resource } = await loadStoryboard(ctx.db, actor, {
         id: suggestion.request.storyboardId,
       })
+      // Decision 0007: sent while the story was private, it stays private.
+      if (!canReadSuggestionSentAt(actor, resource, suggestion.submittedAt)) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
+      }
 
       // A draft is nobody's business but its author's.
       if (suggestion.state === 'DRAFT' && suggestion.contributor.id !== actor?.id) {
@@ -347,6 +384,7 @@ export const suggestionRouter = createTRPCRouter({
               id: true,
               storyboardId: true,
               sectionId: true,
+              state: true,
               section: { select: { lineageId: true } },
             },
           },
@@ -363,10 +401,13 @@ export const suggestionRouter = createTRPCRouter({
         'suggestion:decide',
       )
 
-      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') {
+      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') throw alreadyDecided()
+      // Closed by the author, or by the story going private or finished: what
+      // was waiting there is not to be let in (phase 12 audit).
+      if (suggestion.request.state === 'CLOSED') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'That suggestion has already been decided.',
+          message: 'That request is closed. Open it again before accepting anything into it.',
         })
       }
 
@@ -381,9 +422,21 @@ export const suggestionRouter = createTRPCRouter({
         async (tx) => {
           // Row lock: two acceptances on the same section serialise here rather
           // than both writing a revision.
-          const locked = await tx.$queryRaw<Array<{ currentRevisionId: string | null }>>`
-            select "currentRevisionId" from "Section" where id = ${sectionId} for update
+          const locked = await tx.$queryRaw<
+            Array<{ currentRevisionId: string | null; gone: boolean }>
+          >`
+            select "currentRevisionId", ("deletedAt" is not null or "mergedIntoId" is not null) as gone
+            from "Section" where id = ${sectionId} for update
           `
+          // Accepted into a section that is no longer in the story, it was
+          // credited and announced as accepted and appeared nowhere (phase 12 audit).
+          if (locked[0]?.gone) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message:
+                'That section is no longer in this story, so nothing can be accepted into it.',
+            })
+          }
           const head = locked[0]?.currentRevisionId ?? null
 
           if (head !== suggestion.baseRevisionId && !input.acknowledgedChange) {
@@ -415,10 +468,12 @@ export const suggestionRouter = createTRPCRouter({
             data: { currentRevisionId: revision.id, wordCount: derived.wordCount },
           })
 
-          await tx.suggestion.update({
-            where: { id: suggestion.id },
+          // Only if nobody decided it, or withdrew it, since it was read above.
+          const decided = await tx.suggestion.updateMany({
+            where: { id: suggestion.id, state: { in: ['SUBMITTED', 'STALE'] } },
             data: { state: 'ACCEPTED', decidedAt: new Date(), decidedById: deciderId },
           })
+          if (decided.count !== 1) throw alreadyDecided()
 
           // FR-6.7 — everything else waiting on this request is now written
           // against a head that has moved.
@@ -451,23 +506,25 @@ export const suggestionRouter = createTRPCRouter({
       )
 
       // After the transaction, never inside it.
-      const staled = await ctx.db.suggestion.findMany({
-        where: { requestId, state: 'STALE' },
-        select: { id: true, contributorId: true },
-      })
-      await ctx.db.notification.createMany({
-        data: [
-          {
-            userId: suggestion.contributorId,
-            type: 'SUGGESTION_ACCEPTED' as const,
-            payload: { suggestionId: suggestion.id, requestId },
-          },
-          ...staled.map((entry) => ({
-            userId: entry.contributorId,
-            type: 'SUGGESTION_STALE' as const,
-            payload: { suggestionId: entry.id, requestId },
-          })),
-        ],
+      await afterCommit('suggestion.accept.notify', async () => {
+        const staled = await ctx.db.suggestion.findMany({
+          where: { requestId, state: 'STALE' },
+          select: { id: true, contributorId: true },
+        })
+        await ctx.db.notification.createMany({
+          data: [
+            {
+              userId: suggestion.contributorId,
+              type: 'SUGGESTION_ACCEPTED' as const,
+              payload: { suggestionId: suggestion.id, requestId },
+            },
+            ...staled.map((entry) => ({
+              userId: entry.contributorId,
+              type: 'SUGGESTION_STALE' as const,
+              payload: { suggestionId: entry.id, requestId },
+            })),
+          ],
+        })
       })
 
       // Both people did something: one wrote it, one decided on it.
@@ -518,43 +575,40 @@ export const suggestionRouter = createTRPCRouter({
         { id: suggestion.request.storyboardId },
         'suggestion:decide',
       )
-      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'That suggestion has already been decided.',
-        })
-      }
+      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') throw alreadyDecided()
 
-      const updated = await ctx.db.suggestion.update({
-        where: { id: suggestion.id },
+      // Only if it is still undecided at the moment of writing. A co-author
+      // passing while the owner accepted used to leave it PASSED with its text
+      // in the manuscript and a live credit (phase 12 audit).
+      const passed = await ctx.db.suggestion.updateMany({
+        where: { id: suggestion.id, state: { in: ['SUBMITTED', 'STALE'] } },
         data: {
           state: 'PASSED',
           passReason: input.reason ?? null,
           decidedAt: new Date(),
           decidedById: ctx.session.user.id,
         },
-        select: { id: true, state: true, passReason: true },
       })
-
-      // FR-5.9 — if nothing is waiting any more, the request is open again.
-      const stillWaiting = await ctx.db.suggestion.count({
-        where: { requestId: suggestion.request.id, state: { in: ['SUBMITTED', 'STALE'] } },
-      })
-      if (stillWaiting === 0) {
-        await ctx.db.contributionRequest.updateMany({
-          where: { id: suggestion.request.id, state: 'ANSWERED' },
-          data: { state: 'OPEN' },
-        })
+      if (passed.count !== 1) throw alreadyDecided()
+      const updated = {
+        id: suggestion.id,
+        state: 'PASSED' as const,
+        passReason: input.reason ?? null,
       }
 
+      // FR-5.9 — if nothing is waiting any more, the request is open again.
+      await reopenIfNothingWaits(ctx.db, suggestion.request.id)
+
       // FR-6.10 — information, not a verdict. The wording lives in the template.
-      await ctx.db.notification.create({
-        data: {
-          userId: suggestion.contributorId,
-          type: 'SUGGESTION_PASSED',
-          payload: { suggestionId: suggestion.id, requestId: suggestion.request.id },
-        },
-      })
+      await afterCommit('suggestion.pass.notify', () =>
+        ctx.db.notification.create({
+          data: {
+            userId: suggestion.contributorId,
+            type: 'SUGGESTION_PASSED',
+            payload: { suggestionId: suggestion.id, requestId: suggestion.request.id },
+          },
+        }),
+      )
 
       await recordActivity(ctx.db, ctx.session.user.id)
 
@@ -610,7 +664,14 @@ export const suggestionRouter = createTRPCRouter({
   /** Everything this person has written, for their profile (FR-6.11, FR-9.4). */
   listMine: protectedProcedure.query(({ ctx }) =>
     ctx.db.suggestion.findMany({
-      where: { contributorId: ctx.session.user.id, state: { not: 'DRAFT' } },
+      where: {
+        contributorId: ctx.session.user.id,
+        state: { not: 'DRAFT' },
+        // Only stories they can still see. A story made private, renamed or
+        // deleted since went on showing its title and address here (phase 12
+        // audit).
+        request: { storyboard: visibleStoryboardsWhere(actorFrom(ctx.session, ctx.account)) },
+      },
       orderBy: { submittedAt: 'desc' },
       select: {
         id: true,
@@ -630,6 +691,39 @@ export const suggestionRouter = createTRPCRouter({
     }),
   ),
 })
+
+const alreadyDecided = () =>
+  new TRPCError({ code: 'BAD_REQUEST', message: 'That suggestion has already been decided.' })
+
+/**
+ * FR-5.9 — a request takes suggestions while it is open or answered. Closed
+ * (by its author, or by the story going private or finished) and resolved
+ * ones do not; until the phase 12 audit nothing here checked, so a closed
+ * request kept collecting suggestions, notifications and quota.
+ */
+function assertTakingSuggestions(state: string): void {
+  if (state === 'OPEN' || state === 'ANSWERED') return
+  throw new TRPCError({
+    code: 'BAD_REQUEST',
+    message:
+      state === 'RESOLVED'
+        ? 'That request has already been answered.'
+        : 'That request is closed, so it is not taking suggestions.',
+  })
+}
+
+/** FR-5.9 — with nothing waiting on it, an answered request is open again. */
+async function reopenIfNothingWaits(db: PrismaClient, requestId: string): Promise<void> {
+  const stillWaiting = await db.suggestion.count({
+    where: { requestId, state: { in: ['SUBMITTED', 'STALE'] } },
+  })
+  if (stillWaiting === 0) {
+    await db.contributionRequest.updateMany({
+      where: { id: requestId, state: 'ANSWERED' },
+      data: { state: 'OPEN' },
+    })
+  }
+}
 
 /** A draft the signed-in user owns, with its request. */
 async function requireOwnDraft(

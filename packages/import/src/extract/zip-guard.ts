@@ -1,4 +1,4 @@
-import { unzipSync } from 'fflate'
+import { Unzip, UnzipInflate, UnzipPassThrough, unzipSync } from 'fflate'
 
 /**
  * What a `.docx` claims it will expand to, before anything expands it.
@@ -24,8 +24,16 @@ export class SuspiciousArchiveError extends Error {
 }
 
 /**
- * Throws when the archive declares more than the cap. Returns nothing: this is
- * a gate, and the caller reads the file the ordinary way afterwards.
+ * Throws when the archive declares, or actually holds, more than the cap.
+ * Returns nothing: this is a gate, and the caller reads the file the ordinary
+ * way afterwards.
+ *
+ * Two readings. The directory's declared sizes are free and catch an honest
+ * giant. But they are written by whoever made the archive, so a member can
+ * declare a kilobyte and inflate to gigabytes, and the libraries after this
+ * one inflate first and notice later (phase 12 audit). So every member is also
+ * inflated here, as a stream, counted, and dropped: nothing is kept, and it
+ * stops at the cap rather than at the end.
  */
 export function assertReasonableArchive(file: Buffer): void {
   let declared = 0
@@ -45,4 +53,22 @@ export function assertReasonableArchive(file: Buffer): void {
   }
 
   if (declared > MAX_UNCOMPRESSED_BYTES) throw new SuspiciousArchiveError(declared)
+
+  let actual = 0
+  const unzip = new Unzip((entry) => {
+    entry.ondata = (error, chunk) => {
+      if (error) throw error
+      actual += chunk.length
+      if (actual > MAX_UNCOMPRESSED_BYTES) throw new SuspiciousArchiveError(actual)
+    }
+    entry.start()
+  })
+  unzip.register(UnzipInflate)
+  unzip.register(UnzipPassThrough)
+  try {
+    unzip.push(new Uint8Array(file), true)
+  } catch (error) {
+    if (error instanceof SuspiciousArchiveError) throw error
+    // Damaged rather than dangerous; `mammoth` will say so in its own words.
+  }
 }

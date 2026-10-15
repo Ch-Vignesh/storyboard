@@ -1,12 +1,19 @@
-import type { Prisma, PrismaClient } from '@storyboard/db'
+import { Prisma, type PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadSection, loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
+import { suggestionVisibilityWhere } from '@/lib/authz'
 import { recordActivity } from '@/server/activity'
+import { afterCommit } from '@/server/after-commit'
 import { publicId } from '@/lib/ids'
 import { logger } from '@/lib/logger'
-import { CONTINUE_TARGET_MAX_WORDS, REWRITE_TARGET_MIN_WORDS } from '@/lib/schemas/constants'
+import {
+  BROWSE_LIMITS,
+  CONTINUE_TARGET_MAX_WORDS,
+  GENRE_SELECTION_MAX,
+  REWRITE_TARGET_MIN_WORDS,
+} from '@/lib/schemas/constants'
 import { createRequestSchema, passChipSchema, PROSE_KINDS } from '@/lib/schemas/help'
 
 import {
@@ -96,25 +103,29 @@ export const requestRouter = createTRPCRouter({
       })
     }
 
-    const created = await ctx.db.contributionRequest.create({
-      data: {
-        publicId: publicId(),
-        storyboardId,
-        sectionId,
-        kind: input.kind,
-        title: input.title,
-        ask: input.ask,
-        // FR-5.4 is meaningless for UNBLOCK, so it is not stored for one.
-        preContext: PROSE_KINDS.includes(input.kind) ? (input.preContext ?? null) : null,
-        toneNotes: input.toneNotes ?? null,
-        constraints: input.constraints ?? [],
-        readingList: input.readingList ?? [],
-        minWords: input.minWords,
-        maxWords: input.maxWords,
-        openedById: ctx.session.user.id,
-      },
-      select: { id: true, publicId: true },
-    })
+    const created = await unlessAlreadyOpen(
+      'This section is already open for help. Close that one first.',
+      () =>
+        ctx.db.contributionRequest.create({
+          data: {
+            publicId: publicId(),
+            storyboardId,
+            sectionId,
+            kind: input.kind,
+            title: input.title,
+            ask: input.ask,
+            // FR-5.4 is meaningless for UNBLOCK, so it is not stored for one.
+            preContext: PROSE_KINDS.includes(input.kind) ? (input.preContext ?? null) : null,
+            toneNotes: input.toneNotes ?? null,
+            constraints: input.constraints ?? [],
+            readingList: input.readingList ?? [],
+            minWords: input.minWords,
+            maxWords: input.maxWords,
+            openedById: ctx.session.user.id,
+          },
+          select: { id: true, publicId: true },
+        }),
+    )
 
     // Opening a request is work: it is how an author asks for help (FR-9.3).
     await recordActivity(ctx.db, ctx.session.user.id)
@@ -137,7 +148,9 @@ export const requestRouter = createTRPCRouter({
       if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'That request does not exist.' })
 
       const actor = actorFrom(ctx.session, ctx.account)
-      const { permissions } = await loadStoryboard(ctx.db, actor, { id: row.storyboardId })
+      const { permissions, resource } = await loadStoryboard(ctx.db, actor, {
+        id: row.storyboardId,
+      })
 
       // FR-5.5 — the reading list renders inline, in order, never as links that
       // navigate away. Resolve the lineage ids to their current text here so
@@ -169,10 +182,16 @@ export const requestRouter = createTRPCRouter({
       const suggestions = await ctx.db.suggestion.findMany({
         where: {
           requestId: row.id,
-          // Drafts are private to their author until sent (FR-6.1).
-          OR: [
-            { state: { in: ['SUBMITTED', 'ACCEPTED', 'PASSED', 'STALE'] } },
-            ...(actor ? [{ contributorId: actor.id }] : []),
+          AND: [
+            {
+              // Drafts are private to their author until sent (FR-6.1).
+              OR: [
+                { state: { in: ['SUBMITTED', 'ACCEPTED', 'PASSED', 'STALE'] } },
+                ...(actor ? [{ contributorId: actor.id }] : []),
+              ],
+            },
+            // Decision 0007: what was sent while the story was private stays private.
+            suggestionVisibilityWhere(actor, resource),
           ],
         },
         orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
@@ -247,8 +266,8 @@ export const requestRouter = createTRPCRouter({
     .input(
       z
         .object({
-          genreIds: z.array(z.string().min(1)).max(24).optional(),
-          take: z.number().int().min(1).max(50).default(20),
+          genreIds: z.array(z.string().min(1)).max(GENRE_SELECTION_MAX).optional(),
+          take: z.number().int().min(1).max(BROWSE_LIMITS.pageMax).default(20),
         })
         .optional(),
     )
@@ -303,12 +322,15 @@ export const requestRouter = createTRPCRouter({
    */
   withNews: protectedProcedure.query(async ({ ctx }) => {
     const userId = ctx.session.user.id
+    const actor = actorFrom(ctx.session, ctx.account)
 
     const suggestions = await ctx.db.suggestion.findMany({
       where: {
         contributorId: userId,
         state: { in: ['ACCEPTED', 'PASSED', 'STALE'] },
-        request: { storyboard: { deletedAt: null } },
+        // Visible to them now, not only not deleted: a story that went private
+        // since kept showing its new title here (phase 12 audit).
+        request: { storyboard: visibleStoryboardsWhere(actor) },
       },
       orderBy: [{ decidedAt: 'desc' }, { submittedAt: 'desc' }],
       take: 12,
@@ -333,7 +355,9 @@ export const requestRouter = createTRPCRouter({
       where: {
         authorId: userId,
         markedHelpful: true,
-        request: { storyboard: { deletedAt: null } },
+        // Visible to them now, not only not deleted: a story that went private
+        // since kept showing its new title here (phase 12 audit).
+        request: { storyboard: visibleStoryboardsWhere(actor) },
       },
       orderBy: { createdAt: 'desc' },
       take: 6,
@@ -393,27 +417,33 @@ export const requestRouter = createTRPCRouter({
         where: { requestId: request.id, state: 'SUBMITTED' },
       })
 
-      const updated = await ctx.db.contributionRequest.update({
-        where: { id: request.id },
-        data: {
-          state: submitted > 0 ? 'ANSWERED' : 'OPEN',
-          closedAt: null,
-          resolvedAt: null,
-        },
-        select: { id: true, state: true },
-      })
+      const updated = await unlessAlreadyOpen(
+        'This section already has another request open.',
+        () =>
+          ctx.db.contributionRequest.update({
+            where: { id: request.id },
+            data: {
+              state: submitted > 0 ? 'ANSWERED' : 'OPEN',
+              closedAt: null,
+              resolvedAt: null,
+            },
+            select: { id: true, state: true },
+          }),
+      )
 
-      const everyone = await ctx.db.suggestion.findMany({
-        where: { requestId: request.id },
-        distinct: ['contributorId'],
-        select: { contributorId: true },
-      })
-      await ctx.db.notification.createMany({
-        data: everyone.map((entry) => ({
-          userId: entry.contributorId,
-          type: 'SUGGESTION_STALE' as const,
-          payload: { requestId: request.id, reason: 'reopened' },
-        })),
+      await afterCommit('request.reopen.notify', async () => {
+        const everyone = await ctx.db.suggestion.findMany({
+          where: { requestId: request.id },
+          distinct: ['contributorId'],
+          select: { contributorId: true },
+        })
+        await ctx.db.notification.createMany({
+          data: everyone.map((entry) => ({
+            userId: entry.contributorId,
+            type: 'SUGGESTION_STALE' as const,
+            payload: { requestId: request.id, reason: 'reopened' },
+          })),
+        })
       })
 
       log.info({ event: 'request.reopen', requestId: request.id }, 'request reopened')
@@ -447,4 +477,21 @@ async function requireAuthorOfRequest(
     'suggestion:decide',
   )
   return { request, storyboard }
+}
+
+/**
+ * `one_open_request_per_section` is the real guard; the checks above only make
+ * it a sentence. Two requests opened at once both pass the check, and the one
+ * the index refuses used to get a server fault for an answer (phase 12 audit).
+ * Now it gets the same sentence the check would have given.
+ */
+async function unlessAlreadyOpen<T>(message: string, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write()
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new TRPCError({ code: 'CONFLICT', message })
+    }
+    throw error
+  }
 }

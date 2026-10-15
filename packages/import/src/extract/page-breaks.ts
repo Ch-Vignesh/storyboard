@@ -16,10 +16,34 @@ import { unzipSync, strFromU8 } from 'fflate'
 /** Paragraph text that begins a page, in document order. */
 export type PageStarts = string[]
 
-const PARAGRAPH = /<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/gu
-const TEXT_RUN = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/gu
-const PAGE_BREAK = /<w:br\s[^>]*w:type="page"/u
-const PAGE_BREAK_BEFORE = /<w:pageBreakBefore(?:\s[^>]*)?\/?>/u
+// None of these can scan past the next `<`. The paragraph pattern used to be
+// `<w:p…>([\s\S]*?)</w:p>`, which also opened on a self-closing `<w:p/>`, and
+// from each of those scanned to the end of the document looking for a close:
+// a few kilobytes of compressed XML kept an import busy for hours (phase 12
+// audit). Paragraphs are now found by `paragraphs()` in one pass.
+const PARAGRAPH_TAG = /<(\/?)w:p(?=[\s/>])[^<>]*>/gu
+const TEXT_RUN = /<w:t(?:\s[^<>]*)?>([^<]*)<\/w:t>/gu
+const TEXT_OPEN = /<w:t(?:\s[^<>]*)?>/u
+const PAGE_BREAK = /<w:br\s[^<>]*w:type="page"/u
+const PAGE_BREAK_BEFORE = /<w:pageBreakBefore(?:\s[^<>]*)?\/?>/u
+
+/**
+ * Each paragraph's inner XML, in order, in one pass. A paragraph nested in
+ * another (a text box) ends the outer one at its own close, which is what the
+ * old pattern did too.
+ */
+function* paragraphs(xml: string): Generator<string> {
+  let open = -1
+  for (const tag of xml.matchAll(PARAGRAPH_TAG)) {
+    const at = tag.index
+    if (tag[1] === '/') {
+      if (open !== -1) yield xml.slice(open, at)
+      open = -1
+    } else if (open === -1 && !tag[0].endsWith('/>')) {
+      open = at + tag[0].length
+    }
+  }
+}
 
 function decode(value: string): string {
   return value
@@ -49,8 +73,7 @@ export function readPageStarts(file: Buffer): PageStarts {
   const starts: PageStarts = []
   let breakPending = false
 
-  for (const match of xml.matchAll(PARAGRAPH)) {
-    const body = match[1] ?? ''
+  for (const body of paragraphs(xml)) {
     const text = normalise([...body.matchAll(TEXT_RUN)].map((run) => decode(run[1] ?? '')).join(''))
 
     // A break *before* this paragraph, set as a paragraph property.
@@ -66,7 +89,7 @@ export function readPageStarts(file: Buffer): PageStarts {
     // a chapter heading follows on the same line.
     if (PAGE_BREAK.test(body)) {
       const breakAt = body.search(PAGE_BREAK)
-      const firstText = body.search(/<w:t(?:\s[^>]*)?>/u)
+      const firstText = body.search(TEXT_OPEN)
       if (text.length > 0 && firstText !== -1 && firstText > breakAt) {
         starts.push(text)
       } else {

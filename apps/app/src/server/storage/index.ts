@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 
 // Types only: erased at build, so the SDK itself still loads on first use.
@@ -143,6 +143,30 @@ export async function putObject(key: string, body: Buffer): Promise<void> {
   const path = localPath(key)
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, body)
+}
+
+/**
+ * How many bytes an upload holds, asked of the store without reading them, or
+ * `null` if there is no such upload.
+ *
+ * The presigned PUT cannot bind the size the browser declared, so R2 accepts
+ * whatever arrives. Reading it whole to find out how big it is was the
+ * mistake: a multi-gigabyte object ran the function out of memory before the
+ * 5 MB check (phase 12 audit). Ask first, and refuse before reading.
+ */
+export async function objectSize(key: string): Promise<number | null> {
+  try {
+    if (r2Configured()) {
+      const { sdk, client } = await r2()
+      const head = await client.send(
+        new sdk.HeadObjectCommand({ Bucket: String(env.R2_BUCKET), Key: key }),
+      )
+      return head.ContentLength ?? null
+    }
+    return (await stat(localPath(key))).size
+  } catch {
+    return null
+  }
 }
 
 export async function getObject(key: string): Promise<Buffer> {

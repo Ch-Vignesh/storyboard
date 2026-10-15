@@ -49,10 +49,11 @@ export async function purgeDeletedAccounts(
   const due = await db.user.findMany({
     where: {
       deletionRequestedAt: { not: null, lt: cutoff },
-      // Already stripped: `username` is the flag, because it is the one
-      // identifying column that cannot be null on an account somebody still
-      // uses and must be null once they do not.
-      username: { not: null },
+      // Already stripped: `status` is the flag, and only this purge sets it.
+      // It used to be `username: { not: null }`, which also skipped everyone
+      // who asked to be deleted before choosing a username: their address,
+      // password and name were kept for ever (phase 12 audit).
+      status: { not: 'DELETED' },
     },
     select: { id: true },
   })
@@ -131,6 +132,8 @@ async function purgeOne(db: PrismaClient, userId: string): Promise<void> {
         avatarUrl: null,
         passwordHash: null,
         emailVerifiedAt: null,
+        // A power, not an identity, but nobody is left to hold it.
+        isAdmin: false,
       },
     })
   })

@@ -10,7 +10,7 @@
  *
  * Needs a real Postgres, so it skips when DATABASE_URL is unset. CI runs it.
  */
-import { randomUUID } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 
 import { createPrismaClient, type PrismaClient } from '@storyboard/db'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -64,14 +64,17 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
   })
 
   afterAll(async () => {
+    const { key } = await import('@/server/limits')
     const keys = addresses.flatMap((address) => [
-      `auth:signup:${address}`,
-      `auth:resend:${address}`,
-      `auth:cooldown:${address}`,
-      `auth:reset:${address}`,
-      `auth:reset-cooldown:${address}`,
+      key.signUp(address),
+      key.verificationResend(address),
+      key.addressCooldown(address),
+      key.passwordReset(address),
+      key.resetCooldown(address),
     ])
-    await db.rateLimitHit.deleteMany({ where: { key: { in: keys } } })
+    await db.rateLimitHit.deleteMany({
+      where: { OR: [{ key: { in: keys } }, { key: { startsWith: 'auth:mail-from:203.0.113.' } }] },
+    })
     await db.emailVerificationToken.deleteMany({ where: { user: { email: { in: addresses } } } })
     await db.user.deleteMany({ where: { email: { in: addresses } } })
     await db.$disconnect()
@@ -112,6 +115,64 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
 
     expect(sent).toHaveLength(0)
     expect(await db.user.count({ where: { email: address } })).toBe(0)
+  })
+
+  async function cooldownKey(address: string): Promise<string> {
+    const { key } = await import('@/server/limits')
+    return key.addressCooldown(address)
+  }
+
+  /**
+   * Phase 12 audit. Each form kept its own one-minute rhythm, so asking two of
+   * them in turn told a stranger which kind of address it was: nobody's
+   * answered "sent", "sent"; an account's answered "sent", "cooldown".
+   */
+  it('answers every kind of address the same, whichever form asks first', async () => {
+    const nobody = anAddress('turns-nobody')
+    const someone = anAddress('turns-someone')
+    const halfway = anAddress('turns-halfway')
+    await db.user.create({ data: { email: someone, emailVerifiedAt: new Date() } })
+    await db.user.create({ data: { email: halfway } })
+
+    for (const address of [nobody, someone, halfway]) {
+      expect(await call.resendVerification({ email: address })).toEqual({ status: 'sent' })
+      expect(await call.signUp({ email: address })).toEqual({ status: 'cooldown' })
+      // Reset links keep their own rhythm, the same for every kind of address.
+      expect(await call.requestPasswordReset({ email: address })).toEqual({ status: 'sent' })
+      expect(await call.requestPasswordReset({ email: address })).toEqual({ status: 'cooldown' })
+    }
+  })
+
+  /**
+   * Phase 12 audit. Every limit here was per address, so a script that typed a
+   * new address each time could send without end, and Gmail stops at about
+   * 500 a day: every real sign-up and reset with it.
+   */
+  it('stops one client asking for mail to address after address', async () => {
+    const { AUTH_LIMITS } = await import('@/lib/schemas/constants')
+    const { createCallerFactory } = await import('../init')
+    const { authRouter } = await import('./auth')
+    const { key } = await import('@/server/limits')
+    // A documentation address (RFC 5737), new each run and cleared first, so a
+    // run that was stopped before its cleanup cannot leave this one a day's
+    // worth of mail already counted.
+    const client = `203.0.113.${String(randomInt(1, 255))}`
+    await db.rateLimitHit.deleteMany({ where: { key: key.authEmailsFrom(client) } })
+    const fromOneClient = createCallerFactory(authRouter)({
+      db,
+      session: null,
+      account: null,
+      headers: new Headers({ 'x-forwarded-for': `${client}, 10.0.0.1` }),
+    })
+
+    for (let index = 0; index < AUTH_LIMITS.emailsPerClientPerDay; index += 1) {
+      await fromOneClient.signUp({ email: anAddress(`flood-${String(index)}`) })
+    }
+    await expect(fromOneClient.signUp({ email: anAddress('flood-over') })).rejects.toThrow(
+      /too many emails/iu,
+    )
+    // Somebody else, elsewhere, is not affected.
+    expect(await call.signUp({ email: anAddress('flood-elsewhere') })).toEqual({ status: 'sent' })
   })
 
   it('answers a resend for an address with an account with the note, not a link', async () => {
@@ -175,7 +236,8 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
     await call.requestPasswordReset({ email })
     const first = tokenFromResetMail()
     // A second link, as if they asked twice a few minutes apart.
-    await db.rateLimitHit.deleteMany({ where: { key: `auth:reset-cooldown:${email}` } })
+    const { key } = await import('@/server/limits')
+    await db.rateLimitHit.deleteMany({ where: { key: key.resetCooldown(email) } })
     await call.requestPasswordReset({ email })
     const second = tokenFromResetMail()
     expect(second).not.toBe(first)
@@ -204,6 +266,66 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
         confirm: 'one more attempt',
       }),
     ).rejects.toThrow(/expired/u)
+  })
+
+  /** The token out of the last confirmation email. */
+  function tokenFromVerifyMail(): string {
+    const mail = sent.findLast((each) => each.subject === 'Confirm your email for Draftboard')
+    const token = mail?.text.match(/\/verify\?token=([\w-]+)/u)?.[1]
+    if (!token) throw new Error('No confirmation link was sent.')
+    return token
+  }
+
+  /**
+   * Phase 12 audit. A confirmation link chooses the first password and never
+   * changes one (decision 0036). An older link still sitting in the inbox used
+   * to replace the password silently: no session ended, no notice sent.
+   */
+  it('lets a confirmation link choose the first password, and never change it', async () => {
+    const { verifyPassword } = await import('@/auth/password')
+    const { createVerificationToken } = await import('@/auth/tokens')
+    const email = anAddress('first-password')
+    await call.signUp({ email })
+    const older = tokenFromVerifyMail()
+    await db.rateLimitHit.deleteMany({ where: { key: await cooldownKey(email) } })
+    await call.resendVerification({ email })
+    const newer = tokenFromVerifyMail()
+    expect(newer).not.toBe(older)
+
+    await call.setPassword({ token: newer, password: 'the first passphrase' })
+
+    // The older link closed with it.
+    await expect(call.verifyEmail({ token: older })).rejects.toThrow(/expired/u)
+    await expect(call.setPassword({ token: older, password: 'somebody else now' })).rejects.toThrow(
+      /expired/u,
+    )
+
+    // And a link that somehow outlived it still cannot change the password.
+    const user = await db.user.findUniqueOrThrow({ where: { email } })
+    const stray = createVerificationToken()
+    await db.emailVerificationToken.create({
+      data: { userId: user.id, tokenHash: stray.tokenHash, expiresAt: stray.expiresAt },
+    })
+    expect(await call.verifyEmail({ token: stray.token })).toEqual({ email, hasPassword: true })
+    await expect(
+      call.setPassword({ token: stray.token, password: 'somebody else now' }),
+    ).rejects.toThrow(/already has a password/u)
+
+    const after = await db.user.findUniqueOrThrow({ where: { email } })
+    expect(await verifyPassword(String(after.passwordHash), 'the first passphrase')).toBe(true)
+  })
+
+  it('lets only one of two submissions of the same confirmation link win', async () => {
+    const email = anAddress('first-password-race')
+    await call.signUp({ email })
+    const token = tokenFromVerifyMail()
+
+    const results = await Promise.allSettled([
+      call.setPassword({ token, password: 'the first of the two' }),
+      call.setPassword({ token, password: 'the second of the two' }),
+    ])
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
   })
 
   it('refuses an expired link, and two passwords that do not match', async () => {
