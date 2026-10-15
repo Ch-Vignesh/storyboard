@@ -96,6 +96,15 @@ reason, so the code already live keeps working against the new schema while the
 new code is on its way. Push first and the new code meets a database without
 its columns: for the password reset (decision 0036) that is every signed-in
 page, because the session check reads `passwordChangedAt` on each one.
+
+That happened on 2026-10-15. The push went first, and every sign-in, every
+sign-up and every signed-in page failed until `pnpm db:deploy` was run. So the
+order is no longer only a rule written here: the application's build runs
+`db:check-migrations` first (turbo.json), which compares the migrations in the
+repository with the ones the database has finished, and fails the build with the
+names of any that are missing. On Vercel a failed build is never promoted, so
+the deployment already live keeps serving. To recover, run `pnpm db:deploy`
+from a laptop, then redeploy. The check only reads; it never applies anything.
 The sitemap is prerendered from the published storyboards, so a build with no
 `DATABASE_URL`, or with one whose tables do not exist yet, fails.
 

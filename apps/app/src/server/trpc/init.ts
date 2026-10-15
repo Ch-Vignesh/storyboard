@@ -30,11 +30,24 @@ export async function createTRPCContext(opts: { headers: Headers }) {
 
 export type Context = Awaited<ReturnType<typeof createTRPCContext>>
 
+/**
+ * What a person is told when the fault is ours. Every message a procedure
+ * writes for people is a `TRPCError` with a code of its own; an
+ * `INTERNAL_SERVER_ERROR` is whatever a library threw, and its text is for the
+ * logs. On 2026-10-15 the sign-up form showed a stranger Prisma's "The column
+ * `User.passwordChangedAt` does not exist in the current database".
+ */
+export const SERVER_FAULT_MESSAGE =
+  'Something went wrong on our side, not yours. Try again in a minute.'
+
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
   errorFormatter({ shape, error }) {
+    // The real error is not lost: the route's `onError` logs it before this runs.
+    const message = error.code === 'INTERNAL_SERVER_ERROR' ? SERVER_FAULT_MESSAGE : shape.message
     return {
       ...shape,
+      message,
       data: {
         ...shape.data,
         zodError: error.cause instanceof ZodError ? z.flattenError(error.cause) : null,

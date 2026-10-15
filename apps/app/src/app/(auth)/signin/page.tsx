@@ -10,6 +10,7 @@ import { redirect } from 'next/navigation'
 import { signIn } from '@/auth'
 import { ContinueWithGoogle } from '../continue-with-google'
 import { safeNext } from '@/lib/safe-next'
+import { signInErrorMessage } from '@/lib/sign-in-error'
 
 export const metadata: Metadata = { title: 'Sign in' }
 
@@ -20,6 +21,7 @@ export default async function SignInPage({ searchParams }: Props) {
   // proxy.ts puts the page they were trying to reach here. Validated, because
   // a sign-in page that redirects wherever a URL says is an open redirect.
   const destination = safeNext(next)
+  const errorMessage = signInErrorMessage(error)
 
   async function signInAction(formData: FormData) {
     'use server'
@@ -31,7 +33,9 @@ export default async function SignInPage({ searchParams }: Props) {
       })
     } catch (caught) {
       if (caught instanceof AuthError) {
-        const back = new URLSearchParams({ error: '1' })
+        // The type, not a flag: a refused password and a database that is down
+        // both arrive here, and only one of them is the person's to fix.
+        const back = new URLSearchParams({ error: caught.type })
         if (destination !== '/') back.set('next', destination)
         redirect(`/signin?${back.toString()}`)
       }
@@ -69,9 +73,9 @@ export default async function SignInPage({ searchParams }: Props) {
           </div>
           <PasswordInput id="password" name="password" autoComplete="current-password" required />
         </div>
-        {error ? (
+        {errorMessage ? (
           <p role="alert" className="text-[13.5px] text-crimson">
-            That email and password do not match. Try again.
+            {errorMessage}
           </p>
         ) : null}
         <Button type="submit" variant="primary" className="w-full">

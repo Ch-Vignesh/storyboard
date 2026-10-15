@@ -40,7 +40,7 @@
       "outputs": ["src/generated/**"]
     },
     "build": {
-      "dependsOn": ["^build", "db:generate", "^db:generate"],
+      "dependsOn": ["^build", "db:generate", "^db:generate", "^db:check-migrations"],
       "inputs": ["$TURBO_DEFAULT$", "!**/*.test.ts", "!**/*.test.tsx"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
@@ -61,6 +61,7 @@
     },
     "db:migrate": { "cache": false },
     "db:deploy": { "cache": false },
+    "db:check-migrations": { "cache": false, "dependsOn": ["db:generate"] },
     "db:seed": { "cache": false, "dependsOn": ["db:generate"] },
     "db:reset": { "cache": false },
     "db:studio": { "cache": false, "persistent": true }

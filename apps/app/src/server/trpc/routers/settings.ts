@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { pinGenresSchema } from '@/lib/schemas/onboarding'
@@ -92,7 +93,7 @@ export const settingsRouter = createTRPCRouter({
       select: { id: true },
     })
     if (found.length !== input.genreIds.length) {
-      throw new Error('Unknown genre.')
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unknown genre.' })
     }
 
     await ctx.db.$transaction(async (tx) => {
