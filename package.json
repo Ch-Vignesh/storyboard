@@ -38,11 +38,11 @@
     "@types/node": "catalog:",
     "eslint": "catalog:",
     "husky": "9.1.7",
-    "lint-staged": "17.5.1",
+    "lint-staged": "17.6.0",
     "prettier": "catalog:",
     "prettier-plugin-tailwindcss": "0.8.1",
     "tsx": "catalog:",
-    "turbo": "2.10.12",
+    "turbo": "2.11.7",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
