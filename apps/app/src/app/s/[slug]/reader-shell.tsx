@@ -3,7 +3,7 @@
 import { Button } from '@storyboard/ui/components/button'
 import { useQuery } from '@tanstack/react-query'
 import Link from '@/components/link'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Manuscript } from '@/components/manuscript'
 
@@ -21,16 +21,22 @@ export function ReaderShell({
   data,
   signedIn,
   header,
+  startAt,
 }: {
   data: StoryboardData
   signedIn: boolean
   header: React.ReactNode
+  /** A chapter's or a section's address was followed (SRS section 4). */
+  startAt?: { chapterId: string; sectionId?: string }
 }) {
   const trpc = useTRPC()
-  const { storyboard, chapters, permissions, historyVisibleFrom, version } = data
-  const [activeChapterId, setActiveChapterId] = useState(chapters[0]?.id ?? null)
+  const { storyboard, chapters, permissions, historyVisibleFrom, privateStretches, version } = data
+  const [activeChapterId, setActiveChapterId] = useState(
+    startAt?.chapterId ?? chapters[0]?.id ?? null,
+  )
   // FR-11.5 — clicking a margin card scrolls to its section and highlights it.
-  const [highlighted, setHighlighted] = useState<string | null>(null)
+  // A section's address does the same for the section it names.
+  const [highlighted, setHighlighted] = useState<string | null>(startAt?.sectionId ?? null)
   const flavour = flavourForStoryType(storyboard.type)
 
   // NFR-1 — one chapter at a time. A 120,000-word manuscript is never one
@@ -39,6 +45,16 @@ export function ReaderShell({
     ...trpc.section.listForChapter.queryOptions({ chapterId: activeChapterId ?? '' }),
     enabled: activeChapterId !== null,
   })
+
+  // Once, when the chapter it is in has loaded: after that, the reader is
+  // where the reader has scrolled to.
+  const arrived = useRef(false)
+  const startSection = startAt?.sectionId
+  useEffect(() => {
+    if (!startSection || arrived.current || !chapter.data) return
+    arrived.current = true
+    document.getElementById(`section-${startSection}`)?.scrollIntoView({ block: 'start' })
+  }, [chapter.data, startSection])
 
   // FR-11.5 — the margin of open requests, each tied to its section. A
   // finished storyboard has none, and does not ask for them either.
@@ -69,10 +85,24 @@ export function ReaderShell({
             <Button asChild variant="ghost" size="sm">
               <Link href={`/s/${storyboard.slug}/contributors`}>Contributors</Link>
             </Button>
+            {/* FR-10.3 — the way to the spin-off button, which lives with the
+                story's family tree. Nothing led there for a story nobody had
+                spun off yet, until the 2026-10-16 spec review. */}
+            {signedIn && permissions.canSpinOff && storyboard.visibility === 'PUBLIC' ? (
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/s/${storyboard.slug}/lineage`}>Your own version</Link>
+              </Button>
+            ) : null}
             {/* FR-10.1 — an author has drafts; a reader has none to see. */}
             {permissions.canCreateVersion ? (
               <Button asChild variant="ghost" size="sm">
                 <Link href={`/s/${storyboard.slug}/versions`}>Versions</Link>
+              </Button>
+            ) : null}
+            {/* SRS 3.1 — who writes it, for the people who do. */}
+            {permissions.canEdit ? (
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/s/${storyboard.slug}/coauthors`}>Co-authors</Link>
               </Button>
             ) : null}
             {permissions.canExport ? (
@@ -204,6 +234,18 @@ export function ReaderShell({
           {/* FR-10.4 to FR-10.6 — where this came from, and who took it on. */}
           <LineageBanner storyboardId={storyboard.id} slug={storyboard.slug} />
 
+          {/* FR-14.5 — as the author wrote it, unverified and unendorsed. It
+              was stored and exported and never shown, until the 2026-10-16
+              spec review. */}
+          {storyboard.rightsNote ? (
+            <p className="mb-8 max-w-measure border-l-2 border-rule py-1 pl-4 text-[12.5px] leading-relaxed text-ink-faint">
+              From the author, about rights:{' '}
+              <span className="whitespace-pre-line text-ink-soft italic">
+                {storyboard.rightsNote}
+              </span>
+            </p>
+          ) : null}
+
           {/* Decision 0007 — say so rather than letting history look incomplete. */}
           {historyVisibleFrom ? (
             <p className="mb-8 max-w-measure border-l-2 border-rule py-1 pl-4 text-[12.5px] leading-relaxed text-ink-faint">
@@ -214,6 +256,19 @@ export function ReaderShell({
                 year: 'numeric',
               })}
               . Versions written before then are visible to its authors only.
+            </p>
+          ) : null}
+          {/* Decision 0039 — and so was what was written while it was private again. */}
+          {privateStretches.length > 0 ? (
+            <p className="mb-8 max-w-measure border-l-2 border-rule py-1 pl-4 text-[12.5px] leading-relaxed text-ink-faint">
+              It was private again{' '}
+              {privateStretches
+                .map(
+                  (stretch) =>
+                    `from ${stretch.from.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} to ${stretch.to.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+                )
+                .join(', and ')}
+              . Versions written then are visible to its authors only.
             </p>
           ) : null}
 
@@ -257,7 +312,7 @@ export function ReaderShell({
                 </p>
               ) : (
                 <div className="manuscript mt-6 max-w-measure">
-                  {(chapter.data ?? []).map((section) => (
+                  {(chapter.data ?? []).map((section, position) => (
                     <section
                       key={section.id}
                       id={`section-${section.id}`}
@@ -340,14 +395,14 @@ export function ReaderShell({
                       {permissions.canEdit ? (
                         <p className="not-prose mb-8 text-[12.5px]">
                           <Link
-                            href={`/s/${storyboard.slug}/c/${activeIndex + 1}/${section.order + 1}/edit${versionSuffix}`}
+                            href={`/s/${storyboard.slug}/c/${activeIndex + 1}/${position + 1}/edit${versionSuffix}`}
                             className="text-pencil hover:underline"
                           >
                             Edit
                           </Link>
                           {' · '}
                           <Link
-                            href={`/s/${storyboard.slug}/c/${activeIndex + 1}/${section.order + 1}/history${versionSuffix}`}
+                            href={`/s/${storyboard.slug}/c/${activeIndex + 1}/${position + 1}/history${versionSuffix}`}
                             className="text-ink-faint hover:text-ink hover:underline"
                           >
                             History

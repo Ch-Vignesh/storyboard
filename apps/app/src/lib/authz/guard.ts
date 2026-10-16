@@ -18,6 +18,7 @@ import {
   assertCan,
   can,
   permissionsFor,
+  STORY_NOT_FOUND,
   type Action,
   type Actor,
   type StoryboardResource,
@@ -43,6 +44,7 @@ const AUTHZ_SELECT = {
     where: { acceptedAt: { not: null } },
     select: { userId: true },
   },
+  privateSpans: { select: { startedAt: true, endedAt: true } },
 } satisfies Prisma.StoryboardSelect
 
 type LoadedStoryboard = Prisma.StoryboardGetPayload<{ select: typeof AUTHZ_SELECT }>
@@ -61,10 +63,32 @@ function toResource(row: LoadedStoryboard): StoryboardResource & { publicFrom: D
     deletedAt: row.deletedAt,
     publicFrom: row.publicFrom,
     coauthorIds: row.collaborators.map((c) => c.userId),
+    finished: row.state === 'FINISHED',
+    privateSpans: row.privateSpans,
   }
 }
 
-const notFound = () => new TRPCError({ code: 'NOT_FOUND', message: 'That story does not exist.' })
+/**
+ * FR-14.1 — for the procedures that would open something on a finished
+ * story. They were open to it until the 2026-10-16 spec review: finishing
+ * closed the requests, and nothing stopped them being reopened, or new ones
+ * opened, and so listed in browse.
+ */
+export function assertNotFinished(
+  resource: StoryboardResource,
+  asked: 'by the author' | 'by a helper' = 'by the author',
+): void {
+  if (!resource.finished) return
+  throw new TRPCError({
+    code: 'BAD_REQUEST',
+    message:
+      asked === 'by the author'
+        ? 'This story is marked finished, so it is not asking for help. To ask, choose “Actually, there is more to do” on its Take it out page first.'
+        : 'This story has been marked finished, so it is not taking suggestions any more. Yours stays on your profile.',
+  })
+}
+
+const notFound = () => new TRPCError({ code: 'NOT_FOUND', message: STORY_NOT_FOUND })
 
 /**
  * Load a storyboard by id or slug and assert the action against it.

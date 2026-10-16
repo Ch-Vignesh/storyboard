@@ -163,6 +163,7 @@ export default async function RequestPage({ params }: Params) {
         requestPublicId={request.publicId}
         state={request.state}
         kind={request.kind}
+        finished={request.storyboard.state === 'FINISHED'}
         canDecide={permissions.canOpenRequest}
         canContribute={permissions.canSubmitSuggestion}
         signedIn={signedIn}
@@ -173,6 +174,7 @@ export default async function RequestPage({ params }: Params) {
           slug={slug}
           requestPublicId={request.publicId}
           suggestions={data.suggestions}
+          requestState={request.state}
           canDecide={permissions.canOpenRequest}
           viewerId={session?.user.id ?? null}
         />

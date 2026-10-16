@@ -1,4 +1,4 @@
-import { frontMatterLines, sourceLine } from './front-matter'
+import { frontMatterLines, originLine, sourceLine } from './front-matter'
 import type { BlockNode, InlineNode, Manuscript } from './types'
 
 /** Escapes the characters Markdown would otherwise read as markup. */
@@ -56,6 +56,8 @@ export function toMarkdown(manuscript: Manuscript): string {
   // FR-14.3 — the front matter, before a word of the manuscript.
   parts.push(`# ${manuscript.title}`)
   parts.push(`*by ${manuscript.author}*`)
+  const origin = originLine(manuscript)
+  if (origin) parts.push(`*${origin}*`)
 
   if (manuscript.contributors.length > 0) {
     parts.push('## With contributions from')

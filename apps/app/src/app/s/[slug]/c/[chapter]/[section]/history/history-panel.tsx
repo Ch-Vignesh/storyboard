@@ -1,10 +1,11 @@
 'use client'
 
 import { Button } from '@storyboard/ui/components/button'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import { RevisionComparison } from '@/components/revision-comparison'
 import { nameOf } from '@/lib/people'
 import { useTRPC } from '@/trpc/client'
 import type { AppRouter } from '@/server/trpc/routers/_app'
@@ -21,42 +22,75 @@ const SOURCE_LABELS: Record<Revision['source'], string> = {
   IMPORTED: 'brought in from a file',
 }
 
+const DAY_MONTH = { day: 'numeric', month: 'short' } as const
+
 export function HistoryPanel({
   sectionId,
   initial,
   canRestore,
+  viewerId,
   backHref,
 }: {
   sectionId: string
   initial: History
   canRestore: boolean
+  /** Whose versions may carry a proof of authorship (FR-13.6). */
+  viewerId: string | null
   backHref: string
 }) {
   const trpc = useTRPC()
   const router = useRouter()
   const queryClient = useQueryClient()
-  const [comparing, setComparing] = useState<string | null>(null)
+  const [comparing, setComparing] = useState<Comparing | null>(null)
+  // FR-7.5 — any two versions, not only one against its parent or the
+  // current text. Picked in the list, compared above it.
+  const [picked, setPicked] = useState<string[]>([])
+  const toggle = (next: Comparing) =>
+    setComparing(
+      comparing?.revisionId === next.revisionId && comparing.against === next.against ? null : next,
+    )
+  const pick = (id: string) =>
+    setPicked((current) =>
+      current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id].slice(-2),
+    )
 
-  const history = useQuery({
-    ...trpc.section.history.queryOptions({ sectionId }),
-    initialData: initial,
-  })
+  // FR-8.3 — every version, a page at a time. Only the newest fifty could
+  // be seen until the 2026-10-16 spec review.
+  const history = useInfiniteQuery(
+    trpc.section.history.infiniteQueryOptions(
+      { sectionId },
+      {
+        getNextPageParam: (page) => page.nextCursor,
+        initialData: { pages: [initial], pageParams: [null] },
+      },
+    ),
+  )
 
   const restore = useMutation(
     trpc.section.restoreRevision.mutationOptions({
       onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: trpc.section.history.queryKey() })
+        await queryClient.invalidateQueries({ queryKey: trpc.section.history.pathKey() })
         router.refresh()
       },
     }),
   )
 
-  const revisions = history.data?.revisions ?? []
-  const head = history.data?.currentRevisionId ?? null
+  const pages = history.data?.pages ?? [initial]
+  const revisions = pages.flatMap((page) => page.revisions)
+  const head = pages[0]?.currentRevisionId ?? null
+  const byId = new Map(revisions.map((revision) => [revision.id, revision]))
+  // Older on the left, whichever was picked first.
+  const pair =
+    picked.length === 2
+      ? [...picked].sort(
+          (a, b) =>
+            (byId.get(a)?.createdAt.getTime() ?? 0) - (byId.get(b)?.createdAt.getTime() ?? 0),
+        )
+      : null
 
   return (
     <div className="mt-8">
-      {history.data?.truncatedByVisibility ? (
+      {pages[0]?.truncatedByVisibility ? (
         // Decision 0007 — an incomplete chain is explained, not hidden.
         <p className="mb-6 border-l-2 border-rule py-1 pl-4 text-[12.5px] leading-relaxed text-ink-faint">
           This story was private for part of its life. Versions written then are visible to its
@@ -64,9 +98,29 @@ export function HistoryPanel({
         </p>
       ) : null}
 
+      {pair ? (
+        <div className="mb-8 border border-rule px-4 py-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <p className="text-[13px] text-ink-soft">Comparing the two versions you picked.</p>
+            <Button size="sm" variant="ghost" onClick={() => setPicked([])}>
+              Clear
+            </Button>
+          </div>
+          <RevisionComparison
+            baseId={pair[0] ?? ''}
+            targetId={pair[1] ?? ''}
+            leftLabel={labelOf(byId.get(pair[0] ?? ''))}
+            rightLabel={labelOf(byId.get(pair[1] ?? ''))}
+          />
+        </div>
+      ) : picked.length === 1 ? (
+        <p className="mb-6 text-[13px] text-ink-faint">Pick one more version to compare.</p>
+      ) : null}
+
       <ol className="divide-y divide-rule border-y border-rule">
         {revisions.map((revision) => {
           const isHead = revision.id === head
+          const mine = viewerId !== null && revision.author?.id === viewerId
           return (
             <li key={revision.id} className="py-4">
               <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
@@ -90,24 +144,69 @@ export function HistoryPanel({
                   <p className="mt-1 text-[12.5px] text-ink-faint">
                     {nameOf(revision.author)}
                     {' · '}
-                    {SOURCE_LABELS[revision.source]}
+                    {/* FR-8.4 — "restored from 12 Sep", not only "restored". */}
+                    {revision.source === 'RESTORED' && revision.restoredFrom
+                      ? `restored from ${revision.restoredFrom.createdAt.toLocaleDateString('en-GB', DAY_MONTH)}`
+                      : SOURCE_LABELS[revision.source]}
                     {revision.acceptedBy ? `, accepted by ${nameOf(revision.acceptedBy)}` : ''}
                     {' · '}
                     <span className="tabular-nums">
                       {revision.wordCount.toLocaleString('en-GB')} words
                     </span>
                   </p>
+                  {/* FR-13.6 — every version is fingerprinted when it is
+                      written; the fingerprint is the record, so it is shown,
+                      and its writer can take it away as a signed document
+                      (which names the algorithm). Neither was anywhere on
+                      screen until the 2026-10-16 spec review. */}
+                  <p className="mt-1 text-[11.5px] text-ink-faint">
+                    <span title={`The whole fingerprint: ${revision.contentHash}`}>
+                      Fingerprint{' '}
+                      <span className="font-mono">{revision.contentHash.slice(0, 16)}…</span>
+                    </span>
+                    {mine ? (
+                      <>
+                        {' · '}
+                        <a
+                          href={`/api/export/proof/${revision.id}`}
+                          className="text-pencil hover:underline"
+                        >
+                          Proof that you wrote this (PDF)
+                        </a>
+                      </>
+                    ) : null}
+                  </p>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setComparing(comparing === revision.id ? null : revision.id)}
-                    aria-expanded={comparing === revision.id}
-                  >
-                    {comparing === revision.id ? 'Hide' : 'Compare with current'}
-                  </Button>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-1.5 text-[12.5px] text-ink-soft">
+                    <input
+                      type="checkbox"
+                      checked={picked.includes(revision.id)}
+                      onChange={() => pick(revision.id)}
+                    />
+                    Compare
+                  </label>
+                  {revision.parentId ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => toggle({ revisionId: revision.id, against: 'before' })}
+                      aria-expanded={isOpen(comparing, revision.id, 'before')}
+                    >
+                      {isOpen(comparing, revision.id, 'before') ? 'Hide' : 'What changed'}
+                    </Button>
+                  ) : null}
+                  {!isHead && head ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => toggle({ revisionId: revision.id, against: 'current' })}
+                      aria-expanded={isOpen(comparing, revision.id, 'current')}
+                    >
+                      {isOpen(comparing, revision.id, 'current') ? 'Hide' : 'Compare with current'}
+                    </Button>
+                  ) : null}
                   {canRestore && !isHead ? (
                     <Button
                       size="sm"
@@ -120,36 +219,42 @@ export function HistoryPanel({
                 </div>
               </div>
 
-              {comparing === revision.id ? (
-                // FR-8.3 asks for a one-tap comparison against the head. The
-                // comparison view itself is phase 2 (FR-7, packages/compare);
-                // until then this names both sides honestly rather than
-                // pretending to show a difference it cannot compute yet.
-                <div className="mt-3 border border-rule bg-paper-sunk px-4 py-3 text-[13px] text-ink-soft">
-                  <p>
-                    Comparing this version with the current text. The side-by-side view arrives with
-                    the comparison engine.
-                  </p>
-                  <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-[12.5px]">
-                    <dt className="text-ink-faint">This version</dt>
-                    <dd className="tabular-nums">
-                      {revision.wordCount.toLocaleString('en-GB')} words ·{' '}
-                      <code className="text-[11.5px]">{revision.contentHash.slice(0, 12)}</code>
-                    </dd>
-                    <dt className="text-ink-faint">Current</dt>
-                    <dd className="tabular-nums">
-                      {(
-                        revisions.find((entry) => entry.id === head)?.wordCount ?? 0
-                      ).toLocaleString('en-GB')}{' '}
-                      words
-                    </dd>
-                  </dl>
-                </div>
+              {/* FR-8.3 and FR-7. Until 2026-10-16 this was a placeholder from
+                  phase 1 that only named two word counts: the comparison
+                  engine arrived in phase 2 and was never wired in here, so
+                  nobody could see what an accepted suggestion had changed. */}
+              {isOpen(comparing, revision.id, 'before') && revision.parentId ? (
+                <RevisionComparison
+                  baseId={revision.parentId}
+                  targetId={revision.id}
+                  leftLabel="Before"
+                  rightLabel="This version"
+                />
+              ) : null}
+              {isOpen(comparing, revision.id, 'current') && head ? (
+                <RevisionComparison
+                  baseId={revision.id}
+                  targetId={head}
+                  leftLabel="This version"
+                  rightLabel="Current"
+                />
               ) : null}
             </li>
           )
         })}
       </ol>
+
+      {history.hasNextPage ? (
+        <div className="mt-4">
+          <Button
+            size="sm"
+            disabled={history.isFetchingNextPage}
+            onClick={() => void history.fetchNextPage()}
+          >
+            {history.isFetchingNextPage ? 'Reading' : 'Show older versions'}
+          </Button>
+        </div>
+      ) : null}
 
       {restore.isError ? (
         <p role="alert" className="mt-3 text-[13px] text-crimson">
@@ -164,4 +269,22 @@ export function HistoryPanel({
       </p>
     </div>
   )
+}
+
+/** A version's name in a comparison: when it was written. */
+function labelOf(revision: Revision | undefined): string {
+  return revision
+    ? revision.createdAt.toLocaleString('en-GB', {
+        ...DAY_MONTH,
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'A version'
+}
+
+/** Which comparison is open: a version against the one before it, or against the current text. */
+type Comparing = { revisionId: string; against: 'before' | 'current' }
+
+function isOpen(comparing: Comparing | null, revisionId: string, against: Comparing['against']) {
+  return comparing?.revisionId === revisionId && comparing.against === against
 }

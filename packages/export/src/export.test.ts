@@ -124,6 +124,22 @@ describe('markdown', () => {
     expect(toMarkdown(manuscript())).toContain('Ask before reprinting.')
     expect(toMarkdown(manuscript({ rightsNote: null }))).not.toContain('Ask before')
   })
+
+  it('names the story a spin-off came from, and keeps a private one to itself (FR-10.4)', () => {
+    // An exported spin-off named only its own author until 2026-10-16.
+    const spinOff = manuscript({
+      spunOffFrom: { title: 'The Ship', author: 'J Rivera', url: 'https://example.test/s/ship' },
+    })
+    expect(toMarkdown(spinOff)).toContain(
+      'Spun off from “The Ship” by J Rivera — https://example.test/s/ship',
+    )
+    expect(toFountain(spinOff)).toContain('Spun off from “The Ship”')
+    const hidden = manuscript({
+      spunOffFrom: { title: 'a story that is no longer public', author: null, url: null },
+    })
+    expect(toMarkdown(hidden)).toContain('Spun off from “a story that is no longer public”*')
+    expect(toMarkdown(manuscript())).not.toContain('Spun off')
+  })
 })
 
 describe('fountain', () => {

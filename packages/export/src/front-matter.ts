@@ -21,6 +21,8 @@ export function frontMatterLines(manuscript: Manuscript): FrontMatterLine[] {
     { text: manuscript.title, emphasis: true },
     { text: `by ${manuscript.author}` },
   ]
+  const origin = originLine(manuscript)
+  if (origin) lines.push({ text: origin })
 
   if (manuscript.contributors.length > 0) {
     lines.push({ text: '' })
@@ -40,6 +42,19 @@ export function frontMatterLines(manuscript: Manuscript): FrontMatterLine[] {
   }
 
   return lines
+}
+
+/**
+ * FR-10.4 — where a spin-off came from, said under its author in every
+ * format. An exported spin-off named only its own author until the 2026-10-16
+ * spec review, so the words of the story it was taken from left without it.
+ */
+export function originLine(manuscript: Manuscript): string | null {
+  const origin = manuscript.spunOffFrom
+  if (!origin) return null
+  const by = origin.author ? ` by ${origin.author}` : ''
+  const at = origin.url ? ` — ${origin.url}` : ''
+  return `Spun off from “${origin.title}”${by}${at}`
 }
 
 /** The footer line. Every page of the PDF carries it; other formats carry it once. */

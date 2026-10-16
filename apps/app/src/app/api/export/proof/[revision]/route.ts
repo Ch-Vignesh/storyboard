@@ -8,6 +8,7 @@ import { loadStoryboard } from '@/lib/authz/guard'
 import { actorFrom } from '@/server/trpc/init'
 import { nameOf } from '@/lib/people'
 import { logger } from '@/lib/logger'
+import { mainDraftPlaces } from '@/server/places'
 
 const log = logger.child({ route: 'export/proof' })
 
@@ -47,6 +48,7 @@ export async function GET(_request: Request, { params }: Params): Promise<NextRe
         select: {
           title: true,
           order: true,
+          lineageId: true,
           chapter: {
             select: {
               title: true,
@@ -83,15 +85,26 @@ export async function GET(_request: Request, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: 'Not found.' }, { status: 404 })
   }
 
+  // The section's history where readers find it now: its lineage's place in
+  // the main draft, counted as the reader counts (`server/places.ts`). Built
+  // from this row's stored order until the 2026-10-16 spec review, which was
+  // wrong for a revision written in an alternate version, or a section moved.
+  const place = (await mainDraftPlaces(prisma, storyboard.id, [section.lineageId])).get(
+    section.lineageId,
+  )
+  const url = place
+    ? `${env.NEXT_PUBLIC_APP_URL}${place.path}/history`
+    : `${env.NEXT_PUBLIC_APP_URL}/s/${storyboard.slug}`
+
   const file = await exportAuthorshipProof({
     storyboardTitle: storyboard.title,
     author: nameOf(revision.author),
-    chapterTitle: section.chapter.title,
+    chapterTitle: place?.chapter ?? section.chapter.title,
     sectionTitle: section.title ?? `Section ${String(section.order + 1)}`,
     wordCount: revision.wordCount,
     contentHash: revision.contentHash,
     writtenAt: revision.createdAt,
-    url: `${env.NEXT_PUBLIC_APP_URL}/s/${storyboard.slug}/c/${String(section.chapter.order + 1)}/${String(section.order + 1)}/history`,
+    url,
     exportedAt: new Date(),
   })
 

@@ -3,7 +3,7 @@ import type { Metadata } from 'next'
 import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
-import { PASS_CHIPS, SUGGESTION_STATE_LABELS } from '@/lib/schemas/help'
+import { PASS_CHIPS, suggestionStateLabel, waitsOnClosedRequest } from '@/lib/schemas/help'
 import { ReportButton } from '@/components/report-button'
 import { caller } from '@/trpc/server'
 
@@ -33,6 +33,7 @@ export default async function SuggestionPage({ params }: Params) {
   const { suggestion, permissions } = data
   const name =
     suggestion.contributor.displayName ?? suggestion.contributor.username ?? 'a contributor'
+  const closed = waitsOnClosedRequest(suggestion.state, suggestion.request.state)
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
@@ -54,7 +55,8 @@ export default async function SuggestionPage({ params }: Params) {
           {name}&rsquo;s suggestion
         </h1>
         <p className="mt-1.5 text-[13px] text-ink-faint">
-          {suggestion.wordCount} words · {SUGGESTION_STATE_LABELS[suggestion.state]}
+          {suggestion.wordCount} words ·{' '}
+          {suggestionStateLabel(suggestion.state, suggestion.request.state)}
           {suggestion.submittedAt
             ? ` · sent ${suggestion.submittedAt.toLocaleDateString('en-GB', {
                 day: 'numeric',
@@ -70,11 +72,20 @@ export default async function SuggestionPage({ params }: Params) {
           </p>
         ) : null}
 
+        {/* FR-5.10 — closed without accepting, and still readable. */}
+        {closed ? (
+          <p className="mt-4 text-[13.5px] text-ink-soft">
+            The request was closed without accepting this. It stays here, and on {name}&rsquo;s
+            profile.
+          </p>
+        ) : null}
+
         {/* FR-6.7 — written against text that has since moved. */}
-        {comparison.isStale ? (
+        {comparison.isStale && !closed ? (
           <p className="mt-4 border-l-2 border-ochre bg-ochre-wash px-4 py-3 text-[13.5px] leading-relaxed text-ink">
-            This was written against an earlier version of the section, which has changed since.
-            Accepting it will replace the current text with this one.
+            {suggestion.request.kind === 'CONTINUE'
+              ? 'This was written to follow an earlier version of the section, which has changed since. Accepting it puts it after that version’s text, in place of what has been added since: the comparison below shows exactly what changes.'
+              : 'This was written against an earlier version of the section, which has changed since. Accepting it will replace the current text with this one.'}
           </p>
         ) : null}
 
@@ -91,8 +102,10 @@ export default async function SuggestionPage({ params }: Params) {
         state={suggestion.state}
         comparison={comparison}
         contributorName={name}
-        canDecide={permissions.canOpenRequest}
-        isStale={comparison.isStale}
+        // A closed request takes no decision until it is opened again.
+        canDecide={permissions.canOpenRequest && !closed}
+        continues={suggestion.request.kind === 'CONTINUE'}
+        headRevisionId={comparison.headRevisionId}
         backHref={`/s/${slug}/help/${requestPublicId}`}
       />
 

@@ -7,21 +7,6 @@ import Link from '@/components/link'
 import { NOTIFICATIONS } from '@/lib/schemas/notifications'
 import { useTRPC } from '@/trpc/client'
 
-/** Where a row points, from whatever its payload carries. */
-function hrefFor(payload: unknown): string | null {
-  const data = (payload ?? {}) as Record<string, unknown>
-  const slug = typeof data.slug === 'string' ? data.slug : null
-  const requestPublicId = typeof data.requestPublicId === 'string' ? data.requestPublicId : null
-  if (slug && requestPublicId) return `/s/${slug}/help/${requestPublicId}`
-  if (slug) return `/s/${slug}`
-  return null
-}
-
-function titleOf(payload: unknown): string | null {
-  const data = (payload ?? {}) as Record<string, unknown>
-  return typeof data.title === 'string' ? data.title : null
-}
-
 export function NotificationList() {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -72,8 +57,9 @@ export function NotificationList() {
       <ul className="divide-y divide-rule">
         {notifications.map((notification) => {
           const definition = NOTIFICATIONS[notification.type]
-          const href = hrefFor(notification.payload)
-          const title = titleOf(notification.payload)
+          // Resolved on the server, against what this person may read now.
+          const href = notification.path
+          const title = notification.title
           const isUnread = notification.readAt === null
 
           const body = (

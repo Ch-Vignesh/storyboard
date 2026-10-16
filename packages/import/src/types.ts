@@ -42,6 +42,14 @@ export type Block = {
   isPageBreak?: boolean
   /** A scene-break glyph line (FR-3.4); the text itself is not prose. */
   isSceneBreak?: boolean
+  /** A scene break read from a run of blank lines rather than a glyph (FR-3.4). */
+  fromBlankLines?: boolean
+  /**
+   * FR-3.7 — the text of footnotes referred to in this block, which go at the
+   * end of its section. They went at the end of the whole manuscript until
+   * the 2026-10-16 spec review.
+   */
+  footnotes?: string[]
 }
 
 /** A restricted ProseMirror node — the same vocabulary the editor allows. */
@@ -87,9 +95,21 @@ export const STRATEGY_COPY: Record<Strategy, string> = {
   none: 'guessed from the text',
 }
 
+/** FR-3.5 — why a section starts where it does, said per boundary. */
+export type SectionReason = 'start' | 'scene-break' | 'blank-lines' | 'length'
+
+export const SECTION_REASON_COPY: Record<SectionReason, string> = {
+  start: 'where the chapter starts',
+  'scene-break': 'from a scene break',
+  'blank-lines': 'from a run of blank lines',
+  length: 'guessed from the length',
+}
+
 export type ProposedSection = {
   /** First twelve words, for the outline (FR-3.5). */
   preview: string
+  /** Why it starts here (FR-3.5). */
+  reason: SectionReason
   wordCount: number
   /** Indices into the chapter's block list, both inclusive. */
   from: number
@@ -113,4 +133,11 @@ export type Proposal = {
   dropped: string[]
   /** Set when the file parsed but broke a limit in FR-3.1. */
   tooLong?: boolean
+  /**
+   * FR-3.2 — the opening words of every block, by index, so the review can
+   * put a boundary anywhere: move one, or split a section where the writer
+   * says rather than in the middle. Display only; commit reads the file
+   * again, so nothing here becomes text.
+   */
+  openings: string[]
 }

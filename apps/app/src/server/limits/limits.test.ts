@@ -45,6 +45,19 @@ describe.skipIf(!databaseUrl)('rate limits', () => {
     expect(fourth.retryAt).toBeInstanceOf(Date)
   })
 
+  /**
+   * 2026-10-16 spec review: the count and the insert were unlocked, so
+   * thirty at once all counted before any inserted, and all got through.
+   */
+  it('holds when every attempt arrives at once', async () => {
+    const k = bucket('parallel')
+    const verdicts = await Promise.all(
+      Array.from({ length: 12 }, () => consume(db, k, { limit: 5, windowMs: DAY_MS })),
+    )
+    expect(verdicts.filter((verdict) => verdict.ok)).toHaveLength(5)
+    expect(await used(db, k, DAY_MS)).toBe(5)
+  })
+
   it('does not record a hit when it refuses', async () => {
     const k = bucket('no-record')
     await consume(db, k, { limit: 1, windowMs: DAY_MS })

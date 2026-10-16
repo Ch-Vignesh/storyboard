@@ -725,6 +725,11 @@ Everything above this line was specified before anybody used the product. Phase
 10 is the first one that should not be, and writing a task list for it now would
 be guessing dressed up as planning.
 
+### From use, so far
+
+- [x] **Accepting "what comes next" erased the section's opening** (2026-10-16, the owner's first test of the loop between two accounts). Every accepted suggestion replaced the section (FR-8.1), right for a rewrite and wrong for a continuation. Now a continuation is added after the text, and the comparison before accepting shows that (decision 0038, `server/accepted-text.ts`). A router test reproduces the owner's case and fails on the code that was live.
+- [x] **History could not show what a version changed.** The panel still carried phase 1's placeholder ("the side-by-side view arrives with the comparison engine"). The engine arrived in phase 2 and was never wired in here; phase 2's notes did not catch it. Each version now has "What changed" (against the one before it) and "Compare with current", in the same comparison view the suggestion screen uses. Flow 2 now opens it in a browser.
+
 What it will be drawn from, when there is use to draw on:
 
 - The deferred table in `01-srs.md` section 8 — real-time collaboration,
@@ -738,6 +743,92 @@ What it will be drawn from, when there is use to draw on:
 The one thing to resist is building the deferred list because it is written
 down. Every item on it was deferred for a reason that is still in the table
 beside it.
+
+---
+
+## Spec review, 2026-10-16
+
+**Why.** The owner's first two-account test found the "continue" accept
+erasing an opening and a history screen that had never shown a comparison.
+Both were built to plan and both had been ticked off. So the plan itself was
+traced into the code, requirement by requirement, by five read-only reviews:
+FR-1 to 4, FR-5 to 8, FR-9 to 12, FR-13 to 15 with the permissions matrix
+cell by cell, and the architecture, NFRs, screens and placeholders. Every item
+below marked _verified_ was checked against the code afterwards; the rest are
+the reviews' findings, recorded with their file and line, to be confirmed
+when they are worked on.
+
+**What this says about the tracker.** "Everything else in the SRS is
+implemented" (Audit before deployment, below) was not true. Several phases
+ticked a requirement off when the server half existed and the screen did
+not: spin-offs, deleted-story restore, proof of authorship, lifting a
+suspension, the history comparison. From here, a requirement is done when a
+person can do it in the browser, and a browser flow does it.
+
+**Migrations from this review, for `pnpm db:deploy`:** `20261016120000_draft_base_revision`, `20261016130000_request_reopened_notification`, `20261016140000_private_spans`. All additive; the build guard refuses to deploy the code until they are applied.
+
+### A. Bugs that damage work or break a core flow
+
+Each gets a test that fails without the fix.
+
+- [x] **Formatting-only edits are thrown away and reported "Saved"** (_verified_). The no-change check compares a hash of the plain text (`section.ts:578-588`), so italics, a quote, a scene break or a heading count as no change, and the draft holding them is deleted. _Fixed 2026-10-16: the check compares the stored document, so a mark is a change; integrity test._
+- [x] **A quote holding anything but paragraphs fails every save** (_verified_). TipTap's blockquote allows any block (`tiptap.ts:97`); the stored schema allows paragraphs (`schema.ts:51-54`). Scene break inside a quote, Quote on a heading, or a pasted quoted heading: every save fails until undone. _Fixed 2026-10-16: the editor's quote holds paragraphs only, as the stored schema does._
+- [x] **A reopened draft is never saved** (_verified_). The editor counts changes from the draft it opened on, so Save now, blur and leaving all see nothing to save (`section-editor.tsx`). _Fixed 2026-10-16: an editor that opens on a draft starts with one unsaved change._
+- [x] **Typing on after "changed a moment ago" brings the overwrite back.** The 2026-10-15 fix compares the draft's time with the head's; a draft saved after the conflict looks current. The draft needs to record the revision it was written on (`SectionDraft`, a migration). _Fixed 2026-10-16: `SectionDraft.baseRevisionId` (migration `20261016120000_draft_base_revision`, existing drafts backfilled to the judgement they had); `section.get` decides `behind`; the editor never lets a draft save and a commit overlap; integrity test._
+- [x] **A stale suggestion cannot be sent again** (_verified_; caused by the 2026-10-15 fix that stopped sending to answered requests). Staleness only follows an accept, which resolves the request. FR-6.7's re-send must work on a resolved request, without spending the daily limit or the per-story quota. _Fixed 2026-10-16: a suggestion sent once may be sent again to a resolved request, spending neither the daily limit nor the quota; integrity test._
+- [x] **An accepted suggestion's page compares it with the text after it was accepted**, showing nothing changed (or a continuation added twice) and "Accepting it will replace the current text" (`compare.ts:238-263`). _Fixed 2026-10-16: an accepted one shows the text before it against the revision it made; integrity test._
+- [x] **"What changed" fails on an alternate version's first edit** (_verified_; the 2026-10-16 wiring). Its parent is the main draft's revision, in another section row, and `compare.revisions` refuses pairs across sections. Same lineage should be allowed. _Fixed 2026-10-16: pairs are matched on lineage within one story; integrity test._
+- [x] **A second accepted continuation is stacked after the first.** FR-6.8: written against the old head, it replaces the first unless rebased. A continuation should be added after the text it was written against (its base), not the current head (decision 0038 to amend). _Fixed 2026-10-16: added after its base revision; decision 0038 amended; integrity test._
+- [x] **Every permanent address in credit lines 404s** (_verified_): `/s/{slug}/c/{n}/{m}` has no page (`credit.ts:103`), though SRS §4 lists it. _Fixed 2026-10-16: `/s/{slug}/c/{n}` and `/s/{slug}/c/{n}/{m}` open the reader at the chapter, scrolled to the section. Also found: credit addresses and the reader's Edit and History links were built from stored `order` values, not reading positions, and a joined-away section kept its old address; now positions, and a credit follows a join to the section that took its words. Integrity test, flow 4._
+- [x] **Most notifications lead nowhere** (_verified_). Received, accepted, passed, stale, idea helped, request closed and contribution removed store only ids; the in-app list and emails need the story's address and the request's (`notification-list.tsx:11-18`, `digests.ts:62-71`). The author's "a suggestion arrived" email links to `/notifications`, where the row has no link and no title. _Fixed 2026-10-16: `server/notification-targets.ts` works out each row's link and title when it is read, for the list and the emails alike, against what the recipient may read now, so old rows are mended and a story made private names nothing. Integrity tests, a digest test, flow 4._
+- [x] **Every rate limit can be beaten in parallel** (_verified_). `consumePostgres` counts, then inserts, unlocked (`limits/index.ts:72-92`): 30 simultaneous creates make about 30 stories against 5. _Fixed 2026-10-16: a transaction-scoped advisory lock per key before the count (8 of 12 got through against 5 before; now 5). The Redis limiter adds before it counts and takes the hit back when over. Limits tests._
+- [x] **A finished story's requests can be reopened or opened**, server-side, and then appear in browse (`request.ts:72,396`, `browse.ts:27`). _Fixed 2026-10-16: `assertNotFinished` in `request.create`, `request.reopen` and a re-send; browse excludes finished stories; the request page offers no reopen. Integrity test._
+- [x] **Promoting a version strands its open requests** on the demoted draft; accepting from one writes into the alternate under "Accept into the main draft" (`version.ts:156-169`). _Fixed 2026-10-16: promotion moves each open request to the same lineage in the new main draft, closing (and telling) those with nowhere to go; a request can no longer be opened or reopened on an alternate; deleting an alternate closes requests on its sections. Integrity test._
+- [x] **Deleted prose survives in the comparison cache** (_verified_): `DiffCache` stores paragraph text and nothing deletes it (`compare.ts:84`), so the purge (FR-2.6) leaves the words behind. _Fixed 2026-10-16: the purge deletes every cached comparison of the revisions it removes. Purge test._
+- [x] **Restore only ever turns credits off**: restoring an accepted text back leaves its credit not live (`section.ts:737-750`); and credit liveness is judged per section row, not per main draft. _Fixed 2026-10-16: liveness is judged by lineage in the main draft only, and restoring an accepted text back turns its credit on again. Also found: the history listed revisions by section row, so an alternate version's history was empty and a promoted draft's showed only its own edits; it now follows the chain the current text stands on (decision 0014), and restore accepts any version on it. Integrity tests._
+- [x] **Two accepts at once**: the second gets a serialization failure, shown as a server fault rather than FR-6.6's sentence; and "accept anyway" is a plain flag, not tied to the head the author saw (`suggestion.ts`, `decision-panel.tsx`). _Fixed 2026-10-16: a serialization failure is FR-6.6's sentence, and accepting a stale one names the head the author saw (`acknowledgedHeadId`); integrity tests._
+- [x] **Closing a request by hand** notifies nobody and leaves its waiting suggestions "waiting" for good, holding the helpers' quota (FR-5.10: "marked as not accepted"). _Fixed 2026-10-16: goes through `closeRequest`, which tells everyone with a draft or a suggestion waiting; what was waiting reads "not accepted" and holds no quota, but keeps its state, so reopening puts it back in front of the author. Integrity test, unit test._
+- [x] **Drafts and withdrawn suggestions count as answers**: a request someone only opened a draft on shows "1 suggestion", leaves "No answers yet", and is never nudged (`browse.ts`, `request.ts:256`, `digests.ts:421`). _Fixed 2026-10-16: `server/answers.ts` defines an answer (sent, not withdrawn) for browse, the request lists and the quiet nudge. Integrity test._
+- [x] **Inherited spin-off credits count as the contributor's own**: double counts on the profile, and credit lines naming the spin-off's owner (`profile.ts`). _Fixed 2026-10-16: the profile and credit lines use a contributor's own credits; the spin-off's contributors page still names them. Counts are counted, not taken from the page of 100. Profile test._
+- [x] **Reopening a request** sends "the section you helped with changed" to everyone, drafts and the accepted writer included (`request.ts:434-446`). _Fixed 2026-10-16: a fourteenth notification type, `REQUEST_REOPENED` (migration `20261016130000_request_reopened_notification`), to everyone who ever sent something and nobody who only drafted; reopening happens once however many clicks. Integrity test._
+- [x] Smaller: a duplicate report spends a daily report, and two at once is a server fault (`report.ts:47-54`); the history says "private for part of its life" past 50 revisions (`section.ts:657`); profile counts stop at 100; the admin gauge counts OPEN only; `?version=` with a bad id is a 500 on export; a section of exactly 150 words takes a continue request (FR-5.7); two links to a `/dashboard` that does not exist; the word count opens at 0 (_verified_, fixed 2026-10-16); the scene-break shortcut is not bound (_verified_, fixed 2026-10-16: Mod-Enter); a lone `#` in Markdown becomes a chapter; quotes vanish when importing a screenplay; a guest is offered "Report", and on `/browse` sees Settings and Sign out but no Sign in. Found while fixing these: a session ended by a password reset that opens `/settings` is sent to sign in, as it should be, but the page's prefetch fails first and the server logs it as an error (flow 11). _All fixed 2026-10-16, each with a test: a duplicate report is free and two at once are one; the history notice compares visible versions with the chain; profile counts are counts; the admin gauge counts open as OPEN and ANSWERED, answered as RESOLVED, targets in `SEED_TARGETS`; a stray `?version=` is a 404; exactly 150 words takes no continue request; the dashboard links go to `/`; a lone `#` is a scene break; Final Draft character references (`&#8220;`) are decoded, which is what the "vanishing quotes" were, with an entity-bomb test alongside; a guest is offered "Sign in to report" and, on `/browse`, Sign in and Create an account; and the account pages settle the session before prefetching, so an ended session no longer logs a server error._
+- [x] **Two not-found messages** ("That storyboard does not exist." against "That story does not exist.") tell hidden from absent, and put a banned word on screen (`lib/authz/index.ts:165`, `guard.ts:67`). _Fixed 2026-10-16: one constant, `STORY_NOT_FOUND`, for both. Matrix test._
+
+### B. Built on the server, never connected
+
+Small each; a screen or a link.
+
+- [x] Undo a story deletion within the 30 days (`storyboard.restore`, no caller; deleted stories vanish from the dashboard; restore unfinishes a finished story). _Done 2026-10-16: the dashboard lists deleted stories with "Bring it back" and the date each goes for good (`storyboard.listDeleted`); restore brings a finished story back finished; deleting now closes its requests and tells their helpers. Integrity test._
+- [x] Lift a suspension (`admin.setUserStatus`, `admin.user`, no screen). _Done 2026-10-16: "Suspended accounts" on the moderation screen (`admin.suspended`), each with "Lift the suspension". Flow 8._
+- [x] Start a spin-off: the only button is on `/lineage`, which nothing links to for a story never spun off. _Done 2026-10-16: "Your own version" in the reader's header leads to it. Flow 6 now follows the link instead of typing the address._
+- [x] Proof of authorship (FR-13.6): the route exists, nothing links to it, and no screen now shows a hash. _Done 2026-10-16: each version in the history shows its fingerprint, and its writer gets "Proof that you wrote this (PDF)"; the proof's address is the section's place in the main draft (`server/places.ts`), not its stored order. Flow 2 fetches the PDF._
+- [x] The unread count beside Notifications (`notification.unreadCount`); a resend button after sign-up (`auth.resendVerification`); naming sections (`section.rename`); discarding a draft (`section.discardDraft`); resuming an analysed import after a reload (`import.getProposal`); "already reported" (`report.mine`); a helper's own list (`suggestion.listMine`). _Done 2026-10-16: the count is in the header; "Send it again" after sign-up; sections are named on the contents screen (flow 7); a draft can be thrown away, from the editor holding it (which stands its saves down first) or beside an overtaken one; an analysed import survives a reload (`/import?job=`, flow 7); "You have already reported this" replaces the form (flow 8); "Your suggestions" lists everything sent (flow 3)._
+- [x] The rights note is stored and exported but never shown, and spin-offs do not copy it (FR-14.5). _Done 2026-10-16: shown on the reader as the author wrote it; a spin-off quotes its original's note in its lineage banner rather than copying it into its own author's field._
+- [x] A story's genres cannot be changed after creation (the server accepts them; the form never sends them). _Done 2026-10-16: genre picker in story settings._
+- [x] "An idea arrived" is never sent (`IDEA_RECEIVED`; `idea.post` notifies nobody). _Done 2026-10-16: `idea.post` notifies the authors, never the poster (`server/notify-authors.ts`). Integrity test._
+- [x] The composer (screen 9) shows neither the section's text nor the pre-context, so a continuation is written blind to the opening it follows. _Done 2026-10-16: "The story so far" and the section ("What yours will follow" for a continuation, open by default) above the composer. Flow 3._
+- [x] History (FR-8.3, 8.4, 8.6): "restored from 12 Sep", more than 50 versions, compare any two, chips on restore. _Done 2026-10-16: "restored from 12 Sep", "Show older versions" (paged), and "Compare" on any two. FR-8.6's optional chips on restore are not built: there is nowhere yet to keep or show a reason. Integrity test, flow 2._
+- [x] An exported spin-off never names the story or author it came from. _Done 2026-10-16: every format says "Spun off from …" under the author, naming a private original only as such. Export test._
+
+### C. In the plan, never built
+
+Larger. Each wants a decision on whether, and when.
+
+- [x] **Co-authorship** (SRS 3.2's whole co-author column, FR-9.1's COAUTHOR credit, two notification types, architecture §6's invite / accept / remove). Nothing creates a `Collaborator`, so no one can be a co-author; the private-story copy still promises "the people you invite". Decision needed: build it, or take the promises out. _Built 2026-10-16 (owner: build it): `coauthor` router (invite by username, accept, decline, take back, remove, leave; three at most, invitations included; ten invitations a day), the COAUTHOR credit on accepting, both notifications with links, "Co-authors" for a story's authors, "Invitations" with a dashboard banner. Integrity test, flow 12 (a private story, two accounts, the co-author writes)._
+- [x] **Screenplay writing in the editor** (FR-4.2): no way to make a scene heading, character or dialogue line; they arrive only through import, and a new screenplay is written as prose. _Built 2026-10-16 (owner): decision 0040. An Element menu, and Enter, Tab, Shift-Tab and Escape, in the editor and the suggestion composer; the reader sets any script in Courier Prime. Flow 13._
+- [x] **The quiet-request nudge's two actions** (FR-12.4): widening the word bounds has no procedure, and the digest takes only requests from the last 7 days, so a nudged request can never be in it. _Owner, 2026-10-16: not built now; the email says what is true instead (still open, listed under "No answers yet", close and ask again for a wider range). Digest test._
+- [x] **Alternate version against the main draft** (FR-7.5's third case): a list of sections, no comparison view. _Built 2026-10-16 (owner): each rewritten section opens into the same comparison (`components/revision-comparison.tsx`). Flow 6._
+- [x] **Import review** (FR-3.2, 3.4, 3.5, 3.7): boundaries cannot be moved, a split always cuts the middle, confidence is one phrase for the whole manuscript, blank-line runs are not scene breaks, `.docx` footnotes land at the end of the manuscript. _Built 2026-10-16 (owner): split at a chosen paragraph, move where a section starts, the reason beside every boundary and the rule beside every chapter (`Proposal.openings`, `SECTION_REASON_COPY`); a longer run of blank lines than usual is a scene break; footnotes go at the end of their section. Import package tests, an import router test, flow 7._
+- [ ] **The contributors strip on the reader** (FR-9.2), **request cards in the margin** with a way to the right chapter (FR-11.5), **a record of version promotion** (FR-10.2), **the full lineage** (FR-10.5), **"closing soon"** in browse (FR-11.3), the example label on every seeded surface (FR-15.3), open rewrite requests in the seeded library (FR-15.4), admin shortcuts and feature flags anything reads (FR-13.7, FR-15.5).
+- [ ] **NFRs**: the reader fetches its prose in the browser, so first paint is the chrome (NFR-1, never measured on slow 3G); logs are kept nowhere (NFR-7); the scheduled jobs and backups stop silently after 60 days without a commit (NFR-8); the vocabulary linter does not read server copy, emails, exports or import.
+
+### D. Where the plan needs the owner
+
+- [x] The weekly digest runs on Mondays; FR-12.3 says Sunday, and the nudge email says Sunday. _Done 2026-10-16 (owner: Sunday): `cron.yml` runs it at 09:00 on Sundays; `docs/05-deployment.md` says so._
+- [x] A story made public, private, then public again shows what was written while private (decision 0007 against FR-2.7). _Done 2026-10-16 (owner: keep it private): decision 0039, `PrivateSpan` (migration `20261016140000_private_spans`), one rule in `lib/authz` for revisions, suggestions and the profile, and the reader names each stretch. Also found and closed: `compare.suggestionAgainstHead` never applied decision 0007 to suggestions. Unit and integrity tests._
+- [x] Imports do not count toward five new stories a day (FR-13.3). _Done 2026-10-16, following FR-13.3 as written: a committed import spends one of the five, and starting one says so first if the day is spent. Import test._
+- [x] "Reader × export" is in the code's matrix and not in the SRS; versions are `?version=`, not `?v=`. Both want recording. _Done 2026-10-16: the row and `?version=` are recorded in `01-srs.md` §3.2 and §4._
+- [x] "A suggestion arrived" is emailed immediately; FR-12.3 keeps immediate for decisions on your own work. _Done 2026-10-16, following FR-12.3 as written: hourly._
 
 ---
 
@@ -766,6 +857,10 @@ later was not.
    address has to be resolved against wherever that lineage sits in the main
    draft now. One that no longer appears there gets a line with no address
    rather than a wrong one.
+
+_Corrected 2026-10-16: the next sentence was not true. The spec review above
+found co-authorship, screenplay editing and several screens never built, and
+others built on the server only._
 
 Everything else in the SRS is implemented. Forty-four requirement numbers are
 never written down in the code, which is not the same as being unbuilt — most

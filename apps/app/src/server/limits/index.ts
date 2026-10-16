@@ -41,12 +41,8 @@ export const LONGEST_WINDOW_MS = DAY_MS
 export type { Limit, Verdict } from './types'
 
 /**
- * Counts one action against a key, and records it if it is allowed.
- *
- * The count and the insert are not atomic, so two requests arriving together
- * can both see `limit - 1`. The worst case is one over the limit, which for
- * "ten suggestions a day" is not the kind of wrong that matters — and it is the
- * same behaviour a Redis sliding window gives, for the same reason.
+ * Counts one action against a key, and records it if it is allowed. Atomic
+ * per key: see `consumePostgres`.
  */
 export async function consume(db: Db, key: string, limit: Limit): Promise<Verdict> {
   // Decision 0017's revisit (phase 9). Configuration chooses the store, not
@@ -69,10 +65,37 @@ export async function consume(db: Db, key: string, limit: Limit): Promise<Verdic
   return consumePostgres(db, key, limit)
 }
 
-async function consumePostgres(db: Db, key: string, { limit, windowMs }: Limit): Promise<Verdict> {
+/**
+ * The count and the insert, one key at a time. They were two unlocked
+ * statements, said to go "one over" at worst; in the 2026-10-16 spec review
+ * thirty story creations sent at once made about thirty stories against a
+ * limit of five, since every one counted before any had inserted.
+ *
+ * A transaction-scoped advisory lock on the key, taken before the count: a
+ * second caller waits at the lock, and its count, a later statement under
+ * read committed, sees the first one's row. Transaction-scoped so a pooled
+ * connection cannot keep it, and per key so unrelated limits never wait on
+ * each other. A caller already in a transaction takes it in theirs.
+ */
+async function consumePostgres(db: Db, key: string, limit: Limit): Promise<Verdict> {
+  if ('$transaction' in db) {
+    return db.$transaction((tx) => countAndRecord(tx, key, limit), LOCK_WAIT)
+  }
+  return countAndRecord(db, key, limit)
+}
+
+/** Under load, callers queue at the lock; each holds it for two statements. */
+const LOCK_WAIT = { maxWait: 10_000, timeout: 10_000 }
+
+async function countAndRecord(
+  tx: Prisma.TransactionClient,
+  key: string,
+  { limit, windowMs }: Limit,
+): Promise<Verdict> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`
   const since = new Date(Date.now() - windowMs)
 
-  const hits = await db.rateLimitHit.findMany({
+  const hits = await tx.rateLimitHit.findMany({
     where: { key, at: { gte: since } },
     orderBy: { at: 'asc' },
     select: { at: true },
@@ -88,7 +111,7 @@ async function consumePostgres(db: Db, key: string, { limit, windowMs }: Limit):
     }
   }
 
-  await db.rateLimitHit.create({ data: { key } })
+  await tx.rateLimitHit.create({ data: { key } })
   return { ok: true, remaining: limit - hits.length - 1, retryAt: null }
 }
 
@@ -155,6 +178,7 @@ export const key = {
   importsStarted: (userId: string) => `import:create:${userId}`,
   spinOff: (userId: string, storyboardId: string) => `spinoff:${storyboardId}:${userId}`,
   reportsMade: (userId: string) => `report:create:${userId}`,
+  coauthorInvites: (userId: string) => `coauthor:invite:${userId}`,
   // FR-1.4's surfaces have no signed-in person to key on, so they key on the
   // address being used. An address is not an identity, but it is what the
   // action is about, and it is what somebody abusing it has to keep changing.

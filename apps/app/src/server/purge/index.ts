@@ -85,6 +85,21 @@ async function purgeOne(db: PrismaClient, storyboardId: string): Promise<void> {
       // NFR-3 hatch permits a DELETE on Revision, never an UPDATE.
 
       await tx.sectionDraft.deleteMany({ where: { sectionId: { in: sectionIds } } })
+      // Every comparison of these revisions. A cached comparison holds the
+      // paragraphs it compared, so the purge left the deleted prose behind in
+      // the cache until the 2026-10-16 spec review. Keyed `base:target`.
+      const revisionIds = (
+        await tx.revision.findMany({
+          where: { sectionId: { in: sectionIds } },
+          select: { id: true },
+        })
+      ).map((revision) => revision.id)
+      if (revisionIds.length > 0) {
+        await tx.$executeRaw`
+          DELETE FROM "DiffCache"
+          WHERE split_part("key", ':', 1) = ANY(${revisionIds})
+             OR split_part("key", ':', 2) = ANY(${revisionIds})`
+      }
       // Suggestions and revisions in ONE statement. They point at each other:
       // `Suggestion.baseRevisionId` is RESTRICT, so the revisions cannot go
       // first, and `Revision.suggestionId` is SET NULL, so if the suggestions

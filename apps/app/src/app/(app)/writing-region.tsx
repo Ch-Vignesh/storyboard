@@ -1,8 +1,9 @@
 'use client'
 
 import { Button } from '@storyboard/ui/components/button'
-import { useSuspenseQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import Link from '@/components/link'
+import { useRouter } from 'next/navigation'
 
 import { STORY_TYPE_LABELS } from '@/lib/schemas/storyboard'
 import { useTRPC } from '@/trpc/client'
@@ -71,6 +72,66 @@ export function WritingRegion() {
           ))}
         </ul>
       )}
+
+      <RecentlyDeleted />
     </section>
+  )
+}
+
+/**
+ * FR-2.6 — a deleted story can be brought back for thirty days. Until the
+ * 2026-10-16 spec review it vanished from here the moment it was deleted, and
+ * nothing anywhere could bring it back. Shown only when there is one.
+ */
+function RecentlyDeleted() {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const router = useRouter()
+  const deleted = useQuery(trpc.storyboard.listDeleted.queryOptions())
+  const restore = useMutation(
+    trpc.storyboard.restore.mutationOptions({
+      onSuccess: async ({ slug }) => {
+        await queryClient.invalidateQueries({ queryKey: trpc.storyboard.listDeleted.queryKey() })
+        await queryClient.invalidateQueries({ queryKey: trpc.storyboard.listMine.queryKey() })
+        router.push(`/s/${slug}`)
+      },
+    }),
+  )
+
+  if (!deleted.data || deleted.data.length === 0) return null
+
+  return (
+    <div className="mt-6">
+      <h3 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
+        Deleted, and still yours to bring back
+      </h3>
+      <ul className="mt-2 divide-y divide-rule border-y border-rule">
+        {deleted.data.map((story) => (
+          <li key={story.id} className="flex items-baseline justify-between gap-6 py-3">
+            <span className="min-w-0">
+              <span className="block truncate font-manuscript text-[17px] text-ink-soft">
+                {story.title}
+              </span>
+              <span className="mt-0.5 block text-[12.5px] text-ink-faint">
+                Removed for good after{' '}
+                {story.goneAfter.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}
+              </span>
+            </span>
+            <Button
+              size="sm"
+              disabled={restore.isPending}
+              onClick={() => restore.mutate({ storyboardId: story.id })}
+            >
+              Bring it back
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {restore.error ? (
+        <p role="alert" className="mt-2 text-[13px] text-crimson">
+          {restore.error.message}
+        </p>
+      ) : null}
+    </div>
   )
 }

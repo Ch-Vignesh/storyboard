@@ -10,6 +10,7 @@ import { useTRPC } from '@/trpc/client'
 
 import { FlagsPanel } from './flags-panel'
 import { SeededPanel } from './seeded-panel'
+import { SuspendedPanel } from './suspended-panel'
 
 const CATEGORY_LABELS = Object.fromEntries(
   REPORT_CATEGORIES.map((category) => [category.value, category.label]),
@@ -173,6 +174,7 @@ export function ReportQueue() {
         ) : null}
       </section>
 
+      <SuspendedPanel />
       <SeededPanel />
       <FlagsPanel />
     </>

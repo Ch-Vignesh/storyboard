@@ -3,6 +3,7 @@ import { adminRouter } from './admin'
 import { authRouter } from './auth'
 import { browseRouter } from './browse'
 import { chapterRouter } from './chapter'
+import { coauthorRouter } from './coauthor'
 import { compareRouter } from './compare'
 import { creditRouter } from './credit'
 import { ideaRouter } from './idea'
@@ -39,6 +40,7 @@ export const appRouter = createTRPCRouter({
   version: versionRouter,
   spinOff: spinOffRouter,
   notification: notificationRouter,
+  coauthor: coauthorRouter,
 })
 
 export type AppRouter = typeof appRouter

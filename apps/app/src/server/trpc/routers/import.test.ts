@@ -129,4 +129,82 @@ describe.skipIf(!databaseUrl)('committing an import (FR-3.2, phase 12 audit)', (
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
     expect(await db.storyboard.count({ where: { ownerId: userId } })).toBe(before + 1)
   })
+
+  /**
+   * FR-3.7 — "footnote text, at the end of its section". Notes landed at the
+   * end of the whole manuscript until the 2026-10-16 spec review.
+   */
+  it('puts a footnote at the end of the section that refers to it', async () => {
+    const { Document, FootnoteReferenceRun, HeadingLevel, Packer, Paragraph, TextRun } =
+      await import('docx')
+    const file = await Packer.toBuffer(
+      new Document({
+        footnotes: { 1: { children: [new Paragraph('A note about the harbour.')] } },
+        sections: [
+          {
+            children: [
+              new Paragraph({ text: 'Chapter one', heading: HeadingLevel.HEADING_1 }),
+              new Paragraph({
+                children: [new TextRun('The harbour was empty.'), new FootnoteReferenceRun(1)],
+              }),
+              new Paragraph('A second paragraph in the first chapter.'),
+              new Paragraph({ text: 'Chapter two', heading: HeadingLevel.HEADING_1 }),
+              new Paragraph('The second chapter begins here.'),
+            ],
+          },
+        ],
+      }),
+    )
+    const { putObject } = await import('@/server/storage')
+    const { jobId, upload } = await call.createUpload({
+      fileName: 'notes.docx',
+      byteSize: file.byteLength,
+    })
+    await putObject(upload.key, file)
+    const proposal = await call.analyse({ jobId })
+    const outline = proposal.chapters.map((chapter) => ({
+      title: chapter.title,
+      sections: chapter.sections.map((section) => ({ from: section.from, to: section.to })),
+    }))
+
+    const { slug } = await call.commit({ ...settings(), jobId, outline })
+
+    const sections = await db.section.findMany({
+      where: { chapter: { version: { storyboard: { slug } } } },
+      orderBy: [{ chapter: { order: 'asc' } }, { order: 'asc' }],
+      select: { currentRevision: { select: { contentText: true } } },
+    })
+    expect(sections[0]?.currentRevision?.contentText).toMatch(/A note about the harbour\.$/u)
+    expect(sections.at(-1)?.currentRevision?.contentText).not.toContain('A note')
+  })
+
+  /**
+   * FR-13.3 — five stories a day, and an import is a story. Imports counted
+   * only against their own allowance until the 2026-10-16 spec review.
+   * Last: it fills the day.
+   */
+  it('counts an import against the day’s five stories', async () => {
+    const { key } = await import('@/server/limits')
+    const { DAILY_LIMITS } = await import('@/lib/schemas/constants')
+    const jobId = await anUpload()
+    const proposal = await call.analyse({ jobId })
+    const outline = proposal.chapters.map((chapter) => ({
+      title: chapter.title,
+      sections: chapter.sections.map((section) => ({ from: section.from, to: section.to })),
+    }))
+
+    const spent = await db.rateLimitHit.count({ where: { key: key.storyboardsCreated(userId) } })
+    await db.rateLimitHit.createMany({
+      data: Array.from({ length: DAILY_LIMITS.storyboardsCreated - spent }, () => ({
+        key: key.storyboardsCreated(userId),
+      })),
+    })
+
+    await expect(call.commit({ ...settings(), jobId, outline })).rejects.toThrow(
+      /an import is one/u,
+    )
+    await expect(
+      call.createUpload({ fileName: 'harbour.txt', byteSize: Buffer.byteLength(MANUSCRIPT) }),
+    ).rejects.toThrow(/an import is a story/u)
+  })
 })

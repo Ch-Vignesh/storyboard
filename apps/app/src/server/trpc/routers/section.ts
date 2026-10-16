@@ -17,7 +17,7 @@ import {
   type StoryboardDoc,
 } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
-import { TITLE_MAX_CHARS } from '@/lib/schemas/constants'
+import { HISTORY, TITLE_MAX_CHARS } from '@/lib/schemas/constants'
 import { logger } from '@/lib/logger'
 
 import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
@@ -48,7 +48,11 @@ export const sectionRouter = createTRPCRouter({
     .input(z.object({ sectionId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
-      const { sectionId, permissions } = await loadSection(ctx.db, actor, input.sectionId)
+      const { sectionId, storyboardId, permissions } = await loadSection(
+        ctx.db,
+        actor,
+        input.sectionId,
+      )
 
       const section = await ctx.db.section.findUniqueOrThrow({
         where: { id: sectionId },
@@ -75,12 +79,41 @@ export const sectionRouter = createTRPCRouter({
         },
       })
 
-      const draft = actor
+      const saved = actor
         ? await ctx.db.sectionDraft.findUnique({
             where: { sectionId_userId: { sectionId, userId: actor.id } },
-            select: { contentJson: true, wordCount: true, updatedAt: true },
+            select: { contentJson: true, wordCount: true, updatedAt: true, baseRevisionId: true },
           })
         : null
+
+      // A draft written on a revision that is no longer the head was
+      // overtaken: somebody saved this section after it was started. The
+      // editor must not open it over their text. Judged by the revision it
+      // records, not by time: a draft saved after a "changed a moment ago"
+      // refusal is newer than the head and still written on the old text
+      // (2026-10-16 spec review). One that says nothing the head does not
+      // is no draft at all.
+      let draft = null
+      if (saved) {
+        const headId = section.currentRevision?.id ?? null
+        const behind = saved.baseRevisionId !== headId
+        const flavour = behind ? await flavourOf(ctx.db, storyboardId) : null
+        const redundant =
+          flavour !== null &&
+          section.currentRevision !== null &&
+          sameDoc(
+            parseDoc(saved.contentJson, flavour),
+            parseDoc(section.currentRevision.contentJson, flavour),
+          )
+        if (!redundant) {
+          draft = {
+            contentJson: saved.contentJson,
+            wordCount: saved.wordCount,
+            updatedAt: saved.updatedAt,
+            behind,
+          }
+        }
+      }
 
       return { section, draft, permissions }
     }),
@@ -189,7 +222,8 @@ export const sectionRouter = createTRPCRouter({
       )
       return ctx.db.section.update({
         where: { id: sectionId },
-        data: { title: input.title ?? null },
+        // Cleared is untitled ("Section 2"), not a title of nothing.
+        data: { title: input.title === '' ? null : (input.title ?? null) },
         select: { id: true, title: true },
       })
     }),
@@ -497,7 +531,16 @@ export const sectionRouter = createTRPCRouter({
    * can forget.
    */
   saveDraft: activeProcedure
-    .input(z.object({ sectionId: z.string().min(1), contentJson: docInput }))
+    .input(
+      z.object({
+        sectionId: z.string().min(1),
+        contentJson: docInput,
+        // The revision the editor's text is written on. Optional only for a
+        // tab opened before this was asked for; without it the draft counts
+        // as overtaken, which shows it beside the text rather than over it.
+        baseRevisionId: z.string().min(1).nullish(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, storyboardId } = await loadSection(ctx.db, actor, input.sectionId)
@@ -507,6 +550,8 @@ export const sectionRouter = createTRPCRouter({
       const derived = derive(doc)
       const userId = ctx.session.user.id
 
+      const baseRevisionId = input.baseRevisionId ?? null
+
       const draft = await ctx.db.sectionDraft.upsert({
         where: { sectionId_userId: { sectionId, userId } },
         create: {
@@ -515,11 +560,13 @@ export const sectionRouter = createTRPCRouter({
           contentJson: doc,
           contentText: derived.contentText,
           wordCount: derived.wordCount,
+          baseRevisionId,
         },
         update: {
           contentJson: doc,
           contentText: derived.contentText,
           wordCount: derived.wordCount,
+          baseRevisionId,
         },
         select: { wordCount: true, updatedAt: true },
       })
@@ -576,13 +623,18 @@ export const sectionRouter = createTRPCRouter({
       const userId = ctx.session.user.id
 
       // Nothing changed: do not grow the chain with an identical revision.
+      // The documents are compared, not their text. `contentHash` is of the
+      // plain text, so an italic, a quote, a scene break or a heading added to
+      // the same words used to count as nothing changed: the save was skipped
+      // and the draft holding the formatting deleted, while the editor said
+      // "Saved" (2026-10-16 spec review).
       const head = currentRevisionId
         ? await ctx.db.revision.findUnique({
             where: { id: currentRevisionId },
-            select: { contentHash: true },
+            select: { contentJson: true },
           })
         : null
-      if (head?.contentHash === derived.contentHash) {
+      if (head && sameDoc(parseDoc(head.contentJson, flavour), doc)) {
         await ctx.db.sectionDraft.deleteMany({ where: { sectionId, userId } })
         return { revisionId: currentRevisionId, unchanged: true as const }
       }
@@ -625,21 +677,32 @@ export const sectionRouter = createTRPCRouter({
     .input(
       z.object({
         sectionId: z.string().min(1),
-        take: z.number().int().min(1).max(200).default(50),
+        take: z.number().int().min(1).max(HISTORY.pageMax).default(HISTORY.pageDefault),
+        /**
+         * How many of the newest to skip: the next page of a long history
+         * (FR-8.3). Only the newest fifty could be seen until the 2026-10-16
+         * spec review.
+         */
+        cursor: z.number().int().min(0).nullish(),
       }),
     )
     .query(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
-      const { sectionId, resource, currentRevisionId } = await loadSection(
-        ctx.db,
-        actor,
-        input.sectionId,
-      )
+      const { resource, currentRevisionId } = await loadSection(ctx.db, actor, input.sectionId)
+      const skip = input.cursor ?? 0
 
-      const visibility = revisionVisibilityWhere(actor, resource)
+      // The chain the current text stands on, not this row's revisions: an
+      // alternate version's history begins in the main draft, and after a
+      // promotion the main draft's history is mostly another row's (decision
+      // 0014). Listed by row until the 2026-10-16 spec review, so a promoted
+      // draft showed only the edits made since it was copied.
+      const chain = currentRevisionId ? await ancestorIds(ctx.db, currentRevisionId) : []
+      const where = { id: { in: chain }, ...revisionVisibilityWhere(actor, resource) }
+      const visible = await ctx.db.revision.count({ where })
       const revisions = await ctx.db.revision.findMany({
-        where: { sectionId, ...visibility },
+        where,
         orderBy: { createdAt: 'desc' },
+        skip,
         take: input.take,
         select: {
           id: true,
@@ -649,18 +712,24 @@ export const sectionRouter = createTRPCRouter({
           contentHash: true,
           parentId: true,
           restoredFromId: true,
+          // FR-8.4 — "restored from 12 Sep": the date of the version copied.
+          restoredFrom: { select: { createdAt: true } },
           author: { select: { id: true, username: true, displayName: true } },
           acceptedBy: { select: { id: true, username: true, displayName: true } },
         },
       })
 
-      const total = await ctx.db.revision.count({ where: { sectionId } })
-
       return {
         revisions,
         currentRevisionId,
-        /** True when decision 0007 is hiding the start of the chain. */
-        truncatedByVisibility: !isAuthor(actor, resource) && total > revisions.length,
+        /**
+         * True when decision 0007 is hiding the start of the chain. It compared
+         * the whole chain with one page of it, so any section past fifty
+         * versions said it had been private for part of its life.
+         */
+        truncatedByVisibility: !isAuthor(actor, resource) && visible < chain.length,
+        /** Where the next page starts, or null when this was the last. */
+        nextCursor: visible > skip + revisions.length ? skip + revisions.length : null,
       }
     }),
 
@@ -678,25 +747,30 @@ export const sectionRouter = createTRPCRouter({
     .input(z.object({ sectionId: z.string().min(1), revisionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
-      const { sectionId, currentRevisionId } = await loadSection(
+      const { sectionId, storyboardId, currentRevisionId } = await loadSection(
         ctx.db,
         actor,
         input.sectionId,
         'revision:restore',
       )
 
-      // The revision must belong to this section; an id from elsewhere would
-      // otherwise graft another storyboard's prose into this one.
-      const source = await ctx.db.revision.findFirst({
-        where: { id: input.revisionId, sectionId },
-        select: {
-          id: true,
-          contentJson: true,
-          contentText: true,
-          wordCount: true,
-          contentHash: true,
-        },
-      })
+      // The revision must be in this section's history, the chain its text
+      // stands on; an id from elsewhere would otherwise graft another
+      // story's prose into this one. The chain, not this row: the history
+      // offers every version on it (decision 0014).
+      const history = currentRevisionId ? await ancestorIds(ctx.db, currentRevisionId) : []
+      const source = history.includes(input.revisionId)
+        ? await ctx.db.revision.findUnique({
+            where: { id: input.revisionId },
+            select: {
+              id: true,
+              contentJson: true,
+              contentText: true,
+              wordCount: true,
+              contentHash: true,
+            },
+          })
+        : null
       if (!source) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That version does not exist.' })
       }
@@ -708,11 +782,19 @@ export const sectionRouter = createTRPCRouter({
       }
 
       const userId = ctx.session.user.id
+      const section = await ctx.db.section.findUniqueOrThrow({
+        where: { id: sectionId },
+        select: { lineageId: true, chapter: { select: { version: { select: { isMain: true } } } } },
+      })
+      // FR-9.1 — a credit is live while its writing is in the main draft. A
+      // restore in an alternate version changes nothing a reader sees, so it
+      // changes no credit; until the 2026-10-16 spec review it took credits
+      // out of the main draft's record all the same.
+      const inMainDraft = section.chapter.version.isMain
 
-      // FR-8.5 — which credits stop being live. A credit is live while the
-      // revision it was earned on is an ancestor of the head; restoring past it
-      // takes that writing out of the draft. Walking the parent chain of the
-      // revision being restored to gives exactly the set that survives.
+      // FR-8.5 — which credits are live afterwards: those earned on a revision
+      // the restored text stands on. Walking the parent chain of the revision
+      // being restored to gives exactly that set.
       const ancestors = await ancestorIds(ctx.db, source.id)
 
       const { revisionId, unlinked } = await ctx.db.$transaction(async (tx) => {
@@ -732,14 +814,18 @@ export const sectionRouter = createTRPCRouter({
         })
         await moveHead(tx, sectionId, currentRevisionId, revision.id, source.wordCount)
 
-        // Anything credited on a revision of this section that is *not* an
-        // ancestor of what we just restored is no longer in the main draft.
+        if (!inMainDraft) return { revisionId: revision.id, unlinked: [] }
+
+        // This story's credits on this section, by lineage: the revision a
+        // credit was earned on may be in another row of it (a promoted
+        // version's). Judged by row until the 2026-10-16 spec review.
+        const onThisSection = { storyboardId, sectionLineage: section.lineageId }
+        const surviving = [...ancestors, revision.id]
+
+        // Credited on a revision the restored text does not stand on: that
+        // writing is no longer in the main draft.
         const affected = await tx.credit.findMany({
-          where: {
-            isLive: true,
-            revisionId: { notIn: [...ancestors, revision.id] },
-            revision: { sectionId },
-          },
+          where: { ...onThisSection, isLive: true, revisionId: { not: null, notIn: surviving } },
           select: { id: true, contributorId: true, storyboardId: true },
         })
         if (affected.length > 0) {
@@ -748,6 +834,13 @@ export const sectionRouter = createTRPCRouter({
             data: { isLive: false },
           })
         }
+        // And the other way: restoring an accepted text back puts its writing
+        // back in the draft, and its credit with it. Only ever turned off
+        // before.
+        await tx.credit.updateMany({
+          where: { ...onThisSection, isLive: false, revisionId: { in: surviving } },
+          data: { isLive: true },
+        })
 
         return { revisionId: revision.id, unlinked: affected }
       })
@@ -788,34 +881,33 @@ export const sectionRouter = createTRPCRouter({
 })
 
 /**
- * Every revision from `revisionId` back to the start of the chain.
+ * Every revision from `revisionId` back to the start of the chain, newest
+ * first: a section's history (decision 0014), whichever section rows the
+ * revisions were written in. An alternate version starts on the main draft's
+ * revision, and a promoted version's sections are rows of their own, so
+ * "this row's revisions" is not the history; this chain is.
  *
- * Walked one row at a time rather than with a recursive CTE: a section's chain
- * is tens of revisions, not thousands, and a plain loop is the version anyone
- * can check. The cap is a guard against a cycle that should be impossible —
- * revisions are append-only — rather than an expected case.
+ * One recursive query. It was a loop of one query per revision, used only by
+ * restore; the history panel reads it on every open, and an edited section
+ * cuts a revision at every pause. The depth cap guards against a cycle that
+ * should be impossible, since revisions are append-only.
  */
 async function ancestorIds(
   db: Prisma.TransactionClient,
   revisionId: string,
-  cap = 5000,
+  cap: number = HISTORY.chainMax,
 ): Promise<string[]> {
-  const ids: string[] = []
-  let cursor: string | null = revisionId
-  const seen = new Set<string>()
-
-  while (cursor && ids.length < cap) {
-    if (seen.has(cursor)) break
-    seen.add(cursor)
-    ids.push(cursor)
-    const row: { parentId: string | null } | null = await db.revision.findUnique({
-      where: { id: cursor },
-      select: { parentId: true },
-    })
-    cursor = row?.parentId ?? null
-  }
-
-  return ids
+  const rows = await db.$queryRaw<Array<{ id: string }>>`
+    WITH RECURSIVE chain (id, "parentId", depth) AS (
+      SELECT id, "parentId", 1 FROM "Revision" WHERE id = ${revisionId}
+      UNION ALL
+      SELECT r.id, r."parentId", chain.depth + 1
+      FROM "Revision" AS r
+      JOIN chain ON r.id = chain."parentId"
+      WHERE chain.depth < ${cap}
+    )
+    SELECT id FROM chain ORDER BY depth`
+  return rows.map((row) => row.id)
 }
 
 const changedUnderfoot = () =>
@@ -847,4 +939,13 @@ async function moveHead(
     data: { currentRevisionId: to, wordCount },
   })
   if (moved.count !== 1) throw changedUnderfoot()
+}
+
+/**
+ * Two documents, both already through `parseDoc`, are the same text with the
+ * same formatting. Parsing puts every node's keys in the schema's order, so
+ * their JSON compares exactly.
+ */
+function sameDoc(a: StoryboardDoc, b: StoryboardDoc): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
 }

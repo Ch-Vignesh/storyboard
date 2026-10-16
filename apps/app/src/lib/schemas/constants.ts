@@ -69,6 +69,9 @@ export const DAILY_LIMITS = {
   /** Not in FR-13.3's list. A reporting endpoint with no ceiling is a
    * harassment tool, because the queue at the other end is a person's time. */
   reportsMade: 20,
+  /** Not in FR-13.3's list either. Each invitation notifies somebody, and
+   * inviting and taking it back over and over is a way to keep doing so. */
+  coauthorInvites: 10,
 } as const
 
 /**
@@ -150,6 +153,24 @@ export const PASSWORD_CHARS = { min: 10, max: 128 } as const
  */
 export const DRAFT_IDLE_SECONDS = 3
 export const REVISION_INTERVAL_MINUTES = 5
+
+/**
+ * FR-8.3 — the history panel's page of revisions, and the longest chain it
+ * walks. The chain is append-only, so the cap guards against a cycle that
+ * should be impossible rather than an expected length.
+ */
+export const HISTORY = { pageDefault: 50, pageMax: 200, chainMax: 5000 } as const
+
+/** FR-15.4 — what the seeded library should hold at launch. */
+export const SEED_TARGETS = {
+  storyboards: 25,
+  genres: 6,
+  openRequests: 40,
+  answeredRequests: 15,
+} as const
+
+/** FR-9.3, FR-9.4 — how many credits, and passed suggestions, a profile lists. */
+export const PROFILE_LISTS = { credits: 100, passed: 50 } as const
 
 /** FR-12.3 — how far back the weekly digest looks. */
 export const WEEKLY_DIGEST_DAYS = 7

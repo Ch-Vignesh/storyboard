@@ -52,6 +52,14 @@ export type StoryboardResource = {
   deletedAt: Date | null
   /** Accepted co-authors only. An unaccepted invitation grants nothing. */
   coauthorIds: readonly string[]
+  /**
+   * FR-14.1 — the author has said it is finished: it takes no requests, and
+   * nothing new into the ones it had. Not a role question, so the matrix
+   * does not read it; the procedures that open things do.
+   */
+  finished?: boolean
+  /** Decision 0039 — stretches spent private after first being public. */
+  privateSpans?: ReadonlyArray<{ startedAt: Date; endedAt: Date | null }>
 }
 
 /** Which row of the matrix this actor sits on for this storyboard. */
@@ -147,6 +155,14 @@ export function can(actor: Actor, action: Action, resource: StoryboardResource):
 }
 
 /**
+ * What a story nobody may read and a story that is not there both answer,
+ * word for word. They answered "That storyboard does not exist." and "That
+ * story does not exist." until the 2026-10-16 spec review, which told a
+ * hidden story from an absent one.
+ */
+export const STORY_NOT_FOUND = 'That story does not exist.'
+
+/**
  * `can()` with the error the API should return when the answer is no.
  *
  * The distinction matters and is the reason this is not three lines inline:
@@ -162,7 +178,7 @@ export function assertCan(actor: Actor, action: Action, resource: StoryboardReso
   if (can(actor, action, resource)) return
 
   if (!can(actor, 'storyboard:read', resource)) {
-    throw new TRPCError({ code: 'NOT_FOUND', message: 'That storyboard does not exist.' })
+    throw new TRPCError({ code: 'NOT_FOUND', message: STORY_NOT_FOUND })
   }
 
   if (!actor) {
@@ -229,8 +245,50 @@ export function canReadRevisionAt(
 ): boolean {
   if (!can(actor, 'storyboard:read', resource)) return false
   if (isAuthor(actor, resource)) return true
-  if (resource.publicFrom === null) return false
-  return revisionCreatedAt.getTime() >= resource.publicFrom.getTime()
+  return !writtenWhilePrivate(resource, revisionCreatedAt)
+}
+
+/**
+ * Decision 0039, amending 0007: was the story private at this instant? Before
+ * it was first public, or inside a stretch it spent private again after.
+ * Writing from either stays with its authors. Until the 2026-10-16 spec
+ * review only the first counted, so what was written in a later private
+ * stretch became readable the moment the story was republished.
+ */
+export function writtenWhilePrivate(
+  resource: Pick<StoryboardResource, 'privateSpans'> & { publicFrom: Date | null },
+  at: Date,
+): boolean {
+  if (resource.publicFrom === null || at < resource.publicFrom) return true
+  return (resource.privateSpans ?? []).some(
+    (span) => at >= span.startedAt && (span.endedAt === null || at < span.endedAt),
+  )
+}
+
+/**
+ * The same as a Prisma `where` fragment over one timestamp, so lists filter
+ * in the database. Keep it in step with `writtenWhilePrivate`.
+ */
+function writtenWhilePublicWhere<Field extends 'createdAt' | 'submittedAt'>(
+  field: Field,
+  resource: Pick<StoryboardResource, 'privateSpans'> & { publicFrom: Date | null },
+): Record<Field, { gte: Date }> & {
+  NOT?: Array<Record<Field, { gte: Date; lt?: Date }>>
+} {
+  const after = { [field]: { gte: resource.publicFrom ?? NEVER } } as Record<Field, { gte: Date }>
+  const spans = resource.privateSpans ?? []
+  if (spans.length === 0) return after
+  return {
+    ...after,
+    NOT: spans.map(
+      (span) =>
+        ({
+          [field]: span.endedAt
+            ? { gte: span.startedAt, lt: span.endedAt }
+            : { gte: span.startedAt },
+        }) as Record<Field, { gte: Date; lt?: Date }>,
+    ),
+  }
 }
 
 /**
@@ -250,9 +308,12 @@ const NEVER = new Date(8_640_000_000_000_000)
 export function revisionVisibilityWhere(
   actor: Actor,
   resource: StoryboardResource & { publicFrom: Date | null },
-): { createdAt?: { gte: Date } } {
+): {
+  createdAt?: { gte: Date }
+  NOT?: Array<{ createdAt: { gte: Date; lt?: Date } }>
+} {
   if (isAuthor(actor, resource)) return {}
-  return { createdAt: { gte: resource.publicFrom ?? NEVER } }
+  return writtenWhilePublicWhere('createdAt', resource)
 }
 
 /**
@@ -266,9 +327,16 @@ export function revisionVisibilityWhere(
 export function suggestionVisibilityWhere(
   actor: Actor,
   resource: StoryboardResource & { publicFrom: Date | null },
-): { OR?: Array<{ submittedAt: null | { gte: Date } }> } {
+): {
+  OR?: Array<
+    | { submittedAt: null }
+    | ({ submittedAt: { gte: Date } } & {
+        NOT?: Array<{ submittedAt: { gte: Date; lt?: Date } }>
+      })
+  >
+} {
   if (isAuthor(actor, resource)) return {}
-  return { OR: [{ submittedAt: null }, { submittedAt: { gte: resource.publicFrom ?? NEVER } }] }
+  return { OR: [{ submittedAt: null }, writtenWhilePublicWhere('submittedAt', resource)] }
 }
 
 /** The same rule for one suggestion already in hand. */
@@ -278,5 +346,5 @@ export function canReadSuggestionSentAt(
   submittedAt: Date | null,
 ): boolean {
   if (isAuthor(actor, resource) || !submittedAt) return true
-  return submittedAt >= (resource.publicFrom ?? NEVER)
+  return !writtenWhilePrivate(resource, submittedAt)
 }

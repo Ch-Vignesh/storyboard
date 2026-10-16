@@ -7,7 +7,8 @@ import { emptyDoc, flavourForStoryType } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
 import { publicId, slugify } from '@/lib/ids'
 import { loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
-import { DAILY_LIMITS } from '@/lib/schemas/constants'
+import { DAILY_LIMITS, SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
+import { STORY_NOT_FOUND } from '@/lib/authz'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import {
   createStoryboardSchema,
@@ -212,10 +213,10 @@ export const storyboardRouter = createTRPCRouter({
       // stamped at creation, so there is no history before it — and telling
       // every reader of every public storyboard that it "was private until"
       // the day it was made is both untrue and faintly alarming.
+      const reader = permissions.role !== 'owner' && permissions.role !== 'coauthor'
       const hiddenHistory =
         resource.publicFrom !== null &&
-        permissions.role !== 'owner' &&
-        permissions.role !== 'coauthor' &&
+        reader &&
         (await ctx.db.revision.count({
           where: {
             createdAt: { lt: resource.publicFrom },
@@ -223,6 +224,20 @@ export const storyboardRouter = createTRPCRouter({
           },
           take: 1,
         })) > 0
+      // Decision 0039 — and the private stretches since, each named only if
+      // something was written in it, for the same reason.
+      const privateStretches = []
+      for (const span of reader ? (resource.privateSpans ?? []) : []) {
+        if (!span.endedAt) continue
+        const written = await ctx.db.revision.count({
+          where: {
+            createdAt: { gte: span.startedAt, lt: span.endedAt },
+            section: { chapter: { version: { storyboardId } } },
+          },
+          take: 1,
+        })
+        if (written > 0) privateStretches.push({ from: span.startedAt, to: span.endedAt })
+      }
 
       return {
         storyboard: {
@@ -242,6 +257,7 @@ export const storyboardRouter = createTRPCRouter({
         /** Decision 0007: the reader may not see the whole chain — and is told
          * so only when part of it is actually hidden from them. */
         historyVisibleFrom: hiddenHistory ? resource.publicFrom : null,
+        privateStretches,
       }
     }),
 
@@ -347,10 +363,11 @@ export const storyboardRouter = createTRPCRouter({
   /**
    * FR-2.7, owner only. Going public stamps `publicFrom` once and never clears
    * it (decision 0007) — once a revision has been publicly readable, pretending
-   * it can be unseen is exactly the false protection FR-13.6 forbids.
+   * it can be unseen is exactly the false protection FR-13.6 forbids. Each
+   * private stretch after that is recorded (decision 0039): what was written
+   * in it was never public, and stays with the authors.
    *
-   * Closing open requests on the way to private is phase 2's job; there are no
-   * requests yet, and the hook is marked below rather than half-built.
+   * Going private closes the open requests and tells their helpers, below.
    */
   setVisibility: activeProcedure
     .input(z.object({ storyboardId: z.string().min(1), visibility: visibilitySchema }))
@@ -364,13 +381,31 @@ export const storyboardRouter = createTRPCRouter({
       )
 
       const goingPublic = input.visibility === 'PUBLIC'
-      const updated = await ctx.db.storyboard.update({
-        where: { id: storyboardId },
-        data: {
-          visibility: input.visibility,
-          ...(goingPublic && resource.publicFrom === null ? { publicFrom: new Date() } : {}),
-        },
-        select: { id: true, visibility: true, publicFrom: true },
+      const updated = await ctx.db.$transaction(async (tx) => {
+        const now = new Date()
+        const row = await tx.storyboard.update({
+          where: { id: storyboardId },
+          data: {
+            visibility: input.visibility,
+            ...(goingPublic && resource.publicFrom === null ? { publicFrom: now } : {}),
+          },
+          select: { id: true, visibility: true, publicFrom: true },
+        })
+        // Decision 0039 — once it has been public, a private stretch is
+        // recorded, so what is written in it stays private when the story is
+        // public again. Opened on the way in (only if none is open: setting
+        // private twice is one stretch), closed on the way out.
+        if (!goingPublic && resource.publicFrom !== null) {
+          const open = await tx.privateSpan.count({ where: { storyboardId, endedAt: null } })
+          if (open === 0) await tx.privateSpan.create({ data: { storyboardId, startedAt: now } })
+        }
+        if (goingPublic) {
+          await tx.privateSpan.updateMany({
+            where: { storyboardId, endedAt: null },
+            data: { endedAt: now },
+          })
+        }
+        return row
       })
 
       /*
@@ -464,9 +499,35 @@ export const storyboardRouter = createTRPCRouter({
         select: { id: true, deletedAt: true },
       })
 
-      log.info({ event: 'storyboard.delete', storyboardId }, 'storyboard soft-deleted')
+      // Its requests close, and whoever was answering them is told, as when a
+      // story goes private: a deleted story is a 404 to them, and was without
+      // a word until the 2026-10-16 spec review.
+      const closed = await closeOpenRequests(ctx.db, storyboardId)
+
+      log.info({ event: 'storyboard.delete', storyboardId, closed }, 'storyboard soft-deleted')
       return updated
     }),
+
+  /**
+   * FR-2.6 — the owner's stories deleted and not yet removed for good, so they
+   * can be brought back. Nothing listed them until the 2026-10-16 spec review,
+   * so `restore` had no caller and the grace period was a promise only.
+   */
+  listDeleted: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.db.storyboard.findMany({
+      where: { ownerId: ctx.session.user.id, deletedAt: { not: null } },
+      orderBy: { deletedAt: 'desc' },
+      select: { id: true, title: true, deletedAt: true },
+    })
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      /** When the daily purge takes it (FR-2.6). */
+      goneAfter: new Date(
+        (row.deletedAt ?? new Date()).getTime() + SOFT_DELETE_GRACE_DAYS * 24 * 60 * 60 * 1000,
+      ),
+    }))
+  }),
 
   /** Undo a soft delete inside the grace period. */
   restore: activeProcedure
@@ -477,15 +538,18 @@ export const storyboardRouter = createTRPCRouter({
       // procedure checks ownership directly. It is the only way back.
       const row = await ctx.db.storyboard.findUnique({
         where: { id: input.storyboardId },
-        select: { id: true, ownerId: true, deletedAt: true },
+        select: { id: true, ownerId: true, deletedAt: true, finishedAt: true },
       })
       if (row?.ownerId !== userId || row.deletedAt === null) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'That story does not exist.' })
+        throw new TRPCError({ code: 'NOT_FOUND', message: STORY_NOT_FOUND })
       }
 
+      // Back as it was: deleting does not unfinish a story, and `finishedAt`
+      // survives it. Restore made every story active until the 2026-10-16
+      // spec review.
       return ctx.db.storyboard.update({
         where: { id: row.id },
-        data: { deletedAt: null, state: 'ACTIVE' },
+        data: { deletedAt: null, state: row.finishedAt ? 'FINISHED' : 'ACTIVE' },
         select: { id: true, slug: true },
       })
     }),

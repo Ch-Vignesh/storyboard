@@ -13,16 +13,39 @@ export function SignUpForm() {
   const trpc = useTRPC()
   const [email, setEmail] = useState('')
   const signUp = useMutation(trpc.auth.signUp.mutationOptions())
+  // A message that never came could only be asked for again by signing up
+  // again; `resendVerification` had no caller until the 2026-10-16 spec
+  // review. Same answers, same cooldown, nothing said about the address.
+  const resend = useMutation(trpc.auth.resendVerification.mutationOptions())
 
   if (signUp.isSuccess) {
+    const status = resend.data?.status ?? signUp.data.status
     return (
-      <div className="mt-8 rounded-control border border-moss-wash bg-moss-wash p-4 text-[14px] text-moss">
-        {signUp.data.status === 'cooldown'
-          ? 'We sent a message a moment ago. Check your inbox and your spam folder, and wait a minute before asking for another.'
-          : // The same words whether or not the address has an account (FR-1.3).
-            // Spam is named because, until the sender has a reputation of its
-            // own, that is where a first message often lands.
-            `Check your inbox. If ${email} can receive email, a message from Draftboard is on its way: a confirmation link, or a note if the address already has an account. Give it a couple of minutes, and look in spam too.`}
+      <div className="mt-8 space-y-3">
+        <div className="rounded-control border border-moss-wash bg-moss-wash p-4 text-[14px] text-moss">
+          {status === 'cooldown'
+            ? 'We sent a message a moment ago. Check your inbox and your spam folder, and wait a minute before asking for another.'
+            : // The same words whether or not the address has an account (FR-1.3).
+              // Spam is named because, until the sender has a reputation of its
+              // own, that is where a first message often lands.
+              `Check your inbox. If ${email} can receive email, a message from Draftboard is on its way: a confirmation link, or a note if the address already has an account. Give it a couple of minutes, and look in spam too.`}
+        </div>
+        <p className="text-[13px] text-ink-soft">
+          Nothing after a few minutes?{' '}
+          <button
+            type="button"
+            className="text-pencil underline-offset-2 hover:underline disabled:text-ink-faint"
+            disabled={resend.isPending}
+            onClick={() => resend.mutate({ email })}
+          >
+            {resend.isPending ? 'Sending' : 'Send it again'}
+          </button>
+        </p>
+        {resend.isError ? (
+          <p role="alert" className="text-[13px] text-crimson">
+            {resend.error.message}
+          </p>
+        ) : null}
       </div>
     )
   }

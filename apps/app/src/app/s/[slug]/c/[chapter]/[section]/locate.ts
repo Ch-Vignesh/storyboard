@@ -25,10 +25,18 @@ export async function locate(
   sectionNo: string,
   versionId?: string,
 ) {
-  const chapterIndex = Number(chapterNo) - 1
-  const sectionIndex = Number(sectionNo) - 1
-  if (!Number.isInteger(chapterIndex) || !Number.isInteger(sectionIndex)) notFound()
-  if (chapterIndex < 0 || sectionIndex < 0) notFound()
+  const sectionIndex = positionIn(sectionNo)
+  const located = await locateChapter(slug, chapterNo, versionId)
+
+  const section = located.chapter.sections[sectionIndex]
+  if (!section) notFound()
+
+  return { ...located, section, sectionNumber: sectionIndex + 1 }
+}
+
+/** `/s/{slug}/c/{chapter-no}` alone: the same rules, one level up. */
+export async function locateChapter(slug: string, chapterNo: string, versionId?: string) {
+  const chapterIndex = positionIn(chapterNo)
 
   let data
   try {
@@ -41,16 +49,20 @@ export async function locate(
 
   const chapter = data.chapters[chapterIndex]
   if (!chapter) notFound()
-  const section = chapter.sections[sectionIndex]
-  if (!section) notFound()
 
   return {
+    data,
     storyboard: data.storyboard,
     permissions: data.permissions,
     version: data.version,
     chapter,
     chapterNumber: chapterIndex + 1,
-    section,
-    sectionNumber: sectionIndex + 1,
   }
+}
+
+/** A 1-based position from the URL, as a 0-based index; anything else is a 404. */
+function positionIn(segment: string): number {
+  // Digits only: `Number` would also take "1e1", " 2" and "0x3".
+  if (!/^[1-9]\d{0,5}$/.test(segment)) notFound()
+  return Number(segment) - 1
 }

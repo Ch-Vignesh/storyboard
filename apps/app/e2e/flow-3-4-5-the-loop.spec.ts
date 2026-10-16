@@ -113,7 +113,13 @@ test('flow 3 — a guest reads, signs in, and sends a suggestion', async ({ brow
 
   // FR-6.1 — a rewrite composer opens pre-filled with the current text.
   await expect(helperPage.getByText(/private draft/i)).toBeVisible()
-  await expect(helperPage.getByText(/the ship had been arriving/i)).toBeVisible()
+  await expect(helperPage.getByRole('textbox', { name: /your suggestion/i })).toContainText(
+    /the ship had been arriving/i,
+  )
+  // And the story so far, and the section as it stands, stay in view while
+  // it is rewritten (the composer showed neither until 2026-10-16).
+  await expect(helperPage.getByText('The story so far')).toBeVisible()
+  await expect(helperPage.getByText('The section as it stands')).toBeVisible()
 
   await helperPage.getByRole('textbox', { name: /your suggestion/i }).click()
   await helperPage.keyboard.press('Control+a')
@@ -127,6 +133,13 @@ test('flow 3 — a guest reads, signs in, and sends a suggestion', async ({ brow
 
   await expect(helperPage).toHaveURL(new RegExp(`${requestUrl.replace(/\//g, '\\/')}$`))
   await expect(helperPage.getByText(/waiting on the author/i)).toBeVisible()
+
+  // And it can be found again from the dashboard, while it waits. Nothing
+  // listed a helper's own suggestions until the 2026-10-16 spec review.
+  await helperPage.goto('/')
+  await helperPage.getByRole('link', { name: 'Your suggestions' }).click()
+  await expect(helperPage.getByRole('heading', { name: 'Your suggestions' })).toBeVisible()
+  await expect(helperPage.getByText(/waiting on the author/i)).toBeVisible()
   await helperContext.close()
 })
 
@@ -136,6 +149,15 @@ test('flow 4 — the author compares, accepts, and the credit appears', async ({
   const context = await browser.newContext()
   const page = await context.newPage()
   await signIn(page, author.email, PASSWORD)
+
+  // FR-12.1 — the author hears of it, and the notification leads to it. Until
+  // the 2026-10-16 spec review it named nothing and led nowhere.
+  await page.goto('/notifications')
+  await page
+    .getByRole('link', { name: /a suggestion arrived/i })
+    .first()
+    .click()
+  await expect(page).toHaveURL(/\/help\/[^/]+\/s\/[^/]+$/)
 
   await page.goto(requestUrl)
   await page
@@ -180,6 +202,13 @@ test('flow 4 — the author compares, accepts, and the credit appears', async ({
   await expect(frontMatter).toContainText('wrote a passage')
   await expect(frontMatter).toContainText(`/s/${storyboardUrl.split('/s/')[1] ?? ''}/c/1/1`)
   await expect(page.getByRole('button', { name: /^copy$/i })).toBeVisible()
+
+  // And the address leads to the passage. Until the 2026-10-16 spec review
+  // every one printed was a 404.
+  await page.goto(`${storyboardUrl}/c/1/1`)
+  await expect(page.getByText(/she did not write the ship down that morning/i)).toBeVisible()
+  await page.goto(`${storyboardUrl}/c/1`)
+  await expect(page.getByText(/she did not write the ship down that morning/i)).toBeVisible()
 
   // FR-9.1 — and on the contributor's own profile.
   await page.goto(`/@${helper.username}`)

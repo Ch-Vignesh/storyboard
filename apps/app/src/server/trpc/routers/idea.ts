@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { loadStoryboard } from '@/lib/authz/guard'
 import { recordActivity } from '@/server/activity'
 import { afterCommit } from '@/server/after-commit'
+import { notifyAuthors } from '@/server/notify-authors'
 import { logger } from '@/lib/logger'
 import { DAILY_LIMITS } from '@/lib/schemas/constants'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
@@ -104,6 +105,17 @@ export const ideaRouter = createTRPCRouter({
         select: { id: true, body: true, createdAt: true, parentId: true },
       })
 
+      // FR-12.2 — "an idea arrived", hourly (FR-12.3). Never sent until the
+      // 2026-10-16 spec review.
+      await afterCommit('idea.post.notify', () =>
+        notifyAuthors(
+          ctx.db,
+          request.storyboardId,
+          'IDEA_RECEIVED',
+          { requestId: request.id, ideaId: idea.id },
+          userId,
+        ),
+      )
       await recordActivity(ctx.db, userId)
 
       log.info(

@@ -196,3 +196,21 @@ export const SUGGESTION_STATE_LABELS = {
   STALE: 'needs updating',
   WITHDRAWN: 'withdrawn',
 } as const
+
+/**
+ * FR-5.10 — a request closed without accepting leaves what was waiting on it
+ * "marked as not accepted". Marked, not changed: the rows stay as they were,
+ * so reopening the request (FR-5.9) puts them back in front of the author.
+ * Until the 2026-10-16 spec review they read "waiting on the author" for
+ * good, and held their writers' place in the per-story quota.
+ */
+export function waitsOnClosedRequest(state: string, requestState: string): boolean {
+  return requestState === 'CLOSED' && (state === 'SUBMITTED' || state === 'STALE')
+}
+
+export function suggestionStateLabel(
+  state: keyof typeof SUGGESTION_STATE_LABELS,
+  requestState: string,
+): string {
+  return waitsOnClosedRequest(state, requestState) ? 'not accepted' : SUGGESTION_STATE_LABELS[state]
+}

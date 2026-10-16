@@ -58,6 +58,12 @@ export type Manuscript = {
   sourceUrl: string
   /** FR-14.5 — free text, shown as the author wrote it, never verified. */
   rightsNote?: string | null
+  /**
+   * FR-10.3, FR-10.4 — the story a spin-off was taken from. Its words came
+   * from there, so the file says so, as the reader does. `author` and `url`
+   * are null for an original that is no longer public.
+   */
+  spunOffFrom?: { title: string; author: string | null; url: string | null } | null
   contributors: ExportContributor[]
   chapters: ExportChapter[]
   /** Screenplays are laid out differently, and .fountain only applies to them. */

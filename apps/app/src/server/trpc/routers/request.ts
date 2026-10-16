@@ -2,10 +2,17 @@ import { Prisma, type PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
-import { loadSection, loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
+import {
+  assertNotFinished,
+  loadSection,
+  loadStoryboard,
+  visibleStoryboardsWhere,
+} from '@/lib/authz/guard'
 import { suggestionVisibilityWhere } from '@/lib/authz'
 import { recordActivity } from '@/server/activity'
 import { afterCommit } from '@/server/after-commit'
+import { ANSWERS } from '@/server/answers'
+import { closeRequest } from '@/server/close-requests'
 import { publicId } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import {
@@ -56,7 +63,7 @@ const REQUEST_SELECT = {
       chapter: { select: { id: true, title: true, order: true } },
     },
   },
-  storyboard: { select: { id: true, slug: true, title: true, type: true } },
+  storyboard: { select: { id: true, slug: true, title: true, type: true, state: true } },
 } satisfies Prisma.ContributionRequestSelect
 
 export const requestRouter = createTRPCRouter({
@@ -71,12 +78,14 @@ export const requestRouter = createTRPCRouter({
    */
   create: activeProcedure.input(createRequestSchema).mutation(async ({ ctx, input }) => {
     const actor = actorFrom(ctx.session, ctx.account)
-    const { sectionId, storyboardId, wordCount } = await loadSection(
+    const { sectionId, storyboardId, wordCount, resource, versionId } = await loadSection(
       ctx.db,
       actor,
       input.sectionId,
       'request:open',
     )
+    assertNotFinished(resource)
+    await assertInMainDraft(ctx.db, versionId)
 
     // FR-5.7
     if (input.kind === 'REWRITE' && wordCount < REWRITE_TARGET_MIN_WORDS) {
@@ -85,7 +94,9 @@ export const requestRouter = createTRPCRouter({
         message: `There is not much here to rewrite yet. A section needs at least ${String(REWRITE_TARGET_MIN_WORDS)} words before you can ask someone to rewrite it — ask for what comes next instead.`,
       })
     }
-    if (input.kind === 'CONTINUE' && wordCount > CONTINUE_TARGET_MAX_WORDS) {
+    // "Under", as FR-5.7 says: at exactly the bound a section qualified for
+    // both kinds until the 2026-10-16 spec review.
+    if (input.kind === 'CONTINUE' && wordCount >= CONTINUE_TARGET_MAX_WORDS) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: `This section already has ${String(wordCount)} words. Asking someone to continue works best from an empty or barely started section — ask for a rewrite instead.`,
@@ -253,7 +264,7 @@ export const requestRouter = createTRPCRouter({
           minWords: true,
           maxWords: true,
           createdAt: true,
-          _count: { select: { suggestions: true, ideas: true } },
+          _count: { select: { suggestions: { where: ANSWERS }, ideas: true } },
         },
       })
     }),
@@ -306,7 +317,7 @@ export const requestRouter = createTRPCRouter({
               genres: { select: { genre: { select: { id: true, name: true } } } },
             },
           },
-          _count: { select: { suggestions: true, ideas: true } },
+          _count: { select: { suggestions: { where: ANSWERS }, ideas: true } },
         },
       })
     }),
@@ -377,26 +388,37 @@ export const requestRouter = createTRPCRouter({
     return { suggestions, ideas }
   }),
 
-  /** FR-5.10 — closing does not delete the suggestions; they stay readable. */
+  /**
+   * FR-5.10 — closing does not delete the suggestions; they stay readable,
+   * marked as not accepted (`waitsOnClosedRequest`). Everyone with a draft or
+   * a suggestion waiting is told, as they are when a story goes private.
+   */
   close: activeProcedure
     .input(z.object({ requestId: z.string().min(1), reason: passChipSchema.optional() }))
     .mutation(async ({ ctx, input }) => {
       const { request } = await requireAuthorOfRequest(ctx, input.requestId)
 
-      const updated = await ctx.db.contributionRequest.update({
+      // Only an open one: a resolved request has had its answer.
+      if (await closeRequest(ctx.db, request.id)) {
+        log.info({ event: 'request.close', requestId: request.id }, 'request closed')
+      }
+      return ctx.db.contributionRequest.findUniqueOrThrow({
         where: { id: request.id },
-        data: { state: 'CLOSED', closedAt: new Date() },
         select: { id: true, state: true },
       })
-      log.info({ event: 'request.close', requestId: request.id }, 'request closed')
-      return updated
     }),
 
   /** FR-5.9 — reopening notifies everyone who has ever submitted to it. */
   reopen: activeProcedure
     .input(z.object({ requestId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const { request } = await requireAuthorOfRequest(ctx, input.requestId)
+      const { request, storyboard } = await requireAuthorOfRequest(ctx, input.requestId)
+      assertNotFinished(storyboard.resource)
+      const { chapter } = await ctx.db.section.findUniqueOrThrow({
+        where: { id: request.sectionId },
+        select: { chapter: { select: { versionId: true } } },
+      })
+      await assertInMainDraft(ctx.db, chapter.versionId)
 
       const clash = await ctx.db.contributionRequest.findFirst({
         where: {
@@ -417,37 +439,51 @@ export const requestRouter = createTRPCRouter({
         where: { requestId: request.id, state: 'SUBMITTED' },
       })
 
-      const updated = await unlessAlreadyOpen(
+      // Only from closed or resolved, and so only once: a second click, or a
+      // second tab, finds it open and tells nobody a second time.
+      const reopened = await unlessAlreadyOpen(
         'This section already has another request open.',
         () =>
-          ctx.db.contributionRequest.update({
-            where: { id: request.id },
+          ctx.db.contributionRequest.updateMany({
+            where: { id: request.id, state: { in: ['CLOSED', 'RESOLVED'] } },
             data: {
               state: submitted > 0 ? 'ANSWERED' : 'OPEN',
               closedAt: null,
               resolvedAt: null,
             },
-            select: { id: true, state: true },
           }),
       )
 
-      await afterCommit('request.reopen.notify', async () => {
-        const everyone = await ctx.db.suggestion.findMany({
-          where: { requestId: request.id },
-          distinct: ['contributorId'],
-          select: { contributorId: true },
+      if (reopened.count === 1) {
+        // FR-5.9 — everyone who ever sent something here, and nobody who only
+        // opened a draft. It sent the stale notice, "the section you helped
+        // with changed", to everyone with a row until the 2026-10-16 review.
+        const deciderId = ctx.session.user.id
+        await afterCommit('request.reopen.notify', async () => {
+          const senders = await ctx.db.suggestion.findMany({
+            where: {
+              requestId: request.id,
+              submittedAt: { not: null },
+              contributorId: { not: deciderId },
+            },
+            distinct: ['contributorId'],
+            select: { contributorId: true },
+          })
+          await ctx.db.notification.createMany({
+            data: senders.map((entry) => ({
+              userId: entry.contributorId,
+              type: 'REQUEST_REOPENED' as const,
+              payload: { requestId: request.id },
+            })),
+          })
         })
-        await ctx.db.notification.createMany({
-          data: everyone.map((entry) => ({
-            userId: entry.contributorId,
-            type: 'SUGGESTION_STALE' as const,
-            payload: { requestId: request.id, reason: 'reopened' },
-          })),
-        })
-      })
+        log.info({ event: 'request.reopen', requestId: request.id }, 'request reopened')
+      }
 
-      log.info({ event: 'request.reopen', requestId: request.id }, 'request reopened')
-      return updated
+      return ctx.db.contributionRequest.findUniqueOrThrow({
+        where: { id: request.id },
+        select: { id: true, state: true },
+      })
     }),
 })
 
@@ -455,6 +491,26 @@ function asStringArray(value: Prisma.JsonValue | null): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === 'string')
     : []
+}
+
+/**
+ * FR-5.1 with FR-10.1 — help is asked for on the main draft, the one readers
+ * read. A request on an alternate version's section was allowed until the
+ * 2026-10-16 spec review: helpers answered prose no reader can see, and
+ * accepting wrote into the alternate under "Accept into the main draft".
+ */
+async function assertInMainDraft(db: PrismaClient, versionId: string): Promise<void> {
+  const version = await db.version.findUniqueOrThrow({
+    where: { id: versionId },
+    select: { isMain: true },
+  })
+  if (!version.isMain) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        'Help is asked for on the main draft. An alternate version is for trying things, and only its authors see it.',
+    })
+  }
 }
 
 /** Loads a request and asserts the actor may decide on it (owner or co-author). */

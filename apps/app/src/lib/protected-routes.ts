@@ -21,6 +21,8 @@ export const NEEDS_AN_ACCOUNT: readonly RegExp[] = [
   /^\/onboarding(?:\/|$)/u,
   /^\/new$/u,
   /^\/notifications$/u,
+  /^\/suggestions$/u,
+  /^\/invitations$/u,
   /^\/settings(?:\/|$)/u,
   /^\/import(?:\/|$)/u,
   /^\/admin(?:\/|$)/u,
@@ -29,6 +31,7 @@ export const NEEDS_AN_ACCOUNT: readonly RegExp[] = [
   /^\/s\/[^/]+\/help\/new$/u,
   /^\/s\/[^/]+\/help\/[^/]+\/write$/u,
   /^\/s\/[^/]+\/settings(?:\/|$)/u,
+  /^\/s\/[^/]+\/coauthors$/u,
 ]
 
 export function needsAnAccount(pathname: string): boolean {

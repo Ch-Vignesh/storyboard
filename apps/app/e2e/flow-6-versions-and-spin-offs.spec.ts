@@ -79,6 +79,15 @@ test('an author tries a different draft and makes it the main one', async ({ pag
   await page.goto(`${path}/compare`)
   await expect(page.getByRole('heading', { name: /compare versions/i })).toBeVisible()
   await expect(page.getByText('Rewritten').first()).toBeVisible()
+  // And what was rewritten, not only that it was: the same comparison as
+  // everywhere else (only the list existed until 2026-10-16).
+  await page
+    .getByRole('button', { name: /show the difference/i })
+    .first()
+    .click()
+  await expect(
+    page.getByText(/the harbour filled overnight and nobody could say with what/i).first(),
+  ).toBeVisible()
 
   // FR-10.2 — promotion, and the promise made before the button is pressed.
   await page.goto(`${path}/versions`)
@@ -121,7 +130,11 @@ test('a reader spins off a public storyboard and keeps its credits', async ({ br
 
   await readerPage.goto(path)
   await readerPage.getByRole('link', { name: /contributors/i }).click()
-  await readerPage.goto(`${path}/lineage`)
+  // Reached from the reader, as a reader would: the address was typed here
+  // until the 2026-10-16 spec review, because nothing linked to it.
+  await readerPage.goto(path)
+  await readerPage.getByRole('link', { name: /your own version/i }).click()
+  await expect(readerPage).toHaveURL(new RegExp(`${path}/lineage$`))
   await expect(readerPage.getByText(/nobody has spun this story off yet/i)).toBeVisible()
 
   // FR-10.3 — no permission is asked for, and the copy is honest about itself.

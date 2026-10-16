@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { logger } from '@/lib/logger'
-import { REPORTS_TO_SUSPEND } from '@/lib/schemas/constants'
+import { REPORTS_TO_SUSPEND, SEED_TARGETS } from '@/lib/schemas/constants'
 import { nameOf } from '@/lib/people'
 
 import { adminProcedure, createTRPCRouter } from '../init'
@@ -197,6 +197,30 @@ export const adminRouter = createTRPCRouter({
       return { ...user, upheld: await countUpheldAgainst(ctx.db, user.id) }
     }),
 
+  /**
+   * FR-13.5 — every suspended account, so a suspension can be reviewed and
+   * lifted. `setUserStatus` could lift one, and nothing listed them or called
+   * it, until the 2026-10-16 spec review: "suspended pending review" had no
+   * review.
+   */
+  suspended: adminProcedure.query(async ({ ctx }) => {
+    const users = await ctx.db.user.findMany({
+      where: { status: 'SUSPENDED' },
+      orderBy: { suspendedAt: 'desc' },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        suspendedAt: true,
+        // Null when the ten upheld reports did it rather than a person.
+        suspendedBy: { select: { username: true, displayName: true } },
+      },
+    })
+    return Promise.all(
+      users.map(async (user) => ({ ...user, upheld: await countUpheldAgainst(ctx.db, user.id) })),
+    )
+  }),
+
   /** FR-15.5 — the seeded-content manager. What is seeded, and is it labelled. */
   seeded: adminProcedure.query(async ({ ctx }) => {
     const storyboards = await ctx.db.storyboard.findMany({
@@ -219,23 +243,25 @@ export const adminRouter = createTRPCRouter({
     const genres = new Set(
       storyboards.flatMap((storyboard) => storyboard.genres.map((entry) => entry.genre.name)),
     )
+    // "Open" is still taking suggestions, which an answered request is too;
+    // "answered" is FR-15.4's "showing accepted suggestions", a resolved one.
+    // The gauge counted only the first state of each until the 2026-10-16
+    // spec review, so every answered seed request moved from one to the other.
+    const seeded = { section: { chapter: { version: { storyboard: { isSeed: true } } } } }
     const openRequests = await ctx.db.contributionRequest.count({
-      where: { state: 'OPEN', section: { chapter: { version: { storyboard: { isSeed: true } } } } },
+      where: { state: { in: ['OPEN', 'ANSWERED'] }, ...seeded },
     })
     const answered = await ctx.db.contributionRequest.count({
-      where: {
-        state: { in: ['ANSWERED', 'RESOLVED'] },
-        section: { chapter: { version: { storyboard: { isSeed: true } } } },
-      },
+      where: { state: 'RESOLVED', ...seeded },
     })
 
     return {
       storyboards,
       progress: {
-        storyboards: { have: storyboards.length, want: 25 },
-        genres: { have: genres.size, want: 6 },
-        openRequests: { have: openRequests, want: 40 },
-        answeredRequests: { have: answered, want: 15 },
+        storyboards: { have: storyboards.length, want: SEED_TARGETS.storyboards },
+        genres: { have: genres.size, want: SEED_TARGETS.genres },
+        openRequests: { have: openRequests, want: SEED_TARGETS.openRequests },
+        answeredRequests: { have: answered, want: SEED_TARGETS.answeredRequests },
       },
     }
   }),

@@ -1,5 +1,5 @@
 import { countWords } from './extract/blocks'
-import type { Block, ProposedSection } from './types'
+import type { Block, ProposedSection, SectionReason } from './types'
 
 /**
  * FR-3.4 — section boundaries inside one chapter.
@@ -26,7 +26,12 @@ export function previewOf(blocks: Block[], from: number, to: number): string {
   return words.length > 12 ? `${twelve}…` : twelve
 }
 
-function sectionFrom(blocks: Block[], from: number, to: number): ProposedSection | null {
+function sectionFrom(
+  blocks: Block[],
+  from: number,
+  to: number,
+  reason: SectionReason,
+): ProposedSection | null {
   let wordCount = 0
   let hasProse = false
   for (let index = from; index <= to && index < blocks.length; index += 1) {
@@ -36,7 +41,7 @@ function sectionFrom(blocks: Block[], from: number, to: number): ProposedSection
     wordCount += countWords(block.text)
   }
   if (!hasProse) return null
-  return { preview: previewOf(blocks, from, to), wordCount, from, to }
+  return { preview: previewOf(blocks, from, to), reason, wordCount, from, to }
 }
 
 /**
@@ -46,11 +51,15 @@ function sectionFrom(blocks: Block[], from: number, to: number): ProposedSection
  * proposal can be edited later without re-parsing the file.
  */
 export function detectSections(blocks: Block[], from: number, to: number): ProposedSection[] {
-  const cuts: number[] = [from]
+  const cuts = new Map<number, SectionReason>([[from, 'start']])
 
-  // 1 — an explicit scene break starts the next section after it.
+  // 1 — an explicit scene break starts the next section after it: a glyph, or
+  // a longer run of blank lines than the manuscript's usual (extract/blocks).
   for (let index = from; index <= to && index < blocks.length; index += 1) {
-    if (blocks[index]?.isSceneBreak && index + 1 <= to) cuts.push(index + 1)
+    const block = blocks[index]
+    if (block?.isSceneBreak && index + 1 <= to && !cuts.has(index + 1)) {
+      cuts.set(index + 1, block.fromBlankLines ? 'blank-lines' : 'scene-break')
+    }
   }
 
   let sections = toSections(blocks, cuts, to)
@@ -60,17 +69,21 @@ export function detectSections(blocks: Block[], from: number, to: number): Propo
     sections = splitByLength(blocks, from, to)
   }
 
-  return sections.length > 0 ? sections : [{ preview: '', wordCount: 0, from, to }]
+  return sections.length > 0 ? sections : [{ preview: '', reason: 'start', wordCount: 0, from, to }]
 }
 
-function toSections(blocks: Block[], cuts: number[], to: number): ProposedSection[] {
-  const unique = [...new Set(cuts)].sort((a, b) => a - b)
+function toSections(
+  blocks: Block[],
+  cuts: Map<number, SectionReason>,
+  to: number,
+): ProposedSection[] {
+  const starts = [...cuts.keys()].sort((a, b) => a - b)
   const out: ProposedSection[] = []
 
-  for (const [position, start] of unique.entries()) {
-    const nextCut = unique[position + 1]
+  for (const [position, start] of starts.entries()) {
+    const nextCut = starts[position + 1]
     const end = nextCut === undefined ? to : nextCut - 1
-    const section = sectionFrom(blocks, start, end)
+    const section = sectionFrom(blocks, start, end, cuts.get(start) ?? 'start')
     if (section) out.push(section)
   }
 
@@ -78,13 +91,13 @@ function toSections(blocks: Block[], cuts: number[], to: number): ProposedSectio
 }
 
 function splitByLength(blocks: Block[], from: number, to: number): ProposedSection[] {
-  const cuts: number[] = [from]
+  const cuts = new Map<number, SectionReason>([[from, 'start']])
   let running = 0
 
   for (let index = from; index <= to && index < blocks.length; index += 1) {
     running += countWords(blocks[index]?.text ?? '')
     if (running >= HARD_SPLIT_WORDS && index + 1 <= to) {
-      cuts.push(index + 1)
+      cuts.set(index + 1, 'length')
       running = 0
     }
   }

@@ -68,5 +68,15 @@ export function propose(format: Format, doc: NormalisedDoc): Proposal {
     wordCount,
     dropped: doc.dropped,
     ...(wordCount > IMPORT_LIMITS.words ? { tooLong: true } : {}),
+    openings: blocks.map((block) => (block.isSceneBreak ? '* * *' : openingOf(block.text))),
   }
+}
+
+/** Enough of a paragraph to know it by (FR-3.2's boundary picker). */
+const OPENING_WORDS = 10
+
+function openingOf(value: string): string {
+  const words = value.split(/\s+/u).filter(Boolean)
+  const opening = words.slice(0, OPENING_WORDS).join(' ')
+  return words.length > OPENING_WORDS ? `${opening}…` : opening
 }

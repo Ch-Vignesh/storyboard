@@ -8,6 +8,7 @@ import { derive } from '@/lib/doc/text'
 import { caller } from '@/trpc/server'
 
 import { locate } from '../locate'
+import { DiscardDraftButton } from './discard-draft-button'
 
 type Params = {
   params: Promise<{ slug: string; chapter: string; section: string }>
@@ -35,12 +36,12 @@ export default async function EditSectionPage({ params, searchParams }: Params) 
   const returnHref = `/s/${slug}${suffix}`
   const flavour = flavourForStoryType(located.storyboard.type)
   const head = detail.section.currentRevision
-  // A draft written before somebody else saved this section. Opening it over
-  // their text and saving would replace their words without a word of
-  // warning: the save checks against the text it was opened on, and that was
-  // theirs (phase 12 audit). So the editor opens on their version, and the
-  // draft is shown beside it, kept, for this person to take from.
-  const draftIsBehind = Boolean(detail.draft && head && detail.draft.updatedAt < head.createdAt)
+  // A draft overtaken by somebody else's save (section.get decides). Opening
+  // it over their text and saving would replace their words without a word
+  // of warning: the save checks against the text it was opened on, and that
+  // was theirs (phase 12 audit). So the editor opens on their version, and
+  // the draft is shown beside it, kept, for this person to take from.
+  const draftIsBehind = detail.draft?.behind ?? false
   // FR-4.4 — otherwise a draft outranks the saved text: it is what this person
   // was last writing, and losing it on reload is what autosave exists to prevent.
   const initialContent = draftIsBehind
@@ -86,6 +87,7 @@ export default async function EditSectionPage({ params, searchParams }: Params) 
               {draftText}
             </p>
           </details>
+          <DiscardDraftButton sectionId={located.section.id} />
         </div>
       ) : detail.draft ? (
         <p className="mb-5 border-l-2 border-pencil bg-pencil-wash px-4 py-2.5 text-[13px] text-ink">
@@ -104,6 +106,7 @@ export default async function EditSectionPage({ params, searchParams }: Params) 
         initialContent={initialContent}
         baseRevisionId={detail.section.currentRevision?.id ?? null}
         canCommit={detail.permissions.canEdit}
+        startsUnsaved={Boolean(detail.draft) && !draftIsBehind}
         returnHref={returnHref}
       />
     </main>

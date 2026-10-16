@@ -124,6 +124,8 @@ enum NotificationType {
   REQUEST_QUIET_SEVEN_DAYS
   /// FR-2.7 and FR-14.1 — the request you were answering is no longer open.
   REQUEST_CLOSED
+  /// FR-5.9 — a request you sent a suggestion to is open again.
+  REQUEST_REOPENED
   WEEKLY_DIGEST
 }
 
@@ -328,10 +330,25 @@ model Storyboard {
   credits       Credit[]
   requests      ContributionRequest[]
   importJobs    ImportJob[]
+  privateSpans  PrivateSpan[]
 
   @@index([visibility, state, createdAt])
   @@index([ownerId])
   @@index([forkedFromId])
+}
+
+/// FR-2.7, decision 0039 — a stretch of time a story that had been public
+/// spent private. What was written in it stays private to authors when the
+/// story is public again, as what was written before `publicFrom` does.
+/// Open (`endedAt` null) while the story is private.
+model PrivateSpan {
+  id           String     @id @default(cuid())
+  storyboardId String
+  storyboard   Storyboard @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  startedAt    DateTime
+  endedAt      DateTime?
+
+  @@index([storyboardId])
 }
 
 model StoryboardGenre {
@@ -480,14 +497,19 @@ model Revision {
 /// FR-4.4 — the 3-second autosave target. Per user, per section, overwritten in
 /// place; a durable Revision is cut on blur, navigation, or every 5 minutes.
 model SectionDraft {
-  sectionId   String
-  section     Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  contentJson Json
-  contentText String   @db.Text
-  wordCount   Int      @default(0)
-  updatedAt   DateTime @updatedAt
+  sectionId      String
+  section        Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contentJson    Json
+  contentText    String   @db.Text
+  wordCount      Int      @default(0)
+  /// The revision the draft was written on; null for a section with none yet.
+  /// A draft whose base is no longer the head was overtaken by someone else's
+  /// save, and opening it over theirs would replace their words. Compared for
+  /// equality only, so no foreign key: it is a marker, not a reference.
+  baseRevisionId String?
+  updatedAt      DateTime @updatedAt
 
   @@id([sectionId, userId])
 }

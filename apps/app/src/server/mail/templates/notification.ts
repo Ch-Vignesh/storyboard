@@ -136,24 +136,27 @@ export function digestMail(options: {
 }
 
 /**
- * FR-12.4 — the seven-day nudge. It offers two one-click actions and it never
- * says the request failed, because it has not: an author with no answers yet is
- * a normal state (FR-15.1).
+ * FR-12.4 — the seven-day nudge. It never says the request failed, because it
+ * has not: an author with no answers yet is a normal state (FR-15.1).
+ *
+ * FR-12.4's two one-click actions are not built: nothing widens a request's
+ * word range, and the Sunday digest takes requests from its own week, so a
+ * week-old one is never in it. This offered both, as links to the request
+ * page, until the 2026-10-16 spec review; the owner chose to say what is
+ * true rather than build them now. What is true is below.
  */
 export function quietRequestMail(options: {
   to: string
   requestTitle: string
   requestUrl: string
-  widenUrl: string
   appUrl: string
 }): Mail {
   const text = [
     `Nobody has answered "${options.requestTitle}" yet.`,
     '',
-    'That is common and it is not a verdict on the request. Two things often help:',
+    'That is common, and it is not a verdict on the request. It is still open, and helpers looking for something nobody has answered find it under "No answers yet" in Browse.',
     '',
-    `- Widen the word range, so more people can fit it in: ${options.widenUrl}`,
-    `- Let it go out in Sunday's digest to writers in your genres: ${options.requestUrl}`,
+    'If it asks for a narrow range of words, a wider one lets more people fit it in: close it and ask again with the new range.',
     '',
     options.requestUrl,
   ].join('\n')
@@ -163,11 +166,8 @@ export function quietRequestMail(options: {
     `<p>Nobody has answered <a href="${options.requestUrl}">${escapeHtml(
       options.requestTitle,
     )}</a> yet.</p>`,
-    `<p>That is common, and it is not a verdict on the request. Two things often help:</p>`,
-    '<ul style="padding-left:1.1em">',
-    `<li style="margin-bottom:.5em"><a href="${options.widenUrl}">Widen the word range</a>, so more people can fit it in.</li>`,
-    `<li><a href="${options.requestUrl}">Send it out in Sunday's digest</a> to writers in your genres.</li>`,
-    '</ul>',
+    `<p>That is common, and it is not a verdict on the request. It is still open, and helpers looking for something nobody has answered find it under “No answers yet” in Browse.</p>`,
+    `<p>If it asks for a narrow range of words, a wider one lets more people fit it in: <a href="${options.requestUrl}">close it</a> and ask again with the new range.</p>`,
     `</div>`,
   ].join('\n')
 

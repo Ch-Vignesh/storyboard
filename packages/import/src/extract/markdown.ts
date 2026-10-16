@@ -80,6 +80,13 @@ export function extractMarkdown(source: string): NormalisedDoc {
     switch (token.type) {
       case 'heading': {
         const node = token as Tokens.Heading
+        // A line of nothing but `#` is an empty heading to Markdown and a
+        // scene break to the writer who typed it (FR-3.4). It was a heading,
+        // so every one started a chapter with no title (2026-10-16 review).
+        if (node.text.trim() === '') {
+          if (isSceneBreakLine(node.raw.trim())) blocks.push(sceneBreak())
+          break
+        }
         const level = Math.min(node.depth, 3) as 1 | 2 | 3
         const content = inline(node.tokens)
         push(

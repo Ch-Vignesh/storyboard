@@ -7,6 +7,7 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { DocFlavour } from '@/lib/doc/schema'
+import { ElementPicker } from '@/components/element-picker'
 import { extensionsFor } from '@/lib/doc/tiptap'
 import {
   DRAFT_IDLE_SECONDS,
@@ -175,6 +176,14 @@ export function SuggestionComposer({
         <p className="mt-4 border-l-2 border-pencil bg-pencil-wash px-4 py-2.5 text-[13px] text-ink">
           This is a private draft. Nobody can see it until you send it.
         </p>
+
+        {/* FR-4.2 — a suggestion for a script is written element by element,
+            as the script is (decision 0040). */}
+        {flavour === 'screenplay' ? (
+          <div className="mt-4">
+            <ElementPicker editor={editor} />
+          </div>
+        ) : null}
 
         <div className="manuscript mt-6 max-w-measure">
           <EditorContent editor={editor} />

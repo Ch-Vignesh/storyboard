@@ -32,18 +32,25 @@ const ACCEPT = '.docx,.md,.txt,.rtf,.fountain,.fdx'
  * not be navigated anywhere, and losing the proposal to a route change would
  * mean uploading again.
  */
-export function ImportFlow({ genres }: { genres: Genre[] }) {
+export function ImportFlow({
+  genres,
+  resume,
+}: {
+  genres: Genre[]
+  /** A file read before a reload, picked up at its review (FR-3.2). */
+  resume?: { jobId: string; fileName: string; proposal: Proposal }
+}) {
   const trpc = useTRPC()
   const router = useRouter()
 
   const [file, setFile] = useState<File | null>(null)
-  const [jobId, setJobId] = useState<string | null>(null)
-  const [proposal, setProposal] = useState<Proposal | null>(null)
-  const [outline, setOutline] = useState<Outline>([])
+  const [jobId, setJobId] = useState<string | null>(resume?.jobId ?? null)
+  const [proposal, setProposal] = useState<Proposal | null>(resume?.proposal ?? null)
+  const [outline, setOutline] = useState<Outline>(() => (resume ? outlineOf(resume.proposal) : []))
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
 
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(resume ? titleFrom(resume.fileName) : '')
   const [type, setType] = useState<StoryTypeValue>('NOVEL')
   const [genreIds, setGenreIds] = useState<string[]>([])
   const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PRIVATE')
@@ -86,16 +93,10 @@ export function ImportFlow({ genres }: { genres: Genre[] }) {
       setJobId(id)
       const result = await analyse.mutateAsync({ jobId: id })
       setProposal(result)
-      setOutline(
-        result.chapters.map((chapter) => ({
-          title: chapter.title,
-          sections: chapter.sections.map((section) => ({ from: section.from, to: section.to })),
-        })),
-      )
-      // A sensible first guess at the title: the file's name without its suffix.
-      setTitle(
-        (current) => current || chosen.name.replace(/\.[^.]+$/u, '').replaceAll(/[_-]+/gu, ' '),
-      )
+      setOutline(outlineOf(result))
+      setTitle((current) => current || titleFrom(chosen.name))
+      // So a reload comes back to this review rather than to an empty form.
+      router.replace(`/import?job=${encodeURIComponent(id)}`, { scroll: false })
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'That did not work.')
     } finally {
@@ -302,4 +303,17 @@ export function ImportFlow({ genres }: { genres: Genre[] }) {
 /** FR-3.5 — confidence as a phrase, never a number. */
 function strategyPhrase(strategy: Strategy): string {
   return STRATEGY_COPY[strategy]
+}
+
+/** The proposal as an outline the review can change. */
+function outlineOf(proposal: Proposal): Outline {
+  return proposal.chapters.map((chapter) => ({
+    title: chapter.title,
+    sections: chapter.sections.map((section) => ({ from: section.from, to: section.to })),
+  }))
+}
+
+/** A sensible first guess at the title: the file's name without its suffix. */
+function titleFrom(fileName: string): string {
+  return fileName.replace(/\.[^.]+$/u, '').replaceAll(/[_-]+/gu, ' ')
 }

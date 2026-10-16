@@ -1,12 +1,10 @@
 import { TRPCError } from '@trpc/server'
 import type { Metadata } from 'next'
-import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
-import { auth } from '@/auth'
 import { caller } from '@/trpc/server'
 
-import { ReaderShell } from './reader-shell'
+import { Reader, readerMetadata } from './reader'
 
 type Params = {
   params: Promise<{ slug: string }>
@@ -27,12 +25,7 @@ async function load(slug: string, versionId?: string) {
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { slug } = await params
   const { storyboard } = await load(slug)
-  return {
-    title: storyboard.title,
-    description: storyboard.logline ?? undefined,
-    // A private storyboard must not be indexed even if a link escapes.
-    robots: storyboard.visibility === 'PRIVATE' ? { index: false, follow: false } : undefined,
-  }
+  return readerMetadata(storyboard)
 }
 
 /**
@@ -48,18 +41,6 @@ export default async function StoryboardPage({ params, searchParams }: Params) {
   // from another storyboard is a 404: `storyboard.get` checks that it belongs.
   const { version } = (await searchParams) ?? {}
   const data = await load(slug, version)
-  const session = await auth()
 
-  return (
-    <ReaderShell
-      data={data}
-      // FR-1.2 — a guest reads, and is asked to sign in only to help.
-      signedIn={Boolean(session?.user)}
-      header={
-        <Link href="/" className="font-manuscript text-[19px] font-medium tracking-tight text-ink">
-          Draftboard
-        </Link>
-      }
-    />
-  )
+  return <Reader data={data} />
 }

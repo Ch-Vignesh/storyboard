@@ -243,6 +243,12 @@ export const spinOffRouter = createTRPCRouter({
         owner: { username: string | null; displayName: string | null } | null
         /** True when the row is redacted: it exists, and that is all we say. */
         hidden: boolean
+        /**
+         * FR-14.5 — what its author wrote about rights, verbatim. The words a
+         * spin-off carries are theirs, and a spin-off's own note is its own
+         * author's, so the original's travels here rather than being copied.
+         */
+        rightsNote: string | null
       }> = []
 
       const seen = new Set<string>([storyboardId])
@@ -270,6 +276,7 @@ export const spinOffRouter = createTRPCRouter({
           deletedAt: Date | null
           forkedFromId: string | null
           forkedAt: Date | null
+          rightsNote: string | null
           owner: { username: string | null; displayName: string | null }
         } | null = await ctx.db.storyboard.findUnique({
           where: { id: cursor },
@@ -281,6 +288,7 @@ export const spinOffRouter = createTRPCRouter({
             deletedAt: true,
             forkedFromId: true,
             forkedAt: true,
+            rightsNote: true,
             owner: { select: { username: true, displayName: true } },
           },
         })
@@ -302,6 +310,7 @@ export const spinOffRouter = createTRPCRouter({
             continuedSince: false,
             owner: null,
             hidden: true,
+            rightsNote: null,
           })
           ownForkedAt = row.forkedAt
           cursor = row.forkedFromId
@@ -330,6 +339,7 @@ export const spinOffRouter = createTRPCRouter({
           continuedSince,
           owner: row.owner,
           hidden: false,
+          rightsNote: row.rightsNote,
         })
         ownForkedAt = row.forkedAt
         cursor = row.forkedFromId

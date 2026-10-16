@@ -1,5 +1,5 @@
 /**
- * The thirteen notification types (FR-12.2), with the words the interface uses
+ * The fourteen notification types (FR-12.2), with the words the interface uses
  * for each and how each one is delivered (FR-12.3).
  *
  * One table, because a type that exists in the enum but not here would be
@@ -20,6 +20,7 @@ export const NOTIFICATION_TYPES = [
   'CONTRIBUTION_REMOVED',
   'REQUEST_QUIET_SEVEN_DAYS',
   'REQUEST_CLOSED',
+  'REQUEST_REOPENED',
   'WEEKLY_DIGEST',
 ] as const
 
@@ -49,7 +50,10 @@ export const NOTIFICATIONS: Record<NotificationType, Definition> = {
   SUGGESTION_RECEIVED: {
     label: 'A suggestion arrived',
     sentence: 'Someone sent a suggestion for a passage you opened for help.',
-    delivery: 'immediate',
+    // Hourly, as FR-12.3 says: it is not a decision on the author's own work,
+    // and an author with a busy request heard of every arrival one email at
+    // a time until the 2026-10-16 spec review.
+    delivery: 'hourly',
     canDisableEmail: true,
   },
   SUGGESTION_ACCEPTED: {
@@ -116,10 +120,18 @@ export const NOTIFICATIONS: Record<NotificationType, Definition> = {
   REQUEST_CLOSED: {
     label: 'A passage you were answering was closed',
     sentence:
-      'The author closed it, or made the story private. Any suggestion you sent stays on your profile.',
+      'The author closed it, or marked the story finished, made it private or deleted it. Any suggestion you sent stays on your profile.',
     // Immediate: somebody may be mid-draft on it right now, and every hour they
     // spend after this point is an hour spent on something nobody can accept.
     delivery: 'immediate',
+    canDisableEmail: true,
+  },
+  REQUEST_REOPENED: {
+    label: 'A passage you answered is open again',
+    sentence:
+      'The author opened it for help again. A suggestion of yours that was waiting is back in front of them.',
+    // Good news, not a deadline: nothing is lost by hearing within the hour.
+    delivery: 'hourly',
     canDisableEmail: true,
   },
   WEEKLY_DIGEST: {

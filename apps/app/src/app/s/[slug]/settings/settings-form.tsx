@@ -8,11 +8,12 @@ import { useMutation } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
-import { SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
+import { SOFT_DELETE_GRACE_DAYS, STORYBOARD_GENRES } from '@/lib/schemas/constants'
 import { VISIBILITY_COPY } from '@/lib/schemas/storyboard'
 import { useTRPC } from '@/trpc/client'
 
 type Contributor = { id: string; username: string | null; displayName: string | null }
+type Genre = { id: string; name: string }
 
 export function SettingsForm({
   storyboardId,
@@ -22,6 +23,8 @@ export function SettingsForm({
   visibility: initialVisibility,
   publicFrom,
   contributors,
+  genres,
+  genreIds: initialGenreIds,
 }: {
   storyboardId: string
   title: string
@@ -30,6 +33,9 @@ export function SettingsForm({
   visibility: 'PUBLIC' | 'PRIVATE'
   publicFrom: Date | null
   contributors: Contributor[]
+  /** Every genre, and this story's (FR-2.1). */
+  genres: Genre[]
+  genreIds: string[]
 }) {
   const trpc = useTRPC()
   const router = useRouter()
@@ -37,6 +43,13 @@ export function SettingsForm({
   const [title, setTitle] = useState(initialTitle)
   const [logline, setLogline] = useState(initialLogline ?? '')
   const [rightsNote, setRightsNote] = useState(initialRights ?? '')
+  const [genreIds, setGenreIds] = useState(initialGenreIds)
+  const toggleGenre = (id: string) =>
+    setGenreIds((current) => {
+      if (current.includes(id)) return current.filter((value) => value !== id)
+      if (current.length >= STORYBOARD_GENRES.max) return current
+      return [...current, id]
+    })
   const [visibility, setVisibility] = useState(initialVisibility)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -68,6 +81,7 @@ export function SettingsForm({
               title: title.trim(),
               logline: logline.trim() || null,
               rightsNote: rightsNote.trim() || null,
+              genreIds,
             })
           }}
         >
@@ -94,6 +108,40 @@ export function SettingsForm({
             />
           </div>
 
+          {/* FR-2.1 — genres change as a story does. The server took them
+              and this form never sent them, until the 2026-10-16 review. */}
+          <fieldset className="space-y-2">
+            <legend className="text-[13.5px] font-medium text-ink">
+              Genres{' '}
+              <span className="font-normal text-ink-faint">
+                ({STORYBOARD_GENRES.min} to {STORYBOARD_GENRES.max})
+              </span>
+            </legend>
+            <ul className="flex flex-wrap gap-2">
+              {genres.map((genre) => {
+                const selected = genreIds.includes(genre.id)
+                const full = !selected && genreIds.length >= STORYBOARD_GENRES.max
+                return (
+                  <li key={genre.id}>
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      disabled={full}
+                      onClick={() => toggleGenre(genre.id)}
+                      className={
+                        selected
+                          ? 'rounded-control border border-pencil bg-pencil-wash px-3 py-1.5 text-[13.5px] text-pencil'
+                          : 'rounded-control border border-rule bg-paper px-3 py-1.5 text-[13.5px] text-ink-soft hover:border-ink-faint disabled:opacity-40 disabled:hover:border-rule'
+                      }
+                    >
+                      {genre.name}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </fieldset>
+
           <div className="space-y-1.5">
             <Label htmlFor="rights">Rights note</Label>
             <Textarea
@@ -118,7 +166,11 @@ export function SettingsForm({
             </p>
           ) : null}
 
-          <Button type="submit" variant="primary" disabled={update.isPending}>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={update.isPending || genreIds.length < STORYBOARD_GENRES.min}
+          >
             {update.isPending ? 'Saving' : 'Save details'}
           </Button>
         </form>
@@ -148,7 +200,7 @@ export function SettingsForm({
             switch, not after. */}
         <p className="mt-3 text-[12.5px] leading-relaxed text-ink-faint">
           {publicFrom
-            ? `Versions written before ${publicFrom.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} stay visible to you and your co-authors only.`
+            ? `Versions written before ${publicFrom.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} stay visible to you and your co-authors only, and so does anything written while it is private: making it public again opens only what comes after.`
             : 'Everything you have written so far stays visible to you and your co-authors only. Only what you write after the switch becomes readable.'}
         </p>
 
@@ -177,8 +229,9 @@ export function SettingsForm({
           Delete this story
         </h2>
         <p className="mt-3 text-[13.5px] leading-relaxed text-ink-soft">
-          It disappears from everywhere immediately. You have {SOFT_DELETE_GRACE_DAYS} days to
-          change your mind, and after that it is gone for good.
+          It disappears from everywhere immediately, and anyone answering one of its requests is
+          told. For {SOFT_DELETE_GRACE_DAYS} days you can bring it back from your dashboard; after
+          that it is gone for good.
         </p>
 
         {/* FR-2.6 — a storyboard with credits names the people affected. A count

@@ -7,7 +7,16 @@
  * anywhere. Phase 5's exit criterion names the second one specifically, and it
  * is the one the cascade has to get right without help.
  */
-import { AlignmentType, Document, HeadingLevel, PageBreak, Packer, Paragraph, TextRun } from 'docx'
+import {
+  AlignmentType,
+  Document,
+  FootnoteReferenceRun,
+  HeadingLevel,
+  PageBreak,
+  Packer,
+  Paragraph,
+  TextRun,
+} from 'docx'
 import { describe, expect, it } from 'vitest'
 
 import { extractDocx } from './extract/docx'
@@ -128,4 +137,36 @@ describe('a .docx with no heading styles at all (the exit criterion)', () => {
     const counted = sections.reduce((total, section) => total + section.wordCount, 0)
     expect(counted).toBeGreaterThan(proposal.wordCount * 0.98)
   }, 60_000)
+})
+
+/**
+ * FR-3.7 — "footnote text, at the end of its section". The notes went at the
+ * end of the whole manuscript until the 2026-10-16 spec review, as list items
+ * with their bullets and numbers called dropped.
+ */
+describe('footnotes in a .docx', () => {
+  it('keeps each note with the paragraph that refers to it', async () => {
+    const document = new Document({
+      footnotes: { 1: { children: [new Paragraph('A note about the harbour.')] } },
+      sections: [
+        {
+          children: [
+            new Paragraph({ text: 'Chapter one', heading: HeadingLevel.HEADING_1 }),
+            new Paragraph({
+              children: [new TextRun('The harbour was empty.'), new FootnoteReferenceRun(1)],
+            }),
+            new Paragraph({ text: 'Chapter two', heading: HeadingLevel.HEADING_1 }),
+            ...paragraphs(2),
+          ],
+        },
+      ],
+    })
+    const doc = await extractDocx(await Packer.toBuffer(document))
+
+    const referring = doc.blocks.find((block) => block.text.startsWith('The harbour was empty.'))
+    expect(referring?.footnotes).toEqual(['A note about the harbour.'])
+    // Not a stray paragraph at the end, nor a list said to be dropped.
+    expect(doc.blocks.at(-1)?.text).not.toContain('A note about the harbour.')
+    expect(doc.dropped).not.toContain('list bullets and numbering')
+  })
 })

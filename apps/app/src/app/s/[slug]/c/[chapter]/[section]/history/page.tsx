@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from '@/components/link'
 
+import { auth } from '@/auth'
 import { caller } from '@/trpc/server'
 
 import { locate } from '../locate'
@@ -25,6 +26,7 @@ export default async function SectionHistoryPage({ params, searchParams }: Param
   // Back to the draft this history belongs to, not to the main one.
   const suffix = located.version.isMain ? '' : `?version=${encodeURIComponent(located.version.id)}`
   const history = await caller.section.history({ sectionId: located.section.id })
+  const session = await auth()
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
@@ -49,6 +51,7 @@ export default async function SectionHistoryPage({ params, searchParams }: Param
         sectionId={located.section.id}
         initial={history}
         canRestore={located.permissions.canRestore}
+        viewerId={session?.user.id ?? null}
         backHref={`/s/${slug}${suffix}`}
       />
     </main>

@@ -6,6 +6,7 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { DocFlavour } from '@/lib/doc/schema'
+import { ElementPicker } from '@/components/element-picker'
 import { extensionsFor } from '@/lib/doc/tiptap'
 import {
   DRAFT_IDLE_SECONDS,
@@ -24,6 +25,13 @@ type Props = {
   baseRevisionId: string | null
   /** False when this is someone else's section: drafts only, no revisions (FR-4.5). */
   canCommit: boolean
+  /**
+   * The editor opens on a draft, not on the saved text, so what is on screen
+   * is already unsaved. Without this, nothing counted as changed until a
+   * keystroke, and Save now, blur and leaving all skipped it: the draft was
+   * never saved and the story went on showing the older text (2026-10-16).
+   */
+  startsUnsaved?: boolean
   /** Where "done" goes. */
   returnHref: string
 }
@@ -48,6 +56,7 @@ export function SectionEditor({
   baseRevisionId,
   canCommit,
   returnHref,
+  startsUnsaved = false,
 }: Props) {
   const trpc = useTRPC()
   const [state, setState] = useState<SaveState>('idle')
@@ -65,15 +74,25 @@ export function SectionEditor({
   // was typed while that save was on its way: the last edit before leaving
   // (an Italic click, which blurs the editor and so starts a save first) was
   // reported as saved and never was (phase 12 audit).
-  const edits = useRef(0)
+  const edits = useRef(startsUnsaved ? 1 : 0)
   const committed = useRef(0)
-  const drafted = useRef(0)
+  // A draft it opened on is already drafted; only the revision is owed.
+  const drafted = useRef(startsUnsaved ? 1 : 0)
   const unsaved = () => edits.current !== committed.current
   // Two saves of the same section at once open two transactions on one row and
   // deadlock, so one runs at a time. A second caller waits for the first and
   // then saves whatever is still unsaved, rather than being dropped.
   const inFlight = useRef<Promise<boolean> | null>(null)
-  const savingDraft = useRef(false)
+  // Nor does a draft save overlap a save of the text. A draft records the
+  // revision it is written on; one sent while a save was moving the head
+  // recorded the revision before it, or landed after the save had cleared the
+  // draft away, and the writer's own draft then looked overtaken.
+  const draftInFlight = useRef<Promise<void> | null>(null)
+
+  // Set once the draft this editor opened on is being thrown away: no save of
+  // any kind may run after that, or the draft would be kept as a version.
+  const discarded = useRef(false)
+  const discardDraft = useMutation(trpc.section.discardDraft.mutationOptions())
 
   const saveDraft = useMutation(trpc.section.saveDraft.mutationOptions())
   const splitSection = useMutation(trpc.section.split.mutationOptions())
@@ -85,6 +104,11 @@ export function SectionEditor({
     // Next.js renders this on the server first; TipTap must not.
     immediatelyRender: false,
     editorProps: { attributes: { 'aria-label': 'Section text', role: 'textbox' } },
+    // The count of what is there when it opens, not 0 until the first
+    // keystroke: FR-2.5's over-2000 note has to show on a long section at once.
+    onCreate: ({ editor: instance }) => {
+      setWords(countWordsIn(instance.getText()))
+    },
     onUpdate: ({ editor: instance }) => {
       edits.current += 1
       setWords(countWordsIn(instance.getText()))
@@ -93,20 +117,33 @@ export function SectionEditor({
 
   /** Write the draft. Cheap, frequent, private. */
   const writeDraft = useCallback(async () => {
-    if (!editor || edits.current === drafted.current || savingDraft.current) return
-    savingDraft.current = true
-    const at = edits.current
-    setState('draft-saving')
+    if (discarded.current) return
+    if (!editor || edits.current === drafted.current || draftInFlight.current) return
+    const run = (async () => {
+      while (inFlight.current) await inFlight.current
+      // The save just waited for may have taken everything there was.
+      if (edits.current === drafted.current) return
+      const at = edits.current
+      setState('draft-saving')
+      try {
+        await saveDraft.mutateAsync({
+          sectionId,
+          contentJson: editor.getJSON(),
+          baseRevisionId: head.current,
+        })
+        drafted.current = Math.max(drafted.current, at)
+        setState('draft-saved')
+        setError(null)
+      } catch (caught) {
+        setState('error')
+        setError(caught instanceof Error ? caught.message : 'Could not save.')
+      }
+    })()
+    draftInFlight.current = run
     try {
-      await saveDraft.mutateAsync({ sectionId, contentJson: editor.getJSON() })
-      drafted.current = at
-      setState('draft-saved')
-      setError(null)
-    } catch (caught) {
-      setState('error')
-      setError(caught instanceof Error ? caught.message : 'Could not save.')
+      await run
     } finally {
-      savingDraft.current = false
+      draftInFlight.current = null
     }
   }, [editor, saveDraft, sectionId])
 
@@ -115,9 +152,18 @@ export function SectionEditor({
    * nothing is: either it saved, or there was nothing to save.
    */
   const commit = useCallback(async (): Promise<boolean> => {
-    if (!editor || !canCommit) return false
-    while (inFlight.current) {
-      if (!(await inFlight.current)) return false
+    if (!editor || !canCommit || discarded.current) return false
+    // Until neither kind of save is on its way. Checked again after every
+    // wait, and nothing awaited between the last check and claiming
+    // `inFlight` below, so two saves can never both get through.
+    for (;;) {
+      if (inFlight.current) {
+        if (!(await inFlight.current)) return false
+      } else if (draftInFlight.current) {
+        await draftInFlight.current
+      } else {
+        break
+      }
     }
     if (!unsaved()) return true
 
@@ -177,6 +223,30 @@ export function SectionEditor({
       setError(caught instanceof Error ? caught.message : 'Could not split the section.')
     }
   }, [canCommit, commit, editor, returnHref, sectionId, splitSection])
+
+  /**
+   * Back to the saved text. Every save is stood down first, and nothing is
+   * left counted as unsaved, so neither a timer, a blur nor leaving the page
+   * can keep the draft as a version on its way out.
+   */
+  const throwDraftAway = useCallback(async () => {
+    discarded.current = true
+    if (draftTimer.current) clearTimeout(draftTimer.current)
+    if (revisionTimer.current) clearInterval(revisionTimer.current)
+    committed.current = edits.current
+    drafted.current = edits.current
+    try {
+      // Whatever was already on its way finishes first.
+      if (inFlight.current) await inFlight.current
+      if (draftInFlight.current) await draftInFlight.current
+      await discardDraft.mutateAsync({ sectionId })
+      window.location.reload()
+    } catch (caught) {
+      discarded.current = false
+      setState('error')
+      setError(caught instanceof Error ? caught.message : 'Could not throw the draft away.')
+    }
+  }, [discardDraft, sectionId])
 
   // FR-4.4 — a draft after 3 seconds of inactivity.
   useEffect(() => {
@@ -244,12 +314,18 @@ export function SectionEditor({
   return (
     <div>
       {/* FR-4.6 — italic, bold, quote, scene break. Nothing else. This is a
-          manuscript, not a document. */}
+          manuscript, not a document. A script also names its elements
+          (FR-4.2, decision 0040). */}
       <div
         role="toolbar"
         aria-label="Formatting"
         className="sticky top-0 z-10 -mx-2 flex items-center gap-1 border-b border-rule bg-paper/95 px-2 py-2 backdrop-blur"
       >
+        {flavour === 'screenplay' ? (
+          <span className="mr-2">
+            <ElementPicker editor={editor} />
+          </span>
+        ) : null}
         <ToolbarButton
           label="Italic"
           shortcut="Ctrl I"
@@ -331,9 +407,27 @@ export function SectionEditor({
             </span>
           ) : null}
         </p>
-        <a href={returnHref} className="text-[13.5px] text-pencil hover:underline">
-          Back to the story
-        </a>
+        <span className="flex items-center gap-4">
+          {/* FR-4.5 — the draft this opened on can be thrown away, back to
+              the saved text. `section.discardDraft` had no caller until the
+              2026-10-16 spec review. */}
+          {startsUnsaved && !discarded.current ? (
+            <button
+              type="button"
+              className="text-[12.5px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+              // Keeps the editor focused: its blur would save the draft as a
+              // version a moment before it was thrown away.
+              onMouseDown={(event) => event.preventDefault()}
+              disabled={discardDraft.isPending}
+              onClick={() => void throwDraftAway()}
+            >
+              {discardDraft.isPending ? 'Throwing it away' : 'Throw this draft away'}
+            </button>
+          ) : null}
+          <a href={returnHref} className="text-[13.5px] text-pencil hover:underline">
+            Back to the story
+          </a>
+        </span>
       </footer>
 
       {error ? (

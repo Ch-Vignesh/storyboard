@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { loadStoryboard } from '@/lib/authz/guard'
+import { mainDraftPlaces, type Place } from '@/server/places'
 
 import { actorFrom, createTRPCRouter, publicProcedure } from '../init'
 
@@ -69,41 +70,9 @@ export const creditRouter = createTRPCRouter({
       const lineages = [...new Set(credits.map((credit) => credit.sectionLineage))].filter(
         (lineage): lineage is string => Boolean(lineage),
       )
-
-      const sections = lineages.length
-        ? await ctx.db.section.findMany({
-            where: {
-              lineageId: { in: lineages },
-              deletedAt: null,
-              chapter: { version: { storyboardId, isMain: true } },
-            },
-            select: {
-              lineageId: true,
-              order: true,
-              chapter: { select: { order: true, title: true } },
-            },
-          })
-        : []
-
-      // Only when something actually resolved; the slug is otherwise unused.
-      const slug = sections.length
-        ? (
-            await ctx.db.storyboard.findUniqueOrThrow({
-              where: { id: storyboardId },
-              select: { slug: true },
-            })
-          ).slug
-        : ''
-
-      const placeOf = new Map(
-        sections.map((section) => [
-          section.lineageId,
-          {
-            chapter: section.chapter.title,
-            path: `/s/${slug}/c/${String(section.chapter.order + 1)}/${String(section.order + 1)}`,
-          },
-        ]),
-      )
+      const placeOf = lineages.length
+        ? await mainDraftPlaces(ctx.db, storyboardId, lineages)
+        : new Map<string, Place>()
 
       return {
         credits: credits.map((credit) => ({

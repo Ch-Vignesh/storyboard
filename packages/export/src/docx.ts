@@ -9,7 +9,7 @@ import {
   TextRun,
 } from 'docx'
 
-import { sourceLine } from './front-matter'
+import { originLine, sourceLine } from './front-matter'
 import type { BlockNode, InlineNode, Manuscript } from './types'
 
 /**
@@ -139,6 +139,15 @@ export async function toDocx(manuscript: Manuscript): Promise<Buffer> {
       children: [new TextRun(`by ${manuscript.author}`)],
     }),
   )
+  const origin = originLine(manuscript)
+  if (origin) {
+    children.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun({ text: origin, italics: true })],
+      }),
+    )
+  }
 
   if (manuscript.contributors.length > 0) {
     children.push(

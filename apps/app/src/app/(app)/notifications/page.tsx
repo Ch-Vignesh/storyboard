@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 
+import { requireSession } from '@/auth/require-session'
 import { HydrateClient, prefetch, trpc } from '@/trpc/server'
 
 import { NotificationList } from './notification-list'
@@ -12,7 +13,8 @@ export const metadata: Metadata = { title: 'Notifications' }
  * disabled, which is why this page has no "turn these off" control: the email
  * toggles live in settings, and this is the surface that always works.
  */
-export default function NotificationsPage() {
+export default async function NotificationsPage() {
+  await requireSession()
   prefetch(trpc.notification.list.queryOptions({ take: 50 }))
 
   return (

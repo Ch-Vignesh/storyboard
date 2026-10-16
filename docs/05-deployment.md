@@ -314,7 +314,7 @@ Six jobs, in `.github/workflows/cron.yml` (decisions 0012 and 0030):
 | ----------- | ------------- | ----------------------------------------------------------------------------- |
 | `immediate` | every 10 min  | Decisions on your own work (FR-12.3)                                          |
 | `hourly`    | hourly        | Everything that is not about your own work                                    |
-| `weekly`    | Mondays 09:00 | The weekly digest                                                             |
+| `weekly`    | Sundays 09:00 | The weekly digest (FR-12.3)                                                   |
 | `nudge`     | daily 08:30   | The seven-day silence nudge (FR-12.4)                                         |
 | `prune`     | daily 03:15   | Expired rate-limit rows                                                       |
 | `purge`     | daily 03:45   | Storyboards past their 30 days, accounts past their 7, imports left for a day |

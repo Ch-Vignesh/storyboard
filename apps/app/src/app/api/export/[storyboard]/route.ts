@@ -1,4 +1,5 @@
 import { EXPORT_FORMATS, exportManuscript, type ExportFormat } from '@storyboard/export'
+import { TRPCError } from '@trpc/server'
 import { NextResponse } from 'next/server'
 
 import { auth } from '@/auth'
@@ -54,7 +55,17 @@ export async function GET(request: Request, { params }: Params): Promise<NextRes
     return NextResponse.json({ error: 'Not found.' }, { status: 404 })
   }
 
-  const manuscript = await assembleManuscript(prisma, storyboardId, versionId)
+  let manuscript
+  try {
+    manuscript = await assembleManuscript(prisma, storyboardId, versionId)
+  } catch (error) {
+    // A `?version=` that is not one of this story's: the same answer as a
+    // story that is not there. It was a 500 until the 2026-10-16 spec review.
+    if (error instanceof TRPCError && error.code === 'NOT_FOUND') {
+      return NextResponse.json({ error: 'Not found.' }, { status: 404 })
+    }
+    throw error
+  }
 
   if (manuscript.isScreenplay === false && format === 'fountain') {
     return NextResponse.json(

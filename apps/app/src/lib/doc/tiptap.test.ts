@@ -82,7 +82,9 @@ describe('node shapes', () => {
   })
 
   it('lets a blockquote hold paragraphs and nothing else', () => {
-    expect(proseSchema.nodes.blockquote?.spec.content).toBe('block+')
+    // It said 'block+' until the 2026-10-16 spec review: the test had written
+    // down the value the code had, under a name that said the opposite.
+    expect(proseSchema.nodes.blockquote?.spec.content).toBe('paragraph+')
     // The server is the stricter of the two: quotes hold paragraphs only, so a
     // quoted heading is not storable even though ProseMirror would allow it.
     const quotedHeading = {

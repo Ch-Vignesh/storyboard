@@ -4,6 +4,7 @@ import Link from '@/components/link'
 import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
+import { Manuscript } from '@/components/manuscript'
 import { flavourForStoryType } from '@/lib/doc/schema'
 import { caller } from '@/trpc/server'
 
@@ -14,7 +15,7 @@ type Params = { params: Promise<{ slug: string; request: string }> }
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Write a suggestion' }
 
-/** Screen 9 — constraints pinned, word counter live, current text alongside. */
+/** Screen 9 — constraints pinned, word counter live, the text it follows in view. */
 export default async function ComposerPage({ params }: Params) {
   const { slug, request: publicId } = await params
   const session = await auth()
@@ -35,6 +36,10 @@ export default async function ComposerPage({ params }: Params) {
   if (!mine) redirect(`/s/${slug}/help/${publicId}`)
 
   const draft = await caller.suggestion.get({ publicId: mine.publicId })
+  const section = await caller.section.get({ sectionId: data.request.section.id })
+  const flavour = flavourForStoryType(data.request.storyboard.type)
+  const continues = data.request.kind === 'CONTINUE'
+  const current = section.section.currentRevision
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
@@ -48,9 +53,39 @@ export default async function ComposerPage({ params }: Params) {
         </Link>
       </nav>
 
+      {/* What this is written to follow, kept in view while it is written.
+          A continuation was written blind to the opening it follows until
+          the 2026-10-16 spec review: the composer showed neither the story so
+          far (FR-5.4) nor the section. Open for a continuation; a rewrite
+          starts from the section's text, so there it is only a reference. */}
+      {data.request.preContext || (current && current.wordCount > 0) ? (
+        <div className="mb-8 max-w-measure space-y-3 border-b border-rule pb-6">
+          {data.request.preContext ? (
+            <details open={continues}>
+              <summary className="cursor-pointer text-[12px] font-medium tracking-wide text-ink-faint uppercase">
+                The story so far
+              </summary>
+              <p className="manuscript mt-3 whitespace-pre-line text-ink-soft">
+                {data.request.preContext}
+              </p>
+            </details>
+          ) : null}
+          {current && current.wordCount > 0 ? (
+            <details open={continues}>
+              <summary className="cursor-pointer text-[12px] font-medium tracking-wide text-ink-faint uppercase">
+                {continues ? 'What yours will follow' : 'The section as it stands'}
+              </summary>
+              <div className="manuscript mt-3 text-ink-soft">
+                <Manuscript content={current.contentJson} flavour={flavour} />
+              </div>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+
       <SuggestionComposer
         suggestionId={draft.suggestion.id}
-        flavour={flavourForStoryType(data.request.storyboard.type)}
+        flavour={flavour}
         initialContent={draft.suggestion.contentJson}
         constraints={data.request.constraints}
         toneNotes={data.request.toneNotes}

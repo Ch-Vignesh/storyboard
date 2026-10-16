@@ -24,7 +24,7 @@ import { publicId, slugify } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import { confirmedOutlineSchema } from '@/lib/schemas/import'
 import { BULK_WRITE_TRANSACTION, DAILY_LIMITS } from '@/lib/schemas/constants'
-import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
+import { DAY_MS, enforce, key, used, whenToRetry } from '@/server/limits'
 import { createStoryboardSchema } from '@/lib/schemas/storyboard'
 import { outlineProblem } from '@/server/import-outline'
 import {
@@ -83,6 +83,19 @@ export const importRouter = createTRPCRouter({
       }
       if (input.byteSize > IMPORT_LIMITS.bytes) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'That file is larger than 5 MB.' })
+      }
+
+      // A day's stories already started: an import would be refused at the
+      // end, after the upload and the review, so say so now. Read, not spent;
+      // `commit` spends it.
+      if (
+        (await used(ctx.db, key.storyboardsCreated(userId), DAY_MS)) >=
+        DAILY_LIMITS.storyboardsCreated
+      ) {
+        throw new TRPCError({
+          code: 'TOO_MANY_REQUESTS',
+          message: `You have started ${String(DAILY_LIMITS.storyboardsCreated)} stories today, which is the most for a day, and an import is a story. Try again tomorrow.`,
+        })
       }
 
       // FR-13.3 — twice the daily ceiling for creating a storyboard by hand,
@@ -281,6 +294,18 @@ export const importRouter = createTRPCRouter({
       const problem = outlineProblem(input.outline, blocks.length)
       if (problem) throw new TRPCError({ code: 'BAD_REQUEST', message: problem })
 
+      // FR-13.3 — five stories a day, and an import makes one. It counted only
+      // against its own, larger allowance until the 2026-10-16 spec review,
+      // so five stories by hand and ten imported made fifteen. Spent here,
+      // where the story is made, not when the file was chosen.
+      await enforce(
+        ctx.db,
+        key.storyboardsCreated(userId),
+        { limit: DAILY_LIMITS.storyboardsCreated, windowMs: DAY_MS },
+        (retryAt) =>
+          `You can start ${String(DAILY_LIMITS.storyboardsCreated)} stories a day, and an import is one. Your file is kept for a day; try again ${whenToRetry(retryAt)}.`,
+      )
+
       const flavour = flavourForStoryType(input.type)
       const id = publicId()
       const now = new Date()
@@ -475,6 +500,14 @@ function docFromBlocks(
       continue
     }
     content.push(node)
+  }
+
+  // FR-3.7 — "footnote text, at the end of its section": the notes referred
+  // to in this section's blocks, after its last one (extract/docx.ts).
+  for (let index = from; index <= to && index < blocks.length; index += 1) {
+    for (const note of blocks[index]?.footnotes ?? []) {
+      content.push({ type: 'paragraph', content: [{ type: 'text', text: note }] })
+    }
   }
 
   // A section with nothing in it is not storable; an empty paragraph is.

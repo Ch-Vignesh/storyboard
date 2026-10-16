@@ -114,6 +114,24 @@ describe.skipIf(!databaseUrl)('profiles (phase 12 audit)', () => {
     expect(await stillNamed(family)).toBe(0)
   })
 
+  /**
+   * FR-9.3 with FR-10.4. A spin-off's inherited copy of a credit was counted
+   * and listed as a contribution of its own, so one passage counted once per
+   * spin-off, and its credit line named the spin-off's owner as the author
+   * written for (2026-10-16 spec review).
+   */
+  it('counts and lists a contribution once, however many spin-offs carry it', async () => {
+    const writer = await person('counted-once')
+    await aCreditCopiedTwice(writer.id)
+    const visitor = await as(null)
+
+    const profile = await visitor.profile.byUsername({ username: writer.username })
+    expect(profile.counts.prose).toBe(1)
+    expect(profile.credits).toHaveLength(1)
+    const lines = await visitor.profile.creditLines({ username: writer.username })
+    expect(lines.lines).toHaveLength(1)
+  })
+
   it('erases the original too when asked from a copy', async () => {
     const writer = await person('erase-up')
     const family = await aCreditCopiedTwice(writer.id)

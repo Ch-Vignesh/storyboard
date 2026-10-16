@@ -1,8 +1,10 @@
+import type { Prisma } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadStoryboard, loadVersion } from '@/lib/authz/guard'
 import { logger } from '@/lib/logger'
+import { closeRequest, closeRequestsOnSections } from '@/server/close-requests'
 
 import { copyTree } from '@/server/tree'
 
@@ -165,8 +167,17 @@ export const versionRouter = createTRPCRouter({
         }
         await tx.version.update({ where: { id: versionId }, data: { isMain: true } })
 
-        return { previousId: previous?.id ?? null, previousName: previous?.name ?? null }
+        const stranded = previous ? await carryRequestsOver(tx, previous.id, versionId) : []
+        return {
+          previousId: previous?.id ?? null,
+          previousName: previous?.name ?? null,
+          stranded,
+        }
       })
+
+      // Those with nowhere to go are closed, and their helpers told, as for
+      // any other close. After the transaction: telling is not part of it.
+      for (const requestId of result.stranded) await closeRequest(ctx.db, requestId)
 
       // NFR-7 — promotion is one of the socially consequential moments.
       log.info(
@@ -175,11 +186,12 @@ export const versionRouter = createTRPCRouter({
           versionId,
           storyboardId,
           previousMainId: result.previousId,
+          requestsClosed: result.stranded.length,
           userId: ctx.session.user.id,
         },
         'version promoted to main draft',
       )
-      return { versionId, ...result }
+      return { versionId, previousId: result.previousId, previousName: result.previousName }
     }),
 
   /**
@@ -207,21 +219,30 @@ export const versionRouter = createTRPCRouter({
         })
       }
 
-      await ctx.db.$transaction(async (tx) => {
+      const removed = await ctx.db.$transaction(async (tx) => {
         const now = new Date()
         const chapters = await tx.chapter.findMany({
           where: { versionId, deletedAt: null },
           select: { id: true },
         })
-        await tx.section.updateMany({
+        const sections = await tx.section.findMany({
           where: { chapterId: { in: chapters.map((chapter) => chapter.id) }, deletedAt: null },
+          select: { id: true },
+        })
+        await tx.section.updateMany({
+          where: { id: { in: sections.map((section) => section.id) } },
           data: { deletedAt: now },
         })
         await tx.chapter.updateMany({
           where: { versionId, deletedAt: null },
           data: { deletedAt: now },
         })
+        return sections.map((section) => section.id)
       })
+      // A request can no longer be opened on an alternate, but one opened
+      // before that rule, or carried here by a promotion, would be left open
+      // on text that is gone.
+      await closeRequestsOnSections(ctx.db, removed)
 
       log.info({ event: 'version.delete', versionId }, 'alternate version removed')
       return { ok: true }
@@ -229,3 +250,61 @@ export const versionRouter = createTRPCRouter({
 })
 
 export { copyTree } from '@/server/tree'
+
+/**
+ * FR-10.2 with FR-5.1 — the open requests on the draft that was main, moved
+ * to the same section (by lineage) in the draft that is main now. Until the
+ * 2026-10-16 spec review they stayed on the demoted draft: helpers went on
+ * answering prose readers could no longer see, and an accept wrote into the
+ * alternate.
+ *
+ * Their suggestions come along untouched. Each still names the revision it
+ * was written against, so if the new main's text differs, FR-6.7 already says
+ * what happens: the author sees it was written against an earlier text.
+ *
+ * Returns the requests with nowhere to go, because the new main has no such
+ * section or already has a request open on it, for the caller to close.
+ */
+async function carryRequestsOver(
+  tx: Prisma.TransactionClient,
+  fromVersionId: string,
+  toVersionId: string,
+): Promise<string[]> {
+  const open = await tx.contributionRequest.findMany({
+    where: {
+      state: { in: ['OPEN', 'ANSWERED'] },
+      section: { chapter: { versionId: fromVersionId } },
+    },
+    select: { id: true, section: { select: { lineageId: true } } },
+  })
+  if (open.length === 0) return []
+
+  const counterparts = await tx.section.findMany({
+    where: {
+      lineageId: { in: open.map((request) => request.section.lineageId) },
+      deletedAt: null,
+      mergedIntoId: null,
+      chapter: { versionId: toVersionId, deletedAt: null },
+    },
+    select: {
+      id: true,
+      lineageId: true,
+      requests: { where: { state: { in: ['OPEN', 'ANSWERED'] } }, select: { id: true } },
+    },
+  })
+  const counterpartOf = new Map(counterparts.map((section) => [section.lineageId, section]))
+
+  const stranded: string[] = []
+  for (const request of open) {
+    const counterpart = counterpartOf.get(request.section.lineageId)
+    if (!counterpart || counterpart.requests.length > 0) {
+      stranded.push(request.id)
+      continue
+    }
+    await tx.contributionRequest.update({
+      where: { id: request.id },
+      data: { sectionId: counterpart.id },
+    })
+  }
+  return stranded
+}

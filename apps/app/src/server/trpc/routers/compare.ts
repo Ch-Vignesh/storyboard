@@ -4,7 +4,10 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadSection, loadStoryboard, loadVersion } from '@/lib/authz/guard'
-import { canReadRevisionAt } from '@/lib/authz'
+import { canReadRevisionAt, canReadSuggestionSentAt } from '@/lib/authz'
+import { flavourForStoryType } from '@/lib/doc/schema'
+import { derive } from '@/lib/doc/text'
+import { acceptedDoc } from '@/server/accepted-text'
 
 import { actorFrom, createTRPCRouter, publicProcedure } from '../init'
 
@@ -19,7 +22,13 @@ import { actorFrom, createTRPCRouter, publicProcedure } from '../init'
  * live and not cached — exactly as the architecture says.
  */
 
-/** Both revisions must belong to the same section, or the comparison is nonsense. */
+/**
+ * Both revisions must be of the same section, or the comparison is nonsense.
+ * "The same section" is its lineage within one story, not one section row:
+ * an alternate version's sections are rows of their own, so the first edit
+ * in one has the main draft's revision for its parent, and "What changed" on
+ * it was refused until the 2026-10-16 spec review.
+ */
 async function loadPair(
   db: PrismaClient,
   actor: { id: string } | null,
@@ -28,23 +37,36 @@ async function loadPair(
 ) {
   const revisions = await db.revision.findMany({
     where: { id: { in: [baseId, targetId] } },
-    select: { id: true, sectionId: true, contentText: true, createdAt: true, wordCount: true },
+    select: {
+      id: true,
+      sectionId: true,
+      contentText: true,
+      createdAt: true,
+      wordCount: true,
+      section: { select: { lineageId: true } },
+    },
   })
   const base = revisions.find((revision) => revision.id === baseId)
   const target = revisions.find((revision) => revision.id === targetId)
   if (!base || !target) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'That version does not exist.' })
   }
-  if (base.sectionId !== target.sectionId) {
-    throw new TRPCError({
+  const different = () =>
+    new TRPCError({
       code: 'BAD_REQUEST',
       message: 'Those two versions belong to different sections.',
     })
-  }
+  if (base.section.lineageId !== target.section.lineageId) throw different()
 
   // The section check is what enforces visibility; loadSection throws 404 for
-  // anyone who may not read the storyboard.
+  // anyone who may not read the storyboard. Both sections when they are two
+  // rows: a lineage is copied into spin-offs, so the other could be in a story
+  // this person may not read.
   const section = await loadSection(db, actor, base.sectionId)
+  if (target.sectionId !== base.sectionId) {
+    const other = await loadSection(db, actor, target.sectionId)
+    if (other.storyboardId !== section.storyboardId) throw different()
+  }
 
   // Decision 0007 — a reader of a formerly private storyboard must not reach a
   // pre-switch revision through the comparison view either.
@@ -210,11 +232,15 @@ export const compareRouter = createTRPCRouter({
           id: true,
           state: true,
           contentText: true,
+          contentJson: true,
           baseRevisionId: true,
           contributorId: true,
+          submittedAt: true,
           request: {
             select: {
               storyboardId: true,
+              kind: true,
+              storyboard: { select: { type: true } },
               section: { select: { id: true, currentRevisionId: true } },
             },
           },
@@ -224,25 +250,69 @@ export const compareRouter = createTRPCRouter({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
       }
 
-      await loadStoryboard(ctx.db, actor, { id: suggestion.request.storyboardId })
+      const { resource } = await loadStoryboard(ctx.db, actor, {
+        id: suggestion.request.storyboardId,
+      })
       if (suggestion.state === 'DRAFT' && suggestion.contributorId !== actor?.id) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
+      }
+      // Decision 0007 (and 0039): sent while the story was private, it stays
+      // with its authors. `suggestion.get` checked this and the comparison of
+      // the same suggestion did not, until the 2026-10-16 spec review.
+      if (!canReadSuggestionSentAt(actor, resource, suggestion.submittedAt)) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
       }
 
       const head = suggestion.request.section.currentRevisionId
-      const current = head
-        ? await ctx.db.revision.findUnique({
-            where: { id: head },
-            select: { id: true, contentText: true },
-          })
-        : null
 
-      const result = compare(current?.contentText ?? '', suggestion.contentText)
+      // An accepted suggestion is shown as what accepting it did: the text
+      // before it against the revision it made. Compared with the head, as it
+      // was until the 2026-10-16 spec review, an accepted rewrite showed
+      // nothing changed, an accepted continuation showed itself added twice,
+      // and every one carried "Accepting it will replace the current text".
+      if (suggestion.state === 'ACCEPTED') {
+        const made = await ctx.db.revision.findFirst({
+          where: { suggestionId: suggestion.id },
+          select: { contentText: true, parent: { select: { contentText: true } } },
+        })
+        return {
+          ...compare(made?.parent?.contentText ?? '', made?.contentText ?? suggestion.contentText),
+          isStale: false,
+          headRevisionId: head,
+        }
+      }
+
+      const textOf = (id: string | null) =>
+        id
+          ? ctx.db.revision.findUnique({
+              where: { id },
+              select: { contentText: true, contentJson: true },
+            })
+          : Promise.resolve(null)
+      const [current, base] = await Promise.all([
+        textOf(head),
+        textOf(suggestion.request.kind === 'CONTINUE' ? suggestion.baseRevisionId : null),
+      ])
+
+      // What the section would read once accepted, not the suggestion alone:
+      // a continuation is added after the text it was written to follow
+      // (decision 0038), so comparing it with the whole section showed the
+      // author's words as deleted.
+      const after = derive(
+        acceptedDoc(
+          suggestion.request.kind,
+          base?.contentJson ?? null,
+          suggestion.contentJson,
+          flavourForStoryType(suggestion.request.storyboard.type),
+        ),
+      ).contentText
+      const result = compare(current?.contentText ?? '', after)
+      const undecided = suggestion.state === 'SUBMITTED' || suggestion.state === 'STALE'
 
       return {
         ...result,
-        /** FR-6.7 — written against a revision that is no longer the head. */
-        isStale: head !== suggestion.baseRevisionId,
+        /** FR-6.7 — still waiting, and written against a revision that is no longer the head. */
+        isStale: undecided && head !== suggestion.baseRevisionId,
         headRevisionId: head,
       }
     }),

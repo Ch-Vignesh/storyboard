@@ -78,11 +78,19 @@ test('a writer brings an 80,000-word manuscript in and takes it back out', async
   await expect(page.getByRole('heading', { name: /is this where the chapters are/i })).toBeVisible({
     timeout: 60_000,
   })
+
+  // A reload comes back to the review, not to an empty form: the file was
+  // read once and is not read again. Until the 2026-10-16 spec review it was
+  // all lost, upload included.
+  await expect(page).toHaveURL(/\/import\?job=/)
+  await page.reload()
+  await expect(page.getByRole('heading', { name: /is this where the chapters are/i })).toBeVisible()
   const reviewStarted = Date.now()
 
   // ── FR-3.3, FR-3.5: what it found, and how, in words rather than a number.
   await expect(page.getByText(/read as 20 chapters/i)).toBeVisible()
-  await expect(page.getByText(/from a line that says "chapter"/i)).toBeVisible()
+  // Said for the whole, and again beside every chapter (FR-3.5, per boundary).
+  await expect(page.getByText(/from a line that says "chapter"/i)).toHaveCount(21)
   await expect(page.getByText(/\d{2},\d{3} words/)).toBeVisible()
 
   // ── FR-3.2: correct the boundaries. Two corrections, both by hand.
@@ -100,21 +108,39 @@ test('a writer brings an 80,000-word manuscript in and takes it back out', async
   const firstTitle = chapters.first().getByRole('textbox')
   await firstTitle.fill('The harbour')
 
-  // 3. Split a section in two, which is the other correction the review
-  //    screen exists for. The first chapter is open already.
+  // 3. Split a section where the writer says, which is the other correction
+  //    the review screen exists for. The first chapter is open already, and
+  //    says why each section starts where it does (FR-3.5, per boundary).
   await expect(chapters.first().getByRole('button', { name: /^hide$/i })).toBeVisible()
-  const sectionsBefore = await chapters
-    .first()
-    .getByRole('button', { name: /split this in two/i })
-    .count()
+  const starts = chapters.first().getByText(/^starts here/i)
+  await expect(starts.first()).toHaveText(/where the chapter starts/i)
+  const sectionsBefore = await starts.count()
   await chapters
     .first()
-    .getByRole('button', { name: /split this in two/i })
+    .getByRole('button', { name: /split this/i })
     .first()
     .click()
-  await expect(
-    chapters.first().getByRole('button', { name: /split this in two/i }),
-  ).not.toHaveCount(sectionsBefore)
+  // Not the middle: the paragraph chosen (only the middle, until 2026-10-16).
+  await page
+    .getByRole('list', { name: /paragraphs to start a new section at/i })
+    .getByRole('button')
+    .nth(2)
+    .click()
+  await expect(starts).toHaveCount(sectionsBefore + 1)
+  await expect(chapters.first().getByText(/starts here where you put it/i)).toHaveCount(1)
+
+  // 4. Move a boundary, which could not be done at all before.
+  await chapters
+    .first()
+    .getByRole('button', { name: /move where it starts/i })
+    .first()
+    .click()
+  await page
+    .getByRole('list', { name: /paragraphs this section could start at/i })
+    .getByRole('button')
+    .first()
+    .click()
+  await expect(starts).toHaveCount(sectionsBefore + 1)
 
   // ── Everything a storyboard needs that a file cannot say.
   await page.getByLabel('Title').fill('The ship never lands')
@@ -142,6 +168,16 @@ test('a writer brings an 80,000-word manuscript in and takes it back out', async
   // The second chapter's boundary was removed, so what follows is chapter 3.
   await expect(names.nth(1)).toHaveValue('Chapter 3')
   await expect(names.last()).toHaveValue('Chapter 20')
+
+  // FR-2.3 — a section is named here too, and the reader shows the name.
+  // Nothing called `section.rename` until the 2026-10-16 spec review.
+  const firstSection = page.getByRole('textbox', { name: /chapter 1, section 1 name/i })
+  await firstSection.fill('Arrival')
+  const renamed = page.waitForResponse((response) => response.url().includes('section.rename'))
+  await firstSection.blur()
+  expect((await renamed).ok()).toBe(true)
+  await page.goto(`/s/${slug}`)
+  await expect(page.getByRole('heading', { name: 'Arrival' })).toBeVisible()
 
   // ── FR-14: take it back out, with the front matter FR-14.3 requires.
   await page.goto(`/s/${slug}/export`)

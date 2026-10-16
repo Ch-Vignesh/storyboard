@@ -87,8 +87,8 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     // The count is asserted so that adding a type is a deliberate act — a new
     // one with no label and no delivery class would otherwise be silently
     // undeliverable. It went from twelve to thirteen when REQUEST_CLOSED
-    // arrived with FR-2.7.
-    expect(NOTIFICATION_TYPES).toHaveLength(13)
+    // arrived with FR-2.7, and to fourteen with REQUEST_REOPENED (FR-5.9).
+    expect(NOTIFICATION_TYPES).toHaveLength(14)
     for (const type of NOTIFICATION_TYPES) {
       const definition = NOTIFICATIONS[type]
       expect(definition.label.length, `${type} needs a label`).toBeGreaterThan(0)
@@ -122,6 +122,113 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
       expect(mail.text.length).toBeGreaterThan(0)
       expect(mail.text).toContain('http')
       expect(mail.html).not.toContain('<img')
+    }
+  })
+
+  /**
+   * 2026-10-16 spec review: the link was built from the payload, and most
+   * payloads hold only ids, so a decision on your suggestion linked to the
+   * notification list, where the row had no link either.
+   */
+  it('links a decision to the suggestion it is about', async () => {
+    await db.notification.deleteMany({ where: { userId } })
+    const storyboard = await db.storyboard.create({
+      data: {
+        publicId: `dg${run}`,
+        slug: `digest-link-${run}`,
+        title: 'Digest link',
+        type: 'NOVEL',
+        visibility: 'PUBLIC',
+        publicFrom: new Date(Date.now() - 60_000),
+        ownerId: userId,
+      },
+      select: { id: true, slug: true },
+    })
+    try {
+      const version = await db.version.create({
+        data: {
+          storyboardId: storyboard.id,
+          name: 'Main draft',
+          isMain: true,
+          createdById: userId,
+        },
+        select: { id: true },
+      })
+      const chapter = await db.chapter.create({
+        data: { versionId: version.id, lineageId: randomUUID(), order: 0, title: 'One' },
+        select: { id: true },
+      })
+      const section = await db.section.create({
+        data: { chapterId: chapter.id, lineageId: randomUUID(), order: 0 },
+        select: { id: true },
+      })
+      const revision = await db.revision.create({
+        data: {
+          sectionId: section.id,
+          contentJson: { type: 'doc', content: [] },
+          contentText: '',
+          wordCount: 0,
+          contentHash: randomUUID().replaceAll('-', '').padEnd(64, '0'),
+          source: 'AUTHORED',
+          authorId: userId,
+        },
+        select: { id: true },
+      })
+      const request = await db.contributionRequest.create({
+        data: {
+          publicId: `rq${run}`,
+          storyboardId: storyboard.id,
+          sectionId: section.id,
+          openedById: userId,
+          kind: 'REWRITE',
+          title: 'The harbour scene',
+          ask: 'Shorter.',
+          minWords: 1,
+          maxWords: 100,
+        },
+        select: { id: true, publicId: true },
+      })
+      const suggestion = await db.suggestion.create({
+        data: {
+          publicId: `sg${run}`,
+          requestId: request.id,
+          contributorId: userId,
+          baseRevisionId: revision.id,
+          contentJson: { type: 'doc', content: [] },
+          contentText: 'Shorter.',
+          state: 'PASSED',
+          submittedAt: new Date(),
+        },
+        select: { id: true, publicId: true },
+      })
+      await db.notification.create({
+        data: {
+          userId,
+          type: 'SUGGESTION_PASSED',
+          payload: { suggestionId: suggestion.id, requestId: request.id },
+        },
+      })
+
+      const mailer = recordingMailer()
+      await runImmediate(db, { mailer })
+
+      const [mail] = mineIn(mailer)
+      expect(mail?.text).toContain(
+        `/s/${storyboard.slug}/help/${request.publicId}/s/${suggestion.publicId}`,
+      )
+      expect(mail?.subject).toContain('The harbour scene')
+    } finally {
+      await db.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`select set_config('storyboard.hard_delete', 'on', true)`)
+        const where = { chapter: { version: { storyboardId: storyboard.id } } }
+        await tx.section.updateMany({ where, data: { currentRevisionId: null } })
+        await tx.contributionRequest.deleteMany({ where: { storyboardId: storyboard.id } })
+        await tx.revision.deleteMany({ where: { section: where } })
+        await tx.section.deleteMany({ where })
+        await tx.chapter.deleteMany({ where: { version: { storyboardId: storyboard.id } } })
+        await tx.version.deleteMany({ where: { storyboardId: storyboard.id } })
+        await tx.storyboard.delete({ where: { id: storyboard.id } })
+      })
     }
   })
 
@@ -263,7 +370,7 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     expect(mineIn(mailer)).toHaveLength(0)
   })
 
-  it('the quiet nudge offers two actions and never says the request failed (FR-12.4)', async () => {
+  it('the quiet nudge never says the request failed, nor offers what does not exist (FR-12.4)', async () => {
     // Asserted on the template rather than a seeded request: the wording is the
     // requirement, and it is what a nudged author actually reads.
     const { quietRequestMail } = await import('./templates/notification')
@@ -271,13 +378,15 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
       to: 'someone@example.test',
       requestTitle: 'Chapter four will not start',
       requestUrl: 'https://example.test/s/a/help/b',
-      widenUrl: 'https://example.test/s/a/help/b?widen=1',
       appUrl: 'https://example.test',
     })
 
-    expect(mail.text).toContain('Widen the word range')
-    expect(mail.text).toContain("Sunday's digest")
     expect(mail.text).toMatch(/not a verdict/i)
+    // What a writer can actually do, and nothing that is not built: it
+    // offered a one-click widening and a place in a digest that never takes a
+    // week-old request, until the 2026-10-16 spec review.
+    expect(mail.text).toContain('No answers yet')
+    expect(mail.text).not.toMatch(/digest|widen=/i)
     // The words the requirement is written to avoid.
     expect(mail.text).not.toMatch(/\bfailed\b|\bunsuccessful\b|\bnobody wants\b/i)
   })

@@ -16,8 +16,12 @@ import {
   assertCan,
   can,
   canReadRevisionAt,
+  canReadSuggestionSentAt,
   isAuthor,
   permissionsFor,
+  STORY_NOT_FOUND,
+  suggestionVisibilityWhere,
+  writtenWhilePrivate,
   revisionVisibilityWhere,
   roleOn,
   type Actor,
@@ -156,6 +160,8 @@ describe('assertCan', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(TRPCError)
       expect((error as TRPCError).code).toBe('NOT_FOUND')
+      // The sentence a story that is not there gets, too (guard.ts).
+      expect((error as TRPCError).message).toBe(STORY_NOT_FOUND)
     }
   })
 
@@ -364,6 +370,53 @@ describe('pre-switch history stays private (FR-2.7, OD-4 / decision 0007)', () =
       const where = revisionVisibilityWhere({ id: STRANGER }, corrupt)
       expect(where.createdAt?.gte.getTime()).toBeGreaterThan(Date.now())
       expect(canReadRevisionAt({ id: STRANGER }, corrupt, new Date())).toBe(false)
+    })
+  })
+})
+
+describe('a later private stretch stays private too (FR-2.7, decision 0039)', () => {
+  const wentPublic = new Date('2026-09-14T12:00:00Z')
+  const wentPrivate = new Date('2026-10-01T12:00:00Z')
+  const publicAgain = new Date('2026-10-10T12:00:00Z')
+  const resource = {
+    ...storyboard(),
+    publicFrom: wentPublic,
+    privateSpans: [{ startedAt: wentPrivate, endedAt: publicAgain }],
+  }
+  const before = new Date('2026-09-20T09:00:00Z')
+  const during = new Date('2026-10-05T09:00:00Z')
+  const after = new Date('2026-10-12T09:00:00Z')
+
+  it('hides from a reader what was written while it was private again', () => {
+    expect(canReadRevisionAt({ id: STRANGER }, resource, during)).toBe(false)
+    expect(canReadSuggestionSentAt({ id: STRANGER }, resource, during)).toBe(false)
+  })
+
+  it('keeps what was public before, and what came after', () => {
+    expect(canReadRevisionAt({ id: STRANGER }, resource, before)).toBe(true)
+    expect(canReadRevisionAt({ id: STRANGER }, resource, after)).toBe(true)
+    // Its first instant private is private; its first instant public again is not.
+    expect(writtenWhilePrivate(resource, wentPrivate)).toBe(true)
+    expect(writtenWhilePrivate(resource, publicAgain)).toBe(false)
+  })
+
+  it('shows an author all of it', () => {
+    expect(canReadRevisionAt({ id: OWNER }, resource, during)).toBe(true)
+  })
+
+  it('says the same in the database query', () => {
+    expect(revisionVisibilityWhere({ id: STRANGER }, resource)).toEqual({
+      createdAt: { gte: wentPublic },
+      NOT: [{ createdAt: { gte: wentPrivate, lt: publicAgain } }],
+    })
+    expect(suggestionVisibilityWhere({ id: STRANGER }, resource)).toEqual({
+      OR: [
+        { submittedAt: null },
+        {
+          submittedAt: { gte: wentPublic },
+          NOT: [{ submittedAt: { gte: wentPrivate, lt: publicAgain } }],
+        },
+      ],
     })
   })
 })

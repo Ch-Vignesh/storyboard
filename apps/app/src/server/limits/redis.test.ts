@@ -55,22 +55,25 @@ describe('the Redis limiter (decision 0017, revisited)', () => {
     expect(redisConfigured()).toBe(true)
   })
 
-  it('drops what has fallen out of the window before counting what is left', async () => {
-    fetchMock
-      .mockResolvedValueOnce(reply(0, 2, ['member', '1700000000000']))
-      .mockResolvedValueOnce(reply(1, 1))
+  /** The replies to one consume's pipeline: dropped, added, expiry set, count, oldest. */
+  const counted = (count: number, oldest: unknown[] = []) => reply(0, 1, 1, count, oldest)
+
+  it('drops what has fallen out of the window, and adds, before counting', async () => {
+    fetchMock.mockResolvedValueOnce(counted(3, ['member', '1700000000000']))
 
     await consumeRedis('suggestion:submit:u1', { limit: 10, windowMs: 60_000 })
 
-    const [drop, count] = commandsOf(0)
-    // This order is what makes the window slide rather than reset: counting
-    // before dropping would include hits the window has already let go.
-    expect(drop?.[0]).toBe('ZREMRANGEBYSCORE')
-    expect(count?.[0]).toBe('ZCARD')
+    const names = commandsOf(0).map((command) => command[0])
+    // Dropping first is what makes the window slide rather than reset:
+    // counting before dropping would include hits the window has let go.
+    expect(names[0]).toBe('ZREMRANGEBYSCORE')
+    // Adding before counting is what stops callers who arrive together all
+    // counting before any has added, and all getting through (2026-10-16).
+    expect(names.indexOf('ZADD')).toBeLessThan(names.indexOf('ZCARD'))
   })
 
   it('namespaces the key, so a shared Redis cannot collide', async () => {
-    fetchMock.mockResolvedValueOnce(reply(0, 0, [])).mockResolvedValueOnce(reply(1, 1))
+    fetchMock.mockResolvedValueOnce(counted(1))
 
     await consumeRedis('idea:post:u1', { limit: 3, windowMs: 60_000 })
 
@@ -78,9 +81,7 @@ describe('the Redis limiter (decision 0017, revisited)', () => {
   })
 
   it('allows an action under the limit and records it with an expiry', async () => {
-    fetchMock
-      .mockResolvedValueOnce(reply(0, 2, ['member', String(Date.now())]))
-      .mockResolvedValueOnce(reply(1, 1))
+    fetchMock.mockResolvedValueOnce(counted(3, ['member', String(Date.now())]))
 
     const verdict = await consumeRedis('k', { limit: 10, windowMs: 60_000 })
 
@@ -88,39 +89,39 @@ describe('the Redis limiter (decision 0017, revisited)', () => {
     expect(verdict.remaining).toBe(7)
     expect(verdict.retryAt).toBeNull()
 
-    const [add, expire] = commandsOf(1)
-    expect(add?.[0]).toBe('ZADD')
+    const names = commandsOf(0).map((command) => command[0])
+    expect(names).toContain('ZADD')
     // A key nobody touches again must not live for ever.
-    expect(expire?.[0]).toBe('PEXPIRE')
+    expect(names).toContain('PEXPIRE')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('gives each hit a unique member, or two in one millisecond become one', async () => {
-    fetchMock
-      .mockResolvedValueOnce(reply(0, 0, []))
-      .mockResolvedValueOnce(reply(1, 1))
-      .mockResolvedValueOnce(reply(0, 1, ['m', String(Date.now())]))
-      .mockResolvedValueOnce(reply(1, 1))
+    fetchMock.mockResolvedValueOnce(counted(1)).mockResolvedValueOnce(counted(2))
 
     await consumeRedis('k', { limit: 10, windowMs: 60_000 })
     await consumeRedis('k', { limit: 10, windowMs: 60_000 })
 
-    const first = commandsOf(1)[0]?.[3]
-    const second = commandsOf(3)[0]?.[3]
+    const first = commandsOf(0)[1]?.[3]
+    const second = commandsOf(1)[1]?.[3]
     expect(first).not.toBe(second)
   })
 
-  it('refuses at the limit, and says when the window frees up', async () => {
+  it('refuses over the limit, takes its own hit back, and says when to return', async () => {
     const oldest = Date.now() - 30_000
-    fetchMock.mockResolvedValueOnce(reply(0, 10, ['member', String(oldest)]))
+    fetchMock
+      .mockResolvedValueOnce(counted(11, ['member', String(oldest)]))
+      .mockResolvedValueOnce(reply(1))
 
     const verdict = await consumeRedis('k', { limit: 10, windowMs: 60_000 })
 
     expect(verdict.ok).toBe(false)
     expect(verdict.remaining).toBe(0)
     expect(verdict.retryAt?.getTime()).toBe(oldest + 60_000)
-    // Nothing is recorded when nothing was allowed: counting a refusal against
-    // the limit is the bug the phase 6 audit found twice.
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // A refusal must not count against the limit: the bug the phase 6 audit
+    // found twice. The hit it added to count itself is the one removed.
+    const added = commandsOf(0)[1]
+    expect(commandsOf(1)).toEqual([['ZREM', added?.[1], added?.[3]]])
   })
 
   it('throws rather than guessing when Upstash answers badly', async () => {
@@ -143,7 +144,7 @@ describe('the Redis limiter (decision 0017, revisited)', () => {
   })
 
   it('sends the token, and gives up rather than hanging', async () => {
-    fetchMock.mockResolvedValueOnce(reply(0, 0, [])).mockResolvedValueOnce(reply(1, 1))
+    fetchMock.mockResolvedValueOnce(counted(1))
     await consumeRedis('k', { limit: 1, windowMs: 1000 })
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]

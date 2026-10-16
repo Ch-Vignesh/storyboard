@@ -108,8 +108,11 @@ Contributor status is a historical fact, not a live permission grant. A contribu
 | Post an idea                           | ✓     | ✓         | ✓      | —     |
 | Spin off (own copy)                    | ✓     | ✓         | ✓      | —     |
 | Report a user or storyboard            | ✓     | ✓         | ✓      | —     |
+| Export the manuscript to a file †      | ✓     | ✓         | —      | —     |
 
 \* Owners and co-authors bypass the three-suggestion quota on their own storyboard (FR-13.2).
+
+† Recorded 2026-10-16: the code enforced this row and the table never said so. A reader who wants the words takes them by spinning off, which keeps the credit chain (FR-10.3).
 
 ---
 
@@ -131,7 +134,7 @@ User
 
 **Section is the atomic unit of contribution.** A request is always attached to exactly one section. Chapters exist for navigation and reading order only; nothing is ever contributed to a chapter.
 
-**Every object has a URL.** `/s/{storyboard-slug}` · `/s/{slug}/c/{chapter-no}` · `/s/{slug}/c/{chapter-no}/{section-slug}` · `/s/{slug}/help/{request-id}` · `/s/{slug}/help/{request-id}/s/{suggestion-id}`. An alternate version is a query param on the storyboard routes: `?v={version-slug}`. Main draft needs no param.
+**Every object has a URL.** `/s/{storyboard-slug}` · `/s/{slug}/c/{chapter-no}` · `/s/{slug}/c/{chapter-no}/{section-slug}` · `/s/{slug}/help/{request-id}` · `/s/{slug}/help/{request-id}/s/{suggestion-id}`. An alternate version is a query param on the storyboard routes: `?version={version-id}` (recorded 2026-10-16; versions have ids, not slugs, and the parameter was always `version`). Main draft needs no param.
 
 ---
 
@@ -242,7 +245,7 @@ User
 
 ### FR-8 — Accepting, restoring, and history
 
-- **FR-8.1** Accepting creates a new `Revision` whose `parent_id` is the current head, whose content is the suggestion's content, whose `author_id` is the _contributor_, and whose `accepted_by_id` is the deciding author. Both names appear in history.
+- **FR-8.1** Accepting creates a new `Revision` whose `parent_id` is the current head, whose content is the suggestion's content, whose `author_id` is the _contributor_, and whose `accepted_by_id` is the deciding author. Both names appear in history. _(For a `continue` request, the content is the section's text followed by the suggestion, not the suggestion alone. Decision 0038.)_
 - **FR-8.2** Every revision is immutable and permanently addressable. Nothing in this product hard-deletes prose except storyboard deletion (FR-2.6) and account deletion.
 - **FR-8.3** The history panel for a section is a vertical list of revisions with author, date, source (written by the author · accepted from a suggestion · restored), and a one-tap comparison against the current head.
 - **FR-8.4** Restoring an earlier revision creates a _new_ revision with the old content, never rewinds the chain. The panel labels it "restored from 12 Sep".

@@ -1,8 +1,9 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
+import { writtenWhilePrivate } from '@/lib/authz'
 import { logger } from '@/lib/logger'
-import { USERNAME_CHARS } from '@/lib/schemas/constants'
+import { PROFILE_LISTS, USERNAME_CHARS } from '@/lib/schemas/constants'
 import { activityCalendar } from '@/server/activity'
 
 import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
@@ -53,8 +54,13 @@ export const profileRouter = createTRPCRouter({
       // Only public storyboards count anywhere on a profile: a private one's
       // title is not public, even inside somebody's contribution list.
       const publicOnly = { storyboard: { visibility: 'PUBLIC' as const, deletedAt: null } }
+      // Their own credits, not the copies a spin-off inherits (FR-10.4): one
+      // piece of writing was counted once for the story and again for every
+      // spin-off of it, until the 2026-10-16 spec review. The spin-off's own
+      // contributors page still names them.
+      const theirs = { contributorId: user.id, inheritedFromId: null, ...publicOnly }
 
-      const [authored, credits, spinOffs] = await Promise.all([
+      const [authored, credits, spinOffs, proseCount, ideaCount] = await Promise.all([
         ctx.db.storyboard.findMany({
           where: {
             ownerId: user.id,
@@ -75,9 +81,9 @@ export const profileRouter = createTRPCRouter({
           },
         }),
         ctx.db.credit.findMany({
-          where: { contributorId: user.id, ...publicOnly },
+          where: theirs,
           orderBy: { createdAt: 'desc' },
-          take: 100,
+          take: PROFILE_LISTS.credits,
           select: {
             id: true,
             type: true,
@@ -93,6 +99,7 @@ export const profileRouter = createTRPCRouter({
                 slug: true,
                 title: true,
                 publicFrom: true,
+                privateSpans: { select: { startedAt: true, endedAt: true } },
                 owner: { select: { username: true, displayName: true } },
               },
             },
@@ -106,6 +113,10 @@ export const profileRouter = createTRPCRouter({
             forkedFromId: { not: null },
           },
         }),
+        // Counted, not taken from the page of credits shown: the counts
+        // stopped at that page's length until the 2026-10-16 spec review.
+        ctx.db.credit.count({ where: { ...theirs, type: 'PROSE' } }),
+        ctx.db.credit.count({ where: { ...theirs, type: 'IDEA' } }),
       ])
 
       // FR-9.4 — written but not used. The author always sees their own; anyone
@@ -115,7 +126,7 @@ export const profileRouter = createTRPCRouter({
         ? await ctx.db.suggestion.findMany({
             where: { contributorId: user.id, state: 'PASSED', request: publicOnly },
             orderBy: { decidedAt: 'desc' },
-            take: 50,
+            take: PROFILE_LISTS.passed,
             select: {
               id: true,
               publicId: true,
@@ -153,22 +164,27 @@ export const profileRouter = createTRPCRouter({
         /** FR-9.3 — the four counts the profile leads with. */
         counts: {
           authored: authored.length,
-          prose: credits.filter((credit) => credit.type === 'PROSE').length,
-          ideas: credits.filter((credit) => credit.type === 'IDEA').length,
+          prose: proseCount,
+          ideas: ideaCount,
           spinOffs,
         },
         authored,
         // Decision 0007: a contribution sent while its story was private is
         // still credited here, but its words stay private to the people who
         // could read them then. Shown to everyone until the phase 12 audit.
-        credits: credits.map((credit) => {
+        credits: credits.map(({ storyboard: { privateSpans, ...storyboard }, ...credit }) => {
           const sent = credit.suggestion?.submittedAt
-          const publicFrom = credit.storyboard.publicFrom
-          // No `publicFrom` on a public story is bad data; hide rather than leak.
-          const privateThen = !isSelf && sent && (!publicFrom || sent < publicFrom)
-          return privateThen && credit.suggestion
-            ? { ...credit, suggestion: { ...credit.suggestion, contentText: '' } }
-            : credit
+          // Before the story was first public, or in a stretch it spent private
+          // again (decision 0039). No `publicFrom` on a public story is bad
+          // data, and counts as private: hide rather than leak.
+          const privateThen =
+            !isSelf &&
+            sent &&
+            writtenWhilePrivate({ publicFrom: storyboard.publicFrom, privateSpans }, sent)
+          const shown = { ...credit, storyboard }
+          return privateThen && shown.suggestion
+            ? { ...shown, suggestion: { ...shown.suggestion, contentText: '' } }
+            : shown
         }),
         passed,
         showPassed,
@@ -295,6 +311,9 @@ export const profileRouter = createTRPCRouter({
       const credits = await ctx.db.credit.findMany({
         where: {
           contributorId: user.id,
+          // Not a spin-off's inherited copy: its line named the spin-off's
+          // owner as the author they had written for (2026-10-16 review).
+          inheritedFromId: null,
           storyboard: { visibility: 'PUBLIC', deletedAt: null },
         },
         orderBy: { createdAt: 'asc' },

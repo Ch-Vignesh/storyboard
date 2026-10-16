@@ -86,6 +86,7 @@ export function ContentsEditor({
   const renameChapter = useMutation(trpc.chapter.rename.mutationOptions({ onSuccess: refresh }))
   const deleteChapter = useMutation(trpc.chapter.delete.mutationOptions({ onSuccess: refresh }))
   const createSection = useMutation(trpc.section.create.mutationOptions({ onSuccess: refresh }))
+  const renameSection = useMutation(trpc.section.rename.mutationOptions({ onSuccess: refresh }))
   const deleteSection = useMutation(trpc.section.delete.mutationOptions({ onSuccess: refresh }))
   const joinSection = useMutation(
     trpc.section.joinWithPrevious.mutationOptions({ onSuccess: refresh }),
@@ -100,6 +101,7 @@ export function ContentsEditor({
     renameChapter.error ??
     deleteChapter.error ??
     createSection.error ??
+    renameSection.error ??
     deleteSection.error ??
     joinSection.error
 
@@ -193,11 +195,26 @@ export function ContentsEditor({
                               {(sectionHandle) => (
                                 <div className="flex items-center gap-2 px-3 py-2">
                                   {sectionHandle}
+                                  {/* FR-2.3 — sections are named here, as
+                                      chapters are. `section.rename` had no
+                                      caller until the 2026-10-16 spec review. */}
+                                  <Input
+                                    aria-label={`Chapter ${chapterIndex + 1}, section ${sectionIndex + 1} name`}
+                                    defaultValue={section.title ?? ''}
+                                    placeholder={`Section ${sectionIndex + 1}`}
+                                    className="h-8 min-w-0 flex-1 border-transparent text-[13.5px] hover:border-rule"
+                                    onBlur={(event) => {
+                                      const title = event.target.value.trim()
+                                      if (title !== (section.title ?? '')) {
+                                        renameSection.mutate({ sectionId: section.id, title })
+                                      }
+                                    }}
+                                  />
                                   <Link
                                     href={`/s/${slug}/c/${chapterIndex + 1}/${sectionIndex + 1}/edit`}
-                                    className="min-w-0 flex-1 truncate text-[13.5px] text-ink hover:text-pencil hover:underline"
+                                    className="shrink-0 text-[12.5px] text-pencil hover:underline"
                                   >
-                                    {section.title ?? `Section ${sectionIndex + 1}`}
+                                    Write
                                   </Link>
                                   <span className="shrink-0 text-[12px] text-ink-faint tabular-nums">
                                     {section.wordCount.toLocaleString('en-GB')}

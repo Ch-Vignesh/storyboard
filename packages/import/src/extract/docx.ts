@@ -1,6 +1,6 @@
 import mammoth from 'mammoth'
 
-import { isSceneBreakLine, sceneBreak, text } from './blocks'
+import { isSceneBreakLine, sceneBreak, text, withBlankLineBreaks } from './blocks'
 import { normalise, readPageStarts } from './page-breaks'
 import { assertReasonableArchive } from './zip-guard'
 import type { Block, NormalisedDoc, TipTapNode } from '../types'
@@ -173,16 +173,24 @@ export async function extractDocx(file: Buffer | ArrayBuffer): Promise<Normalise
     { styleMap: STYLE_MAP, ignoreEmptyParagraphs: false },
   )
 
-  const blocks: Block[] = []
+  // Each block with the empty paragraphs before it, for FR-3.4's blank-line
+  // runs (`withBlankLineBreaks`).
+  const entries: Array<{ block: Block; blanksBefore: number }> = []
+  let blanks = 0
   const footnotes: string[] = []
   const dropped = new Set<string>()
+  // FR-3.7 — which block refers to each footnote, and each footnote's text.
+  // Mammoth puts the notes in a list after everything else; they went at the
+  // end of the whole manuscript until the 2026-10-16 spec review.
+  const referredFrom = new Map<string, Block>()
+  const noteText = new Map<string, string>()
 
   // FR-3.3 strategy 4. Mammoth drops page breaks, so they come from the
   // document XML as the text each one precedes, matched here in order.
   const pageStarts = readPageStarts(buffer)
   let nextPageStart = 0
 
-  const push = (json: TipTapNode, value: string, style?: string) => {
+  const push = (json: TipTapNode, value: string, style?: string, inner = '') => {
     if (value.length === 0 && json.type === 'paragraph') return
     const block: Block = { text: value, json }
     if (style) block.style = style
@@ -190,7 +198,11 @@ export async function extractDocx(file: Buffer | ArrayBuffer): Promise<Normalise
       block.isPageBreak = true
       nextPageStart += 1
     }
-    blocks.push(block)
+    for (const [, id] of inner.matchAll(/id="footnote-ref-(\d+)"/gu)) {
+      if (id) referredFrom.set(id, block)
+    }
+    entries.push({ block, blanksBefore: blanks })
+    blanks = 0
   }
 
   for (const element of topLevel(result.value)) {
@@ -237,20 +249,36 @@ export async function extractDocx(file: Buffer | ArrayBuffer): Promise<Normalise
       case 'p': {
         const content = inline(element.inner)
         const value = plainText(content)
-        if (value.length === 0) break
-        if (isSceneBreakLine(value)) {
-          blocks.push(sceneBreak())
+        if (value.length === 0) {
+          blanks += 1
           break
         }
-        push({ type: 'paragraph', content }, value)
+        if (isSceneBreakLine(value)) {
+          entries.push({ block: sceneBreak(), blanksBefore: blanks })
+          blanks = 0
+          break
+        }
+        push({ type: 'paragraph', content }, value, undefined, element.inner)
         break
       }
       case 'ul':
       case 'ol': {
-        for (const item of topLevel(element.inner)) {
+        const items = topLevel(element.inner)
+        // Mammoth's footnotes: a list of items with ids "footnote-N", each
+        // ending in a link back to its reference. Their text is kept with the
+        // block that refers to them, below; the link and the number are not.
+        if (items.length > 0 && items.every((item) => /id="footnote-\d+"/u.test(item.attrs))) {
+          for (const item of items) {
+            const id = /id="footnote-(\d+)"/u.exec(item.attrs)?.[1]
+            const value = plainText(inline(item.inner)).replace(/\s*↑\s*$/u, '')
+            if (id && value.length > 0) noteText.set(id, value)
+          }
+          break
+        }
+        for (const item of items) {
           const content = inline(item.inner)
           const value = plainText(content)
-          if (value.length > 0) push({ type: 'paragraph', content }, value)
+          if (value.length > 0) push({ type: 'paragraph', content }, value, undefined, item.inner)
         }
         dropped.add('list bullets and numbering')
         break
@@ -269,12 +297,21 @@ export async function extractDocx(file: Buffer | ArrayBuffer): Promise<Normalise
     }
   }
 
-  // FR-3.7 — footnote text survives, its numbering does not. Mammoth appends
-  // footnotes as a trailing list; anything it warned about is worth naming.
+  // FR-3.7 — footnote text survives, at the end of its section; its numbering
+  // and links do not. Each note goes with the block that refers to it, and
+  // the commit puts it after that block's section. One with no reference
+  // found is kept all the same, as a note at the end.
+  for (const [id, value] of noteText) {
+    const block = referredFrom.get(id)
+    if (block) block.footnotes = [...(block.footnotes ?? []), value]
+    else footnotes.push(value)
+  }
+
+  // Anything mammoth warned about is worth naming.
   for (const message of result.messages) {
     if (/image/iu.test(message.message)) dropped.add('images')
     if (/comment/iu.test(message.message)) dropped.add('comments')
   }
 
-  return { blocks, footnotes, dropped: [...dropped] }
+  return { blocks: withBlankLineBreaks(entries), footnotes, dropped: [...dropped] }
 }

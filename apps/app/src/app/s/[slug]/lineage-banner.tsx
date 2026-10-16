@@ -46,6 +46,14 @@ export function LineageBanner({ storyboardId, slug }: { storyboardId: string; sl
           {origin.forkedAt ? ` on ${origin.forkedAt.toLocaleDateString('en-GB', DATE)}` : ''}
           {/* FR-10.4 — said only when true, and said plainly when it is. */}
           {origin.continuedSince ? ' — that story has continued since.' : '.'}
+          {/* FR-14.5 — the original's note on rights, as its author wrote it. */}
+          {origin.rightsNote ? (
+            <>
+              {' '}
+              Its author wrote about the rights in it:{' '}
+              <span className="whitespace-pre-line italic">{origin.rightsNote}</span>
+            </>
+          ) : null}
           {ancestors.length > 1 || lineage.data?.truncated ? (
             <>
               {' '}

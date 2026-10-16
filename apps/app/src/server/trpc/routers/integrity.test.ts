@@ -10,7 +10,11 @@ import { randomUUID } from 'node:crypto'
 import { createPrismaClient, type PrismaClient } from '@storyboard/db'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { SUGGESTION_QUOTA } from '@/lib/schemas/constants'
+import {
+  CONTINUE_TARGET_MAX_WORDS,
+  SUGGESTION_QUOTA,
+  SUGGESTION_WORDS,
+} from '@/lib/schemas/constants'
 
 vi.mock('@/auth', () => ({ auth: async () => null }))
 
@@ -59,10 +63,14 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     })
   }
 
-  /** A section with one revision, in the shared chapter. */
-  async function aSection(order: number, text = 'The harbour had been empty for a year.') {
+  /** A section with one revision, in the shared chapter unless told otherwise. */
+  async function aSection(
+    order: number,
+    text = 'The harbour had been empty for a year.',
+    inChapter = chapterId,
+  ) {
     const section = await db.section.create({
-      data: { chapterId, lineageId: randomUUID(), order, wordCount: 8 },
+      data: { chapterId: inChapter, lineageId: randomUUID(), order, wordCount: 8 },
       select: { id: true },
     })
     const revision = await db.revision.create({
@@ -82,7 +90,7 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
   }
 
   /** An open request on a new section, asking for one to a thousand words. */
-  async function aRequest() {
+  async function aRequest(kind: 'REWRITE' | 'CONTINUE' | 'UNBLOCK' = 'REWRITE') {
     const { sectionId } = await aSection(100 + people.length + Math.floor(Math.random() * 1e6))
     const request = await db.contributionRequest.create({
       data: {
@@ -90,7 +98,7 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
         storyboardId,
         sectionId,
         openedById: owner.id,
-        kind: 'REWRITE',
+        kind,
         title: 'Make it land',
         ask: 'Shorter.',
         minWords: 1,
@@ -161,7 +169,9 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
       await tx.storyboard.deleteMany({ where: { id: storyboardId } })
       await tx.notification.deleteMany({ where: { userId: { in: people } } })
       await tx.activityDay.deleteMany({ where: { userId: { in: people } } })
-      await tx.rateLimitHit.deleteMany({ where: { key: { endsWith: reader.id } } })
+      await tx.rateLimitHit.deleteMany({
+        where: { OR: people.map((id) => ({ key: { endsWith: id } })) },
+      })
       await tx.user.deleteMany({ where: { id: { in: people } } })
     })
     await db.$disconnect()
@@ -176,9 +186,7 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     await db.contributionRequest.update({ where: { id: requestId }, data: { state: 'CLOSED' } })
 
     await expect((await as(reader)).suggestion.startDraft({ requestId })).rejects.toThrow(/closed/u)
-    await expect(
-      (await as(owner)).suggestion.accept({ suggestionId, acknowledgedChange: true }),
-    ).rejects.toThrow(/closed/u)
+    await expect((await as(owner)).suggestion.accept({ suggestionId })).rejects.toThrow(/closed/u)
   })
 
   it('opens the request again when the last suggestion waiting is withdrawn', async () => {
@@ -196,6 +204,187 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     ).toBe('OPEN')
   })
 
+  /** FR-5.7 says "under 150 words"; a section of exactly 150 took both kinds. */
+  it('asks for what comes next only on a section under the bound', async () => {
+    const { sectionId } = await aSection(90)
+    await db.section.update({
+      where: { id: sectionId },
+      data: { wordCount: CONTINUE_TARGET_MAX_WORDS },
+    })
+    await expect(
+      (await as(owner)).request.create({
+        sectionId,
+        kind: 'CONTINUE',
+        title: 'What next',
+        ask: 'She has just come back to the harbour, and I do not know what she finds there, or who is waiting for her.',
+        preContext: 'The harbour had been empty for a year. '.repeat(15),
+        minWords: SUGGESTION_WORDS.floor,
+        maxWords: SUGGESTION_WORDS.floor,
+      }),
+    ).rejects.toThrow(/already has/u)
+  })
+
+  /** FR-12.2's "an idea arrived" was a type nothing sent (2026-10-16 spec review). */
+  it('tells the author an idea arrived, and leads to it, but not of their own', async () => {
+    const requestId = await aRequest('UNBLOCK')
+    const idea =
+      'Let her find the letter in the boat first, before anyone else does, and keep it from them until the very last chapter of the book.'
+    await (await as(reader)).idea.post({ requestId, body: idea })
+    await (await as(owner)).idea.post({ requestId, body: idea })
+
+    const { publicId } = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { publicId: true },
+    })
+    const arrived = (await (await as(owner)).notification.list()).filter(
+      (row) => row.type === 'IDEA_RECEIVED' && row.path?.endsWith(`/help/${publicId}`),
+    )
+    expect(arrived).toHaveLength(1)
+  })
+
+  /**
+   * FR-13.5. Reporting the same thing again spent one of the day's reports,
+   * and two at once was a server fault (2026-10-16 spec review).
+   */
+  it('takes a report once, free the second time, and two at once as one', async () => {
+    const { key } = await import('@/server/limits')
+    const reporter = await person('reporter')
+    const call = await as(reporter)
+    const spent = () => db.rateLimitHit.count({ where: { key: key.reportsMade(reporter.id) } })
+    const report = (targetType: 'STORYBOARD' | 'USER', targetId: string) =>
+      call.report.create({ targetType, targetId, category: 'SPAM' })
+
+    expect((await report('STORYBOARD', storyboardId)).status).toBe('filed')
+    expect((await report('STORYBOARD', storyboardId)).status).toBe('duplicate')
+    expect(await spent()).toBe(1)
+
+    const together = await Promise.all([report('USER', owner.id), report('USER', owner.id)])
+    expect(together.map((result) => result.status).sort()).toEqual(['duplicate', 'filed'])
+    await db.report.deleteMany({ where: { reporterId: reporter.id } })
+  })
+
+  /**
+   * A draft is not an answer. Every one counted until the 2026-10-16 spec
+   * review: "1 suggestion" on a request nobody had sent anything to, gone
+   * from browse's "No answers yet", and never nudged.
+   */
+  it('counts what was sent as an answer, and no draft', async () => {
+    const requestId = await aRequest()
+    await (await as(reader)).suggestion.startDraft({ requestId })
+    const { publicId } = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { publicId: true },
+    })
+
+    const listed = await (await as(owner)).request.listForStoryboard({ storyboardId })
+    expect(listed.find((request) => request.id === requestId)?._count.suggestions).toBe(0)
+
+    const unanswered = await (
+      await as(reader)
+    ).browse.requests({ query: 'Integrity', sort: 'NO_ANSWERS', take: 50 })
+    expect(JSON.stringify(unanswered)).toContain(publicId)
+  })
+
+  const closedTold = async (requestId: string, type: 'REQUEST_CLOSED' | 'REQUEST_REOPENED') =>
+    (
+      await db.notification.findMany({
+        where: { type, payload: { path: ['requestId'], equals: requestId } },
+        select: { userId: true },
+      })
+    ).map((row) => row.userId)
+
+  /**
+   * FR-5.10. Closing by hand told nobody, and what was waiting stayed
+   * "waiting" for good, holding its writer's place in the per-story quota
+   * (2026-10-16 spec review).
+   */
+  it('tells everyone answering when a request is closed by hand, and frees their place', async () => {
+    const quota = SUGGESTION_QUOTA.contributor
+    const writer = await person('closed-on')
+    const call = await as(writer)
+    const send = async (requestId: string) => {
+      const draft = await call.suggestion.startDraft({ requestId })
+      await call.suggestion.saveDraft({ suggestionId: draft.id, contentJson: prose('Shorter.') })
+      await call.suggestion.submit({ suggestionId: draft.id })
+    }
+    const closing = await aRequest()
+    await send(closing)
+    for (let index = 1; index < quota; index += 1) await send(await aRequest())
+    const drafter = await person('drafting')
+    await (await as(drafter)).suggestion.startDraft({ requestId: closing })
+
+    await (await as(owner)).request.close({ requestId: closing })
+
+    expect(new Set(await closedTold(closing, 'REQUEST_CLOSED'))).toEqual(
+      new Set([writer.id, drafter.id]),
+    )
+    // The one on the closed request no longer counts: a full quota has room.
+    await expect(send(await aRequest())).resolves.toBeUndefined()
+  })
+
+  /**
+   * FR-5.9: everyone who ever sent something is told it is open again. They
+   * were sent "the section you helped with changed", drafts included, and a
+   * second click told them twice (2026-10-16 spec review).
+   */
+  it('tells the people who sent something, once, when a request is opened again', async () => {
+    const requestId = await aRequest()
+    const sent = await aSentSuggestion(requestId, 'reopen-sent', 'Sent.')
+    const drafter = await person('reopen-draft')
+    await (await as(drafter)).suggestion.startDraft({ requestId })
+    const author = await as(owner)
+    await author.request.close({ requestId })
+
+    await Promise.allSettled([
+      author.request.reopen({ requestId }),
+      author.request.reopen({ requestId }),
+    ])
+
+    expect(await closedTold(requestId, 'REQUEST_REOPENED')).toEqual([sent.writer.id])
+    expect(
+      (await db.contributionRequest.findUniqueOrThrow({ where: { id: requestId } })).state,
+    ).toBe('ANSWERED')
+  })
+
+  /**
+   * FR-14.1. Finishing a story closed its requests, and nothing stopped one
+   * being reopened, a new one opened, or a stale suggestion re-sent, and so
+   * listed in browse again (2026-10-16 spec review).
+   */
+  it('opens nothing on a finished story, and browse lists none of its requests', async () => {
+    const requestId = await aRequest()
+    const { sectionId } = await aSection(70)
+    const author = await as(owner)
+    await author.request.close({ requestId })
+    const { publicId } = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { publicId: true },
+    })
+
+    await db.storyboard.update({ where: { id: storyboardId }, data: { state: 'FINISHED' } })
+    try {
+      await expect(author.request.reopen({ requestId })).rejects.toThrow(/marked finished/u)
+      await expect(
+        author.request.create({
+          sectionId,
+          kind: 'UNBLOCK',
+          title: 'Stuck',
+          ask: 'I do not know what she does next, and every version I write of it reads like somebody else wrote it.',
+          minWords: SUGGESTION_WORDS.floor,
+          maxWords: SUGGESTION_WORDS.floor,
+        }),
+      ).rejects.toThrow(/marked finished/u)
+
+      // And were one open anyway, browse would not offer it.
+      await db.contributionRequest.update({ where: { id: requestId }, data: { state: 'OPEN' } })
+      const listed = await (await as(reader)).browse.requests({ query: 'Integrity' })
+      expect(JSON.stringify(listed)).not.toContain(publicId)
+    } finally {
+      await db.contributionRequest.update({ where: { id: requestId }, data: { state: 'CLOSED' } })
+      await db.storyboard.update({ where: { id: storyboardId }, data: { state: 'ACTIVE' } })
+    }
+  })
+
   // ── Suggestions ───────────────────────────────────────────────────────────
 
   it('holds the per-story quota when sends arrive together, and a refusal costs nothing', async () => {
@@ -207,8 +396,14 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
 
     await Promise.allSettled(drafts.map((suggestionId) => call.suggestion.submit({ suggestionId })))
 
+    // On open requests: one on a request closed without accepting holds no
+    // place (FR-5.10), and the first test here left one.
     const waiting = await db.suggestion.count({
-      where: { contributorId: reader.id, state: 'SUBMITTED', request: { storyboardId } },
+      where: {
+        contributorId: reader.id,
+        state: 'SUBMITTED',
+        request: { storyboardId, state: { in: ['OPEN', 'ANSWERED'] } },
+      },
     })
     expect(waiting).toBe(quota)
 
@@ -231,7 +426,7 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     const author = await as(owner)
 
     const results = await Promise.allSettled([
-      author.suggestion.accept({ suggestionId, acknowledgedChange: true }),
+      author.suggestion.accept({ suggestionId }),
       author.suggestion.pass({ suggestionId }),
     ])
 
@@ -301,10 +496,733 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     expect(await db.revision.count({ where: { sectionId } })).toBe(2)
   })
 
+  /**
+   * 2026-10-16 spec review. A draft was judged out of date by its time, so
+   * one typed on after a "changed a moment ago" refusal was newer than the
+   * head, opened over it on reload, and replaced it on the next save.
+   */
+  it('keeps a draft typed after a refused save beside the text, not over it', async () => {
+    const { sectionId, revisionId } = await aSection(35)
+    const author = await as(owner)
+
+    // Another tab saves first; this one's save is refused and it types on.
+    const other = await author.section.commitRevision({
+      sectionId,
+      contentJson: prose('The other tab got there first.'),
+      baseRevisionId: revisionId,
+    })
+    await expect(
+      author.section.commitRevision({
+        sectionId,
+        contentJson: prose('This tab was refused.'),
+        baseRevisionId: revisionId,
+      }),
+    ).rejects.toThrow(/changed a moment ago/)
+    await author.section.saveDraft({
+      sectionId,
+      contentJson: prose('This tab was refused, and typed on.'),
+      baseRevisionId: revisionId,
+    })
+    expect((await author.section.get({ sectionId })).draft?.behind).toBe(true)
+
+    // Written on the text as it is, the same draft is simply the one to pick up.
+    await author.section.saveDraft({
+      sectionId,
+      contentJson: prose('This tab caught up.'),
+      baseRevisionId: other.revisionId,
+    })
+    expect((await author.section.get({ sectionId })).draft?.behind).toBe(false)
+
+    // An overtaken draft that says only what the text says is no draft at all.
+    await author.section.saveDraft({
+      sectionId,
+      contentJson: prose('The other tab got there first.'),
+      baseRevisionId: revisionId,
+    })
+    expect((await author.section.get({ sectionId })).draft).toBeNull()
+  })
+
+  /**
+   * Decision 0038. Found by the owner on 2026-10-16: accepting a "what comes
+   * next" suggestion replaced the section, so the author's opening was gone
+   * and only the continuation was left. And the comparison shown before
+   * accepting had the author's words struck through, as if that were meant.
+   */
+  it('adds an accepted continuation after the text, and shows it that way first', async () => {
+    await db.suggestion.updateMany({
+      where: { contributorId: reader.id, state: 'SUBMITTED' },
+      data: { state: 'WITHDRAWN' },
+    })
+    const requestId = await aRequest('CONTINUE')
+    const suggestionId = await aDraft(requestId)
+    await (await as(reader)).suggestion.submit({ suggestionId })
+    const author = await as(owner)
+
+    const preview = await author.compare.suggestionAgainstHead({ suggestionId })
+    expect(preview.stats.removed).toBe(0)
+    expect(preview.stats.changed).toBe(0)
+
+    await author.suggestion.accept({ suggestionId })
+
+    const request = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { section: { select: { currentRevision: { select: { contentText: true } } } } },
+    })
+    expect(request.section.currentRevision?.contentText).toBe(
+      'The harbour had been empty for a year.\n\nIt was empty.',
+    )
+  })
+
+  /**
+   * 2026-10-16 spec review. The no-change check compared a hash of the plain
+   * text, so formatting the same words was "nothing changed": no version was
+   * written and the draft with the formatting was deleted, under "Saved".
+   */
+  it('saves a change of formatting as a new version, and keeps it', async () => {
+    const { sectionId, revisionId } = await aSection(40, 'The harbour had been empty.')
+    const italic = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'The harbour had been ' },
+            { type: 'text', text: 'empty', marks: [{ type: 'em' }] },
+            { type: 'text', text: '.' },
+          ],
+        },
+      ],
+    }
+
+    // The plain words first, through the real save, so the head's stored hash
+    // is the hash of exactly this text, as it is for every real section.
+    const author = await as(owner)
+    const plain = await author.section.commitRevision({
+      sectionId,
+      contentJson: prose('The harbour had been empty.'),
+      baseRevisionId: revisionId,
+    })
+
+    const saved = await author.section.commitRevision({
+      sectionId,
+      contentJson: italic,
+      baseRevisionId: plain.revisionId,
+    })
+
+    expect(saved.unchanged).toBe(false)
+    const head = await db.section.findUniqueOrThrow({
+      where: { id: sectionId },
+      select: { currentRevision: { select: { contentJson: true } } },
+    })
+    expect(JSON.stringify(head.currentRevision?.contentJson)).toContain('"em"')
+  })
+
+  /** Somebody new's sent suggestion on a request, with this text. */
+  async function aSentSuggestion(requestId: string, label: string, text: string) {
+    const writer = await person(label)
+    const call = await as(writer)
+    const draft = await call.suggestion.startDraft({ requestId })
+    await call.suggestion.saveDraft({ suggestionId: draft.id, contentJson: prose(text) })
+    await call.suggestion.submit({ suggestionId: draft.id })
+    return { writer, call, suggestionId: draft.id }
+  }
+
+  const headText = async (requestId: string) =>
+    (
+      await db.contributionRequest.findUniqueOrThrow({
+        where: { id: requestId },
+        select: { section: { select: { currentRevision: { select: { contentText: true } } } } },
+      })
+    ).section.currentRevision?.contentText
+
+  /**
+   * FR-6.7 with FR-6.8. A suggestion goes stale only when another is
+   * accepted, which answers the request; on 2026-10-15 sending to answered
+   * requests was refused, so an updated stale suggestion could never be sent
+   * again (2026-10-16 spec review).
+   */
+  it('takes a stale suggestion back, updated, without spending a send', async () => {
+    const { key } = await import('@/server/limits')
+    const requestId = await aRequest()
+    const first = await aSentSuggestion(requestId, 'first', 'One way to say it.')
+    const second = await aSentSuggestion(requestId, 'second', 'Another way to say it.')
+    await (await as(owner)).suggestion.accept({ suggestionId: first.suggestionId })
+    expect(
+      (await db.suggestion.findUniqueOrThrow({ where: { id: second.suggestionId } })).state,
+    ).toBe('STALE')
+
+    const sends = () =>
+      db.rateLimitHit.count({ where: { key: key.suggestionsSent(second.writer.id) } })
+    const before = await sends()
+    await second.call.suggestion.rebase({ suggestionId: second.suggestionId })
+    await second.call.suggestion.submit({ suggestionId: second.suggestionId })
+
+    expect(
+      (await db.suggestion.findUniqueOrThrow({ where: { id: second.suggestionId } })).state,
+    ).toBe('SUBMITTED')
+    expect(await sends()).toBe(before)
+  })
+
+  /** FR-6.6 — "accept anyway" covers the change the author saw, and no later one. */
+  it('accepts a stale suggestion only against the text the author was shown', async () => {
+    const requestId = await aRequest()
+    const first = await aSentSuggestion(requestId, 'shown-a', 'The first answer.')
+    const second = await aSentSuggestion(requestId, 'shown-b', 'The second answer.')
+    const author = await as(owner)
+    await author.suggestion.accept({ suggestionId: first.suggestionId })
+
+    await expect(author.suggestion.accept({ suggestionId: second.suggestionId })).rejects.toThrow(
+      /changed a moment ago/u,
+    )
+    const { headRevisionId } = await author.compare.suggestionAgainstHead({
+      suggestionId: second.suggestionId,
+    })
+    await author.suggestion.accept({
+      suggestionId: second.suggestionId,
+      acknowledgedHeadId: headRevisionId,
+    })
+    expect(await headText(requestId)).toBe('The second answer.')
+  })
+
+  /** FR-6.8 for continuations: the second replaces the first, not stacks after it. */
+  it('puts a second continuation in place of the first, not after it', async () => {
+    const requestId = await aRequest('CONTINUE')
+    const leah = await aSentSuggestion(requestId, 'leah', 'Then the boats came back.')
+    const arjun = await aSentSuggestion(requestId, 'arjun', 'Then nobody came at all.')
+    const author = await as(owner)
+    await author.suggestion.accept({ suggestionId: leah.suggestionId })
+    expect(await headText(requestId)).toBe(
+      'The harbour had been empty for a year.\n\nThen the boats came back.',
+    )
+
+    const { headRevisionId } = await author.compare.suggestionAgainstHead({
+      suggestionId: arjun.suggestionId,
+    })
+    await author.suggestion.accept({
+      suggestionId: arjun.suggestionId,
+      acknowledgedHeadId: headRevisionId,
+    })
+    expect(await headText(requestId)).toBe(
+      'The harbour had been empty for a year.\n\nThen nobody came at all.',
+    )
+  })
+
+  /** An accepted suggestion's page shows what accepting it did. */
+  it('compares an accepted suggestion with the text before it, not after', async () => {
+    const requestId = await aRequest()
+    const sent = await aSentSuggestion(requestId, 'accepted', 'An entirely new opening line.')
+    const author = await as(owner)
+    await author.suggestion.accept({ suggestionId: sent.suggestionId })
+
+    const shown = await author.compare.suggestionAgainstHead({ suggestionId: sent.suggestionId })
+    expect(shown.isStale).toBe(false)
+    expect(shown.stats.changed + shown.stats.added + shown.stats.removed).toBeGreaterThan(0)
+  })
+
+  /**
+   * The history's "What changed" on the first edit in an alternate version:
+   * its parent is the main draft's revision, a different section row of the
+   * same lineage, and the comparison refused it (2026-10-16 spec review).
+   */
+  it('shows what the first edit in an alternate version changed', async () => {
+    const { sectionId } = await aSection(50, 'Words in the main draft.')
+    const author = await as(owner)
+    const main = await db.version.findFirstOrThrow({
+      where: { storyboardId, isMain: true },
+      select: { id: true },
+    })
+    const alternate = await author.version.create({ baseVersionId: main.id, name: 'Darker' })
+    const lineage = await db.section.findUniqueOrThrow({
+      where: { id: sectionId },
+      select: { lineageId: true },
+    })
+    const copy = await db.section.findFirstOrThrow({
+      where: { lineageId: lineage.lineageId, chapter: { versionId: alternate.id } },
+      select: { id: true, currentRevisionId: true },
+    })
+
+    const edited = await author.section.commitRevision({
+      sectionId: copy.id,
+      contentJson: prose('Darker words in the alternate.'),
+      baseRevisionId: copy.currentRevisionId,
+    })
+    const made = await db.revision.findUniqueOrThrow({
+      where: { id: edited.revisionId ?? '' },
+      select: { parentId: true },
+    })
+
+    const shown = await author.compare.revisions({
+      baseId: made.parentId ?? '',
+      targetId: edited.revisionId ?? '',
+    })
+    expect(shown.stats.changed + shown.stats.added + shown.stats.removed).toBeGreaterThan(0)
+  })
+
+  /**
+   * FR-8.5 with FR-9.1. A restore only ever turned credits off, so putting an
+   * accepted text back left its credit "no longer in the draft"; and one in
+   * an alternate version turned off credits the main draft still carried
+   * (2026-10-16 spec review).
+   */
+  it('turns a credit off and on again with its writing, in the main draft only', async () => {
+    const requestId = await aRequest()
+    const { suggestionId, writer } = await aSentSuggestion(requestId, 'restored', 'Restored.')
+    const author = await as(owner)
+    const { revisionId: accepted } = await author.suggestion.accept({ suggestionId })
+    const { sectionId, before } = await db.revision
+      .findUniqueOrThrow({ where: { id: accepted }, select: { sectionId: true, parentId: true } })
+      .then((row) => ({ sectionId: row.sectionId, before: row.parentId ?? '' }))
+    const live = async () =>
+      (await db.credit.findFirstOrThrow({ where: { suggestionId }, select: { isLive: true } }))
+        .isLive
+
+    // In an alternate first: the main draft still has the writing.
+    const main = await db.version.findFirstOrThrow({
+      where: { storyboardId, isMain: true },
+      select: { id: true },
+    })
+    const alternate = await author.version.create({ baseVersionId: main.id, name: 'Restored' })
+    const copy = await db.section.findFirstOrThrow({
+      where: { chapter: { versionId: alternate.id }, currentRevisionId: accepted },
+      select: { id: true },
+    })
+    // Its history is the chain it stands on, the main draft's included.
+    const copied = await author.section.history({ sectionId: copy.id })
+    expect(copied.revisions.map((revision) => revision.id)).toEqual(
+      expect.arrayContaining([accepted, before]),
+    )
+    await author.section.restoreRevision({ sectionId: copy.id, revisionId: before })
+    expect(await live()).toBe(true)
+
+    // In the main draft it is taken out, and the writer told...
+    await author.section.restoreRevision({ sectionId, revisionId: before })
+    expect(await live()).toBe(false)
+    expect(
+      await db.notification.count({ where: { userId: writer.id, type: 'CONTRIBUTION_REMOVED' } }),
+    ).toBe(1)
+
+    // ...and putting it back puts the credit back.
+    await author.section.restoreRevision({ sectionId, revisionId: accepted })
+    expect(await live()).toBe(true)
+  })
+
+  /**
+   * Decision 0007's notice compared the whole history with one page of it,
+   * so a section past fifty versions told readers it had been private for
+   * part of its life (2026-10-16 spec review).
+   */
+  it('does not call a long history private when none of it was', async () => {
+    const { sectionId, revisionId } = await aSection(80, 'Version 0.')
+    const author = await as(owner)
+    let head: string | null = revisionId
+    for (let index = 1; index <= 3; index += 1) {
+      head = (
+        await author.section.commitRevision({
+          sectionId,
+          contentJson: prose(`Version ${String(index)}.`),
+          baseRevisionId: head,
+        })
+      ).revisionId
+    }
+
+    const call = await as(reader)
+    const shown = await call.section.history({ sectionId, take: 2 })
+    expect(shown.revisions).toHaveLength(2)
+    expect(shown.truncatedByVisibility).toBe(false)
+
+    // And the rest can be reached: only the newest page could be, before.
+    expect(shown.nextCursor).toBe(2)
+    const older = await call.section.history({ sectionId, take: 2, cursor: shown.nextCursor })
+    expect(older.revisions.map((revision) => revision.id)).toContain(revisionId)
+    expect(older.nextCursor).toBeNull()
+  })
+
+  /**
+   * FR-10.2 with FR-5.1. Promotion left open requests on the demoted draft,
+   * and requests could be opened on an alternate at all, so an accept wrote
+   * where no reader looks (2026-10-16 spec review).
+   */
+  it('carries open requests to the new main draft, and opens none on an alternate', async () => {
+    const author = await as(owner)
+    const main = await db.version.findFirstOrThrow({
+      where: { storyboardId, isMain: true },
+      select: { id: true },
+    })
+    const carriedId = await aRequest()
+    const { suggestionId } = await aSentSuggestion(carriedId, 'carried', 'Carried over.')
+    const strandedId = await aRequest()
+    const alternate = await author.version.create({ baseVersionId: main.id, name: 'Lighter' })
+    const lineageOf = async (requestId: string) =>
+      (
+        await db.contributionRequest.findUniqueOrThrow({
+          where: { id: requestId },
+          select: { section: { select: { lineageId: true } } },
+        })
+      ).section.lineageId
+    // The alternate has no counterpart for the second request's section.
+    await db.section.updateMany({
+      where: { lineageId: await lineageOf(strandedId), chapter: { versionId: alternate.id } },
+      data: { deletedAt: new Date() },
+    })
+
+    const inAlternate = await db.section.findFirstOrThrow({
+      where: { chapter: { versionId: alternate.id }, deletedAt: null },
+      select: { id: true },
+    })
+    await expect(
+      author.request.create({
+        sectionId: inAlternate.id,
+        kind: 'UNBLOCK',
+        title: 'Stuck',
+        ask: 'I do not know what she does next, and every version I write of it reads like somebody else wrote it.',
+        minWords: SUGGESTION_WORDS.floor,
+        maxWords: SUGGESTION_WORDS.floor,
+      }),
+    ).rejects.toThrow(/main draft/u)
+
+    try {
+      await author.version.promoteToMain({ versionId: alternate.id })
+
+      const carried = await db.contributionRequest.findUniqueOrThrow({
+        where: { id: carriedId },
+        select: { state: true, section: { select: { chapter: { select: { versionId: true } } } } },
+      })
+      expect(carried.state).toBe('ANSWERED')
+      expect(carried.section.chapter.versionId).toBe(alternate.id)
+      const stranded = await db.contributionRequest.findUniqueOrThrow({
+        where: { id: strandedId },
+        select: { state: true },
+      })
+      expect(stranded.state).toBe('CLOSED')
+
+      // Accepting now writes into the draft that is main.
+      await author.suggestion.accept({ suggestionId })
+      expect(await headText(carriedId)).toBe('Carried over.')
+    } finally {
+      await author.version.promoteToMain({ versionId: main.id })
+    }
+  })
+
+  /**
+   * FR-9.6. A credit line's address had no page, and was built from the
+   * stored order fields, not the reading positions the address is resolved
+   * by; a section joined away kept its old place (2026-10-16 spec review).
+   */
+  it('gives a credit the address the reader opens, and follows it through a join', async () => {
+    const { versionId } = await db.chapter.findUniqueOrThrow({
+      where: { id: chapterId },
+      select: { versionId: true },
+    })
+    // A chapter of its own, since a join renumbers its chapter; with gaps in
+    // the order, as the address must not depend on there being none.
+    const own = await db.chapter.create({
+      data: { versionId, lineageId: randomUUID(), order: 7, title: 'Two' },
+      select: { id: true },
+    })
+    await aSection(10, 'First.', own.id)
+    const second = await aSection(20, 'Second.', own.id)
+    const third = await aSection(30, 'Third.', own.id)
+    const request = await db.contributionRequest.create({
+      data: {
+        publicId: randomUUID().replaceAll('-', '').slice(0, 10),
+        storyboardId,
+        sectionId: third.sectionId,
+        openedById: owner.id,
+        kind: 'REWRITE',
+        title: 'Say it better',
+        ask: 'Anything.',
+        minWords: 1,
+        maxWords: 1000,
+      },
+      select: { id: true },
+    })
+    const { suggestionId } = await aSentSuggestion(request.id, 'credited', 'Third, better.')
+    const author = await as(owner)
+    await author.suggestion.accept({ suggestionId })
+
+    const { slug } = await db.storyboard.findUniqueOrThrow({
+      where: { id: storyboardId },
+      select: { slug: true },
+    })
+    const lineageOf = async (sectionId: string) =>
+      (
+        await db.section.findUniqueOrThrow({
+          where: { id: sectionId },
+          select: { lineageId: true },
+        })
+      ).lineageId
+    const placeOfCredit = async () => {
+      const { credits } = await author.credit.forStoryboard({ storyboardId })
+      const lineage = await lineageOf(third.sectionId)
+      return credits.find((credit) => credit.sectionLineage === lineage)?.place?.path
+    }
+
+    // Where the reader puts it: the second chapter's third section.
+    const story = await author.storyboard.get({ slug })
+    expect(story.chapters[1]?.sections[2]?.id).toBe(third.sectionId)
+    expect(await placeOfCredit()).toBe(`/s/${slug}/c/2/3`)
+
+    // Joined into the one above, its words are read there.
+    await author.section.joinWithPrevious({ sectionId: third.sectionId })
+    expect((await author.storyboard.get({ slug })).chapters[1]?.sections[1]?.id).toBe(
+      second.sectionId,
+    )
+    expect(await placeOfCredit()).toBe(`/s/${slug}/c/2/2`)
+  })
+
+  /**
+   * FR-12.1. Most notifications stored only ids, and the list and the emails
+   * read a link and a title from the payload, so "your suggestion was
+   * accepted" led nowhere and named nothing (2026-10-16 spec review).
+   */
+  it('leads each notification to what it is about', async () => {
+    const requestId = await aRequest()
+    const { call: writer, suggestionId } = await aSentSuggestion(requestId, 'told', 'Told.')
+    const author = await as(owner)
+    await author.suggestion.accept({ suggestionId })
+
+    const { slug } = await db.storyboard.findUniqueOrThrow({
+      where: { id: storyboardId },
+      select: { slug: true },
+    })
+    const request = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { publicId: true },
+    })
+    const suggestion = await db.suggestion.findUniqueOrThrow({
+      where: { id: suggestionId },
+      select: { publicId: true },
+    })
+    const page = `/s/${slug}/help/${request.publicId}/s/${suggestion.publicId}`
+
+    const arrived = (await author.notification.list()).find(
+      (row) => row.type === 'SUGGESTION_RECEIVED' && row.path === page,
+    )
+    expect(arrived?.title).toBe('Make it land')
+
+    const accepted = (await writer.notification.list()).find(
+      (row) => row.type === 'SUGGESTION_ACCEPTED',
+    )
+    expect(accepted).toMatchObject({ path: page, title: 'Make it land' })
+  })
+
+  /**
+   * SRS 3.1 and 3.2, FR-9.1, FR-12.2. Nothing made a co-author until the
+   * 2026-10-16 spec review, so the matrix's whole co-author column was
+   * unreachable.
+   */
+  it('makes a co-author by invitation, who writes, is credited, and can leave', async () => {
+    const author = await as(owner)
+    const writer = await person('coauthor')
+    const call = await as(writer)
+    const { sectionId, revisionId } = await aSection(110, 'Before the co-author.')
+
+    // Not yet: an invitation grants nothing.
+    const { invitationId } = await author.coauthor.invite({
+      storyboardId,
+      username: `@${writer.username.toUpperCase()}`,
+    })
+    await expect(
+      call.section.commitRevision({
+        sectionId,
+        contentJson: prose('Too soon.'),
+        baseRevisionId: revisionId,
+      }),
+    ).rejects.toThrow()
+    const invited = (await call.notification.list()).find((row) => row.type === 'COAUTHOR_INVITED')
+    expect(invited).toMatchObject({ path: '/invitations', title: 'Integrity' })
+    expect((await call.coauthor.invitations()).map((row) => row.id)).toContain(invitationId)
+
+    await call.coauthor.accept({ invitationId })
+    const written = await call.section.commitRevision({
+      sectionId,
+      contentJson: prose('Written by the co-author.'),
+      baseRevisionId: revisionId,
+    })
+    expect(written.unchanged).toBe(false)
+    expect(
+      await db.credit.count({
+        where: { storyboardId, contributorId: writer.id, type: 'COAUTHOR' },
+      }),
+    ).toBe(1)
+    expect(
+      await db.notification.count({ where: { userId: owner.id, type: 'COAUTHOR_ACCEPTED' } }),
+    ).toBeGreaterThan(0)
+
+    // Only the owner invites (SRS 3.2).
+    const another = await person('not-invited')
+    await expect(
+      call.coauthor.invite({ storyboardId, username: another.username }),
+    ).rejects.toThrow()
+
+    // Three at most, invitations included.
+    const list = await author.coauthor.list({ storyboardId })
+    const room = list.max - list.coauthors.length
+    const extra = []
+    for (let index = 0; index < room; index += 1) {
+      const invitee = await person(`invitee-${String(index)}`)
+      extra.push(
+        (await author.coauthor.invite({ storyboardId, username: invitee.username })).invitationId,
+      )
+    }
+    await expect(
+      author.coauthor.invite({ storyboardId, username: another.username }),
+    ).rejects.toThrow(/at most/u)
+    for (const id of extra) await author.coauthor.remove({ invitationId: id })
+
+    // Leaving takes the right to write, and leaves the credit.
+    await call.coauthor.remove({ invitationId })
+    await expect(
+      call.section.commitRevision({
+        sectionId,
+        contentJson: prose('After leaving.'),
+        baseRevisionId: written.revisionId,
+      }),
+    ).rejects.toThrow()
+    expect(
+      await db.credit.count({
+        where: { storyboardId, contributorId: writer.id, type: 'COAUTHOR' },
+      }),
+    ).toBe(1)
+  })
+
+  /**
+   * FR-2.6. Nothing listed a deleted story, so `restore` had no caller;
+   * restoring unfinished a finished story; and deleting closed none of its
+   * requests and told nobody (2026-10-16 spec review).
+   */
+  it('brings a deleted story back as it was, and tells its helpers it went', async () => {
+    const run = randomUUID().replaceAll('-', '').slice(0, 8)
+    const story = await db.storyboard.create({
+      data: {
+        publicId: `dl${run}`,
+        slug: `deleted-${run}`,
+        title: `Deleted ${run}`,
+        type: 'NOVEL',
+        visibility: 'PUBLIC',
+        publicFrom: new Date(Date.now() - 60_000),
+        ownerId: owner.id,
+      },
+      select: { id: true },
+    })
+    try {
+      const version = await db.version.create({
+        data: { storyboardId: story.id, name: 'Main draft', isMain: true, createdById: owner.id },
+        select: { id: true },
+      })
+      const chapter = await db.chapter.create({
+        data: { versionId: version.id, lineageId: randomUUID(), order: 0, title: 'One' },
+        select: { id: true },
+      })
+      const { sectionId } = await aSection(0, 'A section.', chapter.id)
+      const request = await db.contributionRequest.create({
+        data: {
+          publicId: `rq${run}`,
+          storyboardId: story.id,
+          sectionId,
+          openedById: owner.id,
+          kind: 'REWRITE',
+          title: 'Help',
+          ask: 'Anything.',
+          minWords: 1,
+          maxWords: 1000,
+        },
+        select: { id: true },
+      })
+      const drafter = await person('deleted-on')
+      await (await as(drafter)).suggestion.startDraft({ requestId: request.id })
+      const author = await as(owner)
+
+      const stateOf = () =>
+        db.storyboard.findUniqueOrThrow({
+          where: { id: story.id },
+          select: { state: true, deletedAt: true },
+        })
+
+      // Deleted while its request is open: the helper hears of it.
+      await author.storyboard.delete({ storyboardId: story.id })
+      expect(
+        await db.notification.count({ where: { userId: drafter.id, type: 'REQUEST_CLOSED' } }),
+      ).toBe(1)
+      expect((await author.storyboard.listDeleted()).map((row) => row.id)).toContain(story.id)
+      await author.storyboard.restore({ storyboardId: story.id })
+      expect(await stateOf()).toEqual({ state: 'ACTIVE', deletedAt: null })
+      expect((await author.storyboard.listDeleted()).map((row) => row.id)).not.toContain(story.id)
+
+      // A finished story comes back finished.
+      await author.storyboard.markFinished({ storyboardId: story.id, finished: true })
+      await author.storyboard.delete({ storyboardId: story.id })
+      await author.storyboard.restore({ storyboardId: story.id })
+      expect(await stateOf()).toEqual({ state: 'FINISHED', deletedAt: null })
+    } finally {
+      await db.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`select set_config('storyboard.hard_delete', 'on', true)`)
+        const where = { chapter: { version: { storyboardId: story.id } } }
+        await tx.section.updateMany({ where, data: { currentRevisionId: null } })
+        await tx.$executeRaw`
+          WITH gone AS (
+            DELETE FROM "Suggestion" AS s USING "ContributionRequest" AS r
+            WHERE s."requestId" = r."id" AND r."storyboardId" = ${story.id}
+          )
+          DELETE FROM "Revision" AS v USING "Section" AS c, "Chapter" AS h, "Version" AS n
+          WHERE v."sectionId" = c."id" AND c."chapterId" = h."id" AND h."versionId" = n."id"
+            AND n."storyboardId" = ${story.id}`
+        await tx.contributionRequest.deleteMany({ where: { storyboardId: story.id } })
+        await tx.section.deleteMany({ where })
+        await tx.chapter.deleteMany({ where: { version: { storyboardId: story.id } } })
+        await tx.version.deleteMany({ where: { storyboardId: story.id } })
+        await tx.storyboard.delete({ where: { id: story.id } })
+      })
+    }
+  })
+
+  /**
+   * FR-2.7, decision 0039 (the owner's choice, 2026-10-16). `publicFrom` is
+   * stamped once, so what was written while a story was private again became
+   * readable the moment it was republished.
+   */
+  it('keeps what was written in a private stretch private when the story is public again', async () => {
+    const { sectionId, revisionId } = await aSection(95, 'Public words.')
+    const author = await as(owner)
+    await author.storyboard.setVisibility({ storyboardId, visibility: 'PRIVATE' })
+    const secret = await author.section.commitRevision({
+      sectionId,
+      contentJson: prose('Private words.'),
+      baseRevisionId: revisionId,
+    })
+    await author.storyboard.setVisibility({ storyboardId, visibility: 'PUBLIC' })
+    const later = await author.section.commitRevision({
+      sectionId,
+      contentJson: prose('Public again.'),
+      baseRevisionId: secret.revisionId,
+    })
+
+    const call = await as(reader)
+    const shown = await call.section.history({ sectionId })
+    const ids = shown.revisions.map((revision) => revision.id)
+    expect(ids).toEqual(expect.arrayContaining([revisionId, later.revisionId]))
+    expect(ids).not.toContain(secret.revisionId)
+    expect(shown.truncatedByVisibility).toBe(true)
+    await expect(
+      call.compare.revisions({ baseId: revisionId, targetId: secret.revisionId ?? '' }),
+    ).rejects.toThrow(/does not exist/u)
+
+    const { slug } = await db.storyboard.findUniqueOrThrow({
+      where: { id: storyboardId },
+      select: { slug: true },
+    })
+    expect((await call.storyboard.get({ slug })).privateStretches).toHaveLength(1)
+    // The author sees all of it.
+    expect((await author.section.history({ sectionId })).revisions.map((r) => r.id)).toContain(
+      secret.revisionId,
+    )
+  })
+
   // Last, because it makes the shared story private.
   it('stops naming a story in a reader’s own lists once it is private to them', async () => {
     const call = await as(reader)
     expect((await call.suggestion.listMine()).length).toBeGreaterThan(0)
+    expect((await call.notification.list()).some((row) => row.path !== null)).toBe(true)
 
     await db.storyboard.update({
       where: { id: storyboardId },
@@ -314,5 +1232,9 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     expect(await call.suggestion.listMine()).toEqual([])
     const news = await call.request.withNews()
     expect(JSON.stringify(news)).not.toContain('A new, private title')
+    // Their notifications still say what happened, and no longer where.
+    const told = await call.notification.list()
+    expect(told.length).toBeGreaterThan(0)
+    expect(told.every((row) => row.path === null && row.title === null)).toBe(true)
   })
 })

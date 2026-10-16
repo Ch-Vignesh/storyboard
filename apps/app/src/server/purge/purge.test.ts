@@ -139,6 +139,28 @@ describe.skipIf(!databaseUrl)('purging a deleted storyboard (FR-2.6)', () => {
   })
 
   /**
+   * 2026-10-16 spec review: a cached comparison holds the paragraphs it
+   * compared, and nothing deleted it, so the purged prose lived on there.
+   */
+  it('takes the cached comparisons of its prose with it', async () => {
+    const { storyboard, revision } = await writeSomething('cached')
+    const keys = [`${revision.id}:other`, `other:${revision.id}`]
+    const unrelated = `unrelated-${randomUUID()}:also-unrelated`
+    for (const key of [...keys, unrelated]) {
+      await db.diffCache.create({
+        data: { key, result: { paragraphs: ['The harbour had been empty.'] }, stats: {} },
+      })
+    }
+    await deleteAndAge(storyboard.id)
+
+    await purgeDeletedStoryboards(db)
+
+    expect(await db.diffCache.count({ where: { key: { in: keys } } })).toBe(0)
+    expect(await db.diffCache.count({ where: { key: unrelated } })).toBe(1)
+    await db.diffCache.delete({ where: { key: unrelated } })
+  })
+
+  /**
    * Found in the phase 12 audit: every storyboard that had ever accepted a
    * suggestion failed its purge, every night, for ever. Deleting the suggestion
    * made Postgres null `Revision.suggestionId` on the accepted revision, which

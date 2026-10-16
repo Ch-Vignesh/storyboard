@@ -1,3 +1,4 @@
+import { Prisma } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
@@ -40,6 +41,21 @@ export const reportRouter = createTRPCRouter({
       })
     }
 
+    // Before the limit: a report already made costs nothing to make again. It
+    // spent one of the day's reports until the 2026-10-16 spec review.
+    const existing = await ctx.db.report.findUnique({
+      where: {
+        reporterId_targetType_targetId: {
+          reporterId,
+          targetType: input.targetType,
+          targetId: input.targetId,
+        },
+      },
+      select: { id: true },
+    })
+    const duplicate = { status: 'duplicate' as const, message: REPORT_COPY.duplicate }
+    if (existing) return duplicate
+
     // FR-13.3 — not in the requirement's list, but a reporting endpoint with no
     // ceiling is a harassment tool: the queue is a person's time. Counted after
     // the target is known to exist, so probing for things that do not exist
@@ -51,27 +67,24 @@ export const reportRouter = createTRPCRouter({
       (retryAt) => `You have reported a lot today. Try again ${whenToRetry(retryAt)}.`,
     )
 
-    const existing = await ctx.db.report.findUnique({
-      where: {
-        reporterId_targetType_targetId: {
+    try {
+      await ctx.db.report.create({
+        data: {
           reporterId,
           targetType: input.targetType,
           targetId: input.targetId,
+          category: input.category,
+          note: input.note ?? null,
         },
-      },
-      select: { id: true },
-    })
-    if (existing) return { status: 'duplicate' as const, message: REPORT_COPY.duplicate }
-
-    await ctx.db.report.create({
-      data: {
-        reporterId,
-        targetType: input.targetType,
-        targetId: input.targetId,
-        category: input.category,
-        note: input.note ?? null,
-      },
-    })
+      })
+    } catch (error) {
+      // Two at once, from a double click: the unique index lets one in, and
+      // the other is the same report, not a server fault (it was one).
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return duplicate
+      }
+      throw error
+    }
 
     // NFR-7 — a report is one of the socially consequential moments. The
     // reporter is in the log because a pattern of reports is itself a signal;

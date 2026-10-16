@@ -163,12 +163,15 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   const targetContext = await browser.newContext()
   const targetPage = await targetContext.newPage()
   const target = await signUpAndOnboard(targetPage)
+  // Its own title: the queue is shared with every earlier run against this
+  // database, and a run that stopped part-way leaves its report open.
+  const title = `A story under review ${String(Date.now())}`
 
   await targetPage.goto('/new')
-  await targetPage.getByLabel('Title').fill('A storyboard under review')
+  await targetPage.getByLabel('Title').fill(title)
   await targetPage.getByRole('button', { name: 'Horror', exact: true }).click()
   await targetPage.getByRole('button', { name: /create and start writing/i }).click()
-  await expect(targetPage).toHaveURL(/\/s\/a-storyboard-under-review-/)
+  await expect(targetPage).toHaveURL(/\/s\/a-story-under-review-/)
   const targetPath = new URL(targetPage.url()).pathname
   await targetContext.close()
 
@@ -219,12 +222,12 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   await reporterPage.getByRole('button', { name: /send the report/i }).click()
   await expect(reporterPage.getByText(/nobody is told who reported what/i)).toBeVisible()
 
-  // Reporting the same thing again is not an error and does not double-count.
+  // Coming back, they are told they reported it, rather than offered a form
+  // whose report would only be swallowed (the server still takes a second
+  // one as a duplicate, without counting it: integrity.test.ts).
   await reporterPage.reload()
-  await reporterPage.getByRole('button', { name: /report this story/i }).click()
-  await reporterPage.getByRole('radio', { name: /spam/i }).check()
-  await reporterPage.getByRole('button', { name: /send the report/i }).click()
   await expect(reporterPage.getByText(/already reported this/i)).toBeVisible()
+  await expect(reporterPage.getByRole('button', { name: /report this story/i })).toHaveCount(0)
   await reporterContext.close()
 
   // An administrator upholds it. `isAdmin` has no interface by design.
@@ -240,13 +243,12 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   await adminPage.goto('/admin')
   await expect(adminPage.getByRole('heading', { name: 'Moderation' })).toBeVisible()
 
-  const row = adminPage.getByRole('listitem').filter({ hasText: 'A storyboard under review' })
+  const row = adminPage.getByRole('listitem').filter({ hasText: title })
   await expect(row).toHaveCount(1)
   await row.getByRole('button', { name: /^uphold$/i }).click()
 
   // FR-13.5 — that was the tenth.
   await expect(adminPage.getByText(/tenth upheld report/i)).toBeVisible({ timeout: 15_000 })
-  await adminContext.close()
 
   const after = await prisma.user.findUniqueOrThrow({
     where: { id: targetUser.id },
@@ -261,7 +263,7 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   const guestPage = await guestContext.newPage()
   const response = await guestPage.goto(targetPath)
   expect(response?.status()).toBe(200)
-  await expect(guestPage.getByRole('heading', { name: 'A storyboard under review' })).toBeVisible()
+  await expect(guestPage.getByRole('heading', { name: title })).toBeVisible()
   await guestContext.close()
 
   const lockedOut = await browser.newContext()
@@ -272,6 +274,25 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   await lockedOutPage.getByRole('button', { name: /sign in/i }).click()
   await expect(lockedOutPage).toHaveURL(/\/signin/)
   await lockedOut.close()
+
+  // "Pending review": the review lifts it, from the same screen. Nothing
+  // listed suspended accounts until the 2026-10-16 spec review.
+  await adminPage.reload()
+  const suspendedRow = adminPage
+    .getByRole('listitem')
+    .filter({ hasText: target.username })
+    .filter({ has: adminPage.getByRole('button', { name: /lift the suspension/i }) })
+  await suspendedRow.getByRole('button', { name: /lift the suspension/i }).click()
+  await expect(suspendedRow).toHaveCount(0)
+  expect(
+    (
+      await prisma.user.findUniqueOrThrow({
+        where: { id: targetUser.id },
+        select: { status: true },
+      })
+    ).status,
+  ).toBe('ACTIVE')
+  await adminContext.close()
 
   // A non-admin gets 404 from the admin screen, not 403.
   const nosyContext = await browser.newContext()

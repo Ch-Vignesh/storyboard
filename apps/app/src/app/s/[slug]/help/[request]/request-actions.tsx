@@ -18,6 +18,7 @@ export function RequestActions({
   requestPublicId,
   state,
   kind,
+  finished,
   canDecide,
   canContribute,
   signedIn,
@@ -27,6 +28,8 @@ export function RequestActions({
   requestPublicId: string
   state: 'OPEN' | 'ANSWERED' | 'RESOLVED' | 'CLOSED'
   kind: RequestKind
+  /** FR-14.1 — a finished story asks for nothing, so nothing here reopens. */
+  finished: boolean
   canDecide: boolean
   canContribute: boolean
   signedIn: boolean
@@ -79,7 +82,7 @@ export function RequestActions({
       ) : null}
 
       {/* FR-5.9 — an author can reopen, and everyone who ever sent something is told. */}
-      {canDecide && !open ? (
+      {canDecide && !open && !finished ? (
         <Button
           variant="ghost"
           disabled={reopen.isPending}
@@ -93,7 +96,9 @@ export function RequestActions({
         <p className="text-[13px] text-ink-faint">
           {state === 'RESOLVED'
             ? 'A suggestion was accepted. Everything sent here is still readable.'
-            : 'This is closed. Everything sent here is still readable.'}
+            : finished
+              ? 'The story is marked finished, so this is closed. Everything sent here is still readable.'
+              : 'This is closed. Everything sent here is still readable.'}
         </p>
       ) : null}
 

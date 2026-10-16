@@ -1,6 +1,6 @@
 import PDFDocument from 'pdfkit'
 
-import { sourceLine } from './front-matter'
+import { originLine, sourceLine } from './front-matter'
 import type { AuthorshipProof, BlockNode, InlineNode, Manuscript } from './types'
 
 /**
@@ -165,6 +165,8 @@ export async function toPdf(manuscript: Manuscript): Promise<Buffer> {
     .text(manuscript.title, { align: 'center' })
   document.fontSize(BODY).font(base).moveDown(0.6)
   document.text(`by ${manuscript.author}`, { align: 'center' })
+  const origin = originLine(manuscript)
+  if (origin) document.moveDown(0.4).text(origin, { align: 'center' })
 
   if (manuscript.contributors.length > 0) {
     document.moveDown(2)

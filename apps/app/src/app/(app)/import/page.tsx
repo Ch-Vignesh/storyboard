@@ -20,16 +20,32 @@ const SURVIVES = [
 ] as const
 
 /** Screen 15 — import (FR-3). */
-export default async function ImportPage() {
+export default async function ImportPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ job?: string }>
+}) {
   const session = await auth()
   if (!session?.user) redirect('/signin?next=/import')
 
   const genres = await caller.user.genres()
 
+  // FR-3.2 — a file already read is reviewed where it was left: the job is in
+  // the address once its proposal exists. A reload threw the proposal away,
+  // and the upload with it, until the 2026-10-16 spec review; `getProposal`
+  // had no caller. A job that is not this person's, is gone, or was not read
+  // is simply not resumed.
+  const { job } = (await searchParams) ?? {}
+  const found = job ? await caller.import.getProposal({ jobId: job }).catch(() => null) : null
+  const resume =
+    found?.state === 'ANALYSED' && found.proposal
+      ? { jobId: found.id, fileName: found.fileName, proposal: found.proposal }
+      : undefined
+
   return (
     <main id="main" className="mx-auto max-w-2xl px-6 py-12">
       <nav className="mb-6 text-[12.5px] text-ink-faint">
-        <Link href="/dashboard" className="hover:text-ink hover:underline">
+        <Link href="/" className="hover:text-ink hover:underline">
           Your dashboard
         </Link>
       </nav>
@@ -71,7 +87,7 @@ export default async function ImportPage() {
         </p>
       </section>
 
-      <ImportFlow genres={genres} />
+      <ImportFlow genres={genres} resume={resume} />
     </main>
   )
 }

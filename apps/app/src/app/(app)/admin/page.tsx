@@ -32,7 +32,7 @@ export default async function AdminPage() {
   return (
     <main id="main" className="mx-auto max-w-4xl px-6 py-12">
       <nav className="mb-6 text-[12.5px] text-ink-faint">
-        <Link href="/dashboard" className="hover:text-ink hover:underline">
+        <Link href="/" className="hover:text-ink hover:underline">
           Your dashboard
         </Link>
       </nav>

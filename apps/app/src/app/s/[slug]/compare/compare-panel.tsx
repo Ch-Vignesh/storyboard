@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import Link from '@/components/link'
 import { useState } from 'react'
 
+import { RevisionComparison } from '@/components/revision-comparison'
 import { useTRPC } from '@/trpc/client'
 
 type VersionOption = { id: string; name: string; isMain: boolean }
@@ -37,6 +38,8 @@ export function ComparePanel({
   const trpc = useTRPC()
   const [baseVersionId, setBase] = useState(initialBase)
   const [targetVersionId, setTarget] = useState(initialTarget)
+  // FR-7.5 — the section open for reading, by lineage.
+  const [open, setOpen] = useState<string | null>(null)
 
   const comparison = useQuery({
     ...trpc.compare.versions.queryOptions({ baseVersionId, targetVersionId }),
@@ -95,18 +98,39 @@ export function ComparePanel({
             {comparison.data.rows.map((row) => {
               const copy = STATE_COPY[row.state]
               return (
-                <li
-                  key={row.lineageId}
-                  className="flex items-baseline justify-between gap-4 py-3 text-[14px]"
-                >
-                  <span className="min-w-0 truncate text-ink">{row.title}</span>
-                  <span className="flex shrink-0 items-baseline gap-3">
-                    <span className="text-[12.5px] text-ink-faint tabular-nums">
-                      {row.baseWords.toLocaleString('en-GB')} →{' '}
-                      {row.targetWords.toLocaleString('en-GB')}
+                <li key={row.lineageId} className="py-3 text-[14px]">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="min-w-0 truncate text-ink">{row.title}</span>
+                    <span className="flex shrink-0 items-baseline gap-3">
+                      <span className="text-[12.5px] text-ink-faint tabular-nums">
+                        {row.baseWords.toLocaleString('en-GB')} →{' '}
+                        {row.targetWords.toLocaleString('en-GB')}
+                      </span>
+                      <span className={`text-[12.5px] ${copy.className}`}>{copy.label}</span>
+                      {/* FR-7.5's third case, shown rather than only counted:
+                          the same comparison as everywhere else, of the two
+                          versions' text of this section. Until the 2026-10-16
+                          spec review this list was all there was. */}
+                      {row.state === 'changed' && row.baseRevisionId && row.targetRevisionId ? (
+                        <button
+                          type="button"
+                          className="text-[12.5px] text-pencil hover:underline"
+                          aria-expanded={open === row.lineageId}
+                          onClick={() => setOpen(open === row.lineageId ? null : row.lineageId)}
+                        >
+                          {open === row.lineageId ? 'Hide' : 'Show the difference'}
+                        </button>
+                      ) : null}
                     </span>
-                    <span className={`text-[12.5px] ${copy.className}`}>{copy.label}</span>
-                  </span>
+                  </div>
+                  {open === row.lineageId && row.baseRevisionId && row.targetRevisionId ? (
+                    <RevisionComparison
+                      baseId={row.baseRevisionId}
+                      targetId={row.targetRevisionId}
+                      leftLabel={nameOfVersion(baseVersionId)}
+                      rightLabel={nameOfVersion(targetVersionId)}
+                    />
+                  ) : null}
                 </li>
               )
             })}

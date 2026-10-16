@@ -23,7 +23,6 @@ describe('subject lines cannot carry headers', () => {
       to: 'author@example.test',
       requestTitle: `Chapter four${CR}${LF}Bcc: everyone@example.test`,
       requestUrl: 'https://example.test/s/a/help/b',
-      widenUrl: 'https://example.test/s/a/help/b?widen=1',
       appUrl: 'https://example.test',
     })
 
@@ -53,7 +52,6 @@ describe('subject lines cannot carry headers', () => {
       to: 'author@example.test',
       requestTitle: 'x'.repeat(500),
       requestUrl: 'https://example.test/s/a/help/b',
-      widenUrl: 'https://example.test/s/a/help/b?widen=1',
       appUrl: 'https://example.test',
     })
     expect(mail.subject.length).toBeLessThanOrEqual(200)

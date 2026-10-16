@@ -51,6 +51,17 @@ describe('reading a file (FR-3.1)', () => {
     expect(marks?.map((mark) => mark.type)).toEqual(['em', 'strong'])
   })
 
+  it('takes a line of nothing but # as a scene break, not a chapter', () => {
+    // Markdown reads it as an empty heading; the writer meant a break, and
+    // each one used to start an untitled chapter (2026-10-16 spec review).
+    const doc = extractMarkdown('She left.\n\n#\n\nShe came back.\n')
+    expect(doc.blocks.map((block) => block.json.type)).toEqual([
+      'paragraph',
+      'scene_break',
+      'paragraph',
+    ])
+  })
+
   it('drops what FR-3.7 says it drops, and says so', () => {
     const doc = extractMarkdown('| a | b |\n| - | - |\n| 1 | 2 |\n\nProse.\n')
     expect(doc.dropped).toContain('tables')
@@ -105,6 +116,31 @@ describe('reading a file (FR-3.1)', () => {
     const doc = extractFdx(fdx)
     expect(doc.blocks).toHaveLength(4)
     expect(doc.blocks[1]?.text).toBe('Gulls. Nothing else.')
+  })
+
+  it('keeps quotation marks in dialogue and action, in both formats', () => {
+    // 2026-10-16 spec review: quotes vanished on the way in.
+    const fountain = extractFountain(
+      ['INT. KITCHEN - DAY', '', 'A note: "Back soon."', '', 'MARGARET', '"Soon," she said.'].join(
+        '\n',
+      ),
+    )
+    expect(fountain.blocks.map((block) => block.text)).toContain('A note: "Back soon."')
+    expect(fountain.blocks.map((block) => block.text)).toContain('"Soon," she said.')
+
+    const fdx = extractFdx(`<?xml version="1.0" encoding="UTF-8"?>
+      <FinalDraft DocumentType="Script">
+        <Content>
+          <Paragraph Type="Action"><Text>A note: &quot;Back soon.&quot;</Text></Paragraph>
+          <Paragraph Type="Dialogue"><Text>"Soon," she said. It's late.</Text></Paragraph>
+          <Paragraph Type="Dialogue"><Text>&#8220;Later,&#8221; &#x2014; she&#39;s gone.</Text></Paragraph>
+        </Content>
+      </FinalDraft>`)
+    expect(fdx.blocks.map((block) => block.text)).toEqual([
+      'A note: "Back soon."',
+      `"Soon," she said. It's late.`,
+      '“Later,” — she’s gone.'.replace('’', "'"),
+    ])
   })
 
   it('does not throw on a file that is not XML at all', () => {
@@ -229,6 +265,38 @@ describe('section boundaries (FR-3.4)', () => {
     )
     const sections = detectSections(blocks, 0, blocks.length - 1)
     expect(sections).toHaveLength(3)
+    // FR-3.5 — and says why, per boundary.
+    expect(sections.map((section) => section.reason)).toEqual([
+      'start',
+      'scene-break',
+      'scene-break',
+    ])
+  })
+
+  it('reads a longer run of blank lines than usual as a scene break', () => {
+    // FR-3.4's "run of two or more blank lines"; not read until 2026-10-16.
+    const paragraphs = (from: number) =>
+      Array.from({ length: 3 }, (_, index) => `Paragraph ${String(from + index)} of the story.`)
+    const text = [...paragraphs(0), '\n\n', ...paragraphs(3)].join('\n\n')
+    const blocks = blocksFromPlainText(text)
+    const sections = detectSections(blocks, 0, blocks.length - 1)
+    expect(sections.map((section) => section.reason)).toEqual(['start', 'blank-lines'])
+  })
+
+  it('does not cut after every paragraph of a manuscript spaced with two blank lines', () => {
+    const text = Array.from(
+      { length: 6 },
+      (_, index) => `Paragraph ${String(index)} of the story.`,
+    ).join('\n\n\n')
+    const blocks = blocksFromPlainText(text)
+    expect(blocks.some((block) => block.isSceneBreak)).toBe(false)
+  })
+
+  it('gives the review the opening words of every block (FR-3.2)', () => {
+    const doc = extractPlainText(`${prose(3)}\n\n***\n\n${prose(2, 3)}`)
+    const proposal = propose('txt', doc)
+    expect(proposal.openings).toHaveLength(doc.blocks.length)
+    expect(proposal.openings).toContain('* * *')
   })
 
   it('cuts a monolithic chapter by length, at a paragraph boundary', () => {
@@ -410,6 +478,23 @@ describe('a file built to make the reader work for ever', () => {
     const doc = extractFountain('a:' + '\n b:'.repeat(40))
     expect(performance.now() - started).toBeLessThan(500)
     expect(doc.dropped).not.toContain('the title page')
+  })
+
+  it('does not expand a Final Draft file’s entities into a billion laughs', () => {
+    // Each entity is ten of the one before; nine levels is 10^9 copies.
+    const levels = Array.from({ length: 9 }, (_, index) => {
+      const previous = index === 0 ? 'lol' : `&l${String(index - 1)};`
+      return `<!ENTITY l${String(index)} "${previous.repeat(10)}">`
+    }).join('')
+    const bomb = `<?xml version="1.0"?><!DOCTYPE FinalDraft [${levels}]>
+      <FinalDraft><Content><Paragraph Type="Action"><Text>&l8;</Text></Paragraph></Content></FinalDraft>`
+
+    const started = performance.now()
+    const doc = extractFdx(bomb)
+    expect(performance.now() - started).toBeLessThan(2000)
+    expect(doc.blocks.reduce((total, block) => total + block.text.length, 0)).toBeLessThan(
+      1_000_000,
+    )
   })
 
   it('still finds a title page where there is one', async () => {

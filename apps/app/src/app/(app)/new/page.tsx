@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 
+import { requireSession } from '@/auth/require-session'
 import { HydrateClient, prefetch, trpc } from '@/trpc/server'
 
 import { CreateStoryboardForm } from './create-storyboard-form'
@@ -14,7 +15,8 @@ export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Start a story' }
 
 /** FR-2.1 — title, type, one to three genres, visibility. Everything else later. */
-export default function NewStoryboardPage() {
+export default async function NewStoryboardPage() {
+  await requireSession()
   prefetch(trpc.user.genres.queryOptions())
 
   return (

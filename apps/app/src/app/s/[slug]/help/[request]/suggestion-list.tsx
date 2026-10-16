@@ -5,7 +5,7 @@ import { useMutation } from '@tanstack/react-query'
 import Link from '@/components/link'
 import { useRouter } from 'next/navigation'
 
-import { PASS_CHIPS, SUGGESTION_STATE_LABELS } from '@/lib/schemas/help'
+import { PASS_CHIPS, suggestionStateLabel } from '@/lib/schemas/help'
 import { useTRPC } from '@/trpc/client'
 
 type Suggestion = {
@@ -24,15 +24,20 @@ export function SuggestionList({
   slug,
   requestPublicId,
   suggestions,
+  requestState,
   canDecide,
   viewerId,
 }: {
   slug: string
   requestPublicId: string
   suggestions: Suggestion[]
+  requestState: string
   canDecide: boolean
   viewerId: string | null
 }) {
+  // FR-5.10 — closed without accepting: nothing here can be decided, sent,
+  // updated or taken back until the author opens it again.
+  const closed = requestState === 'CLOSED'
   const trpc = useTRPC()
   const router = useRouter()
   const refresh = () => router.refresh()
@@ -70,7 +75,7 @@ export function SuggestionList({
                     <p className="text-[14px] text-ink">
                       {mine ? 'You' : name}
                       <span className="text-ink-faint"> · {suggestion.wordCount} words</span>
-                      <StateBadge state={suggestion.state} />
+                      <StateBadge state={suggestion.state} requestState={requestState} />
                     </p>
                     {suggestion.note ? (
                       // FR-6.2 — the note goes above the prose, not below it.
@@ -86,7 +91,7 @@ export function SuggestionList({
                   </div>
 
                   <div className="flex shrink-0 items-center gap-2">
-                    {suggestion.state === 'DRAFT' && mine ? (
+                    {suggestion.state === 'DRAFT' && mine && !closed ? (
                       <Button asChild size="sm" variant="primary">
                         <Link href={`/s/${slug}/help/${requestPublicId}/write`}>
                           Finish your draft
@@ -95,7 +100,7 @@ export function SuggestionList({
                     ) : (
                       <Button asChild size="sm" variant={canDecide ? 'primary' : 'default'}>
                         <Link href={`/s/${slug}/help/${requestPublicId}/s/${suggestion.publicId}`}>
-                          {canDecide && suggestion.state === 'SUBMITTED'
+                          {canDecide && suggestion.state === 'SUBMITTED' && !closed
                             ? 'Read and decide'
                             : 'Read it'}
                         </Link>
@@ -104,7 +109,7 @@ export function SuggestionList({
 
                     {/* FR-6.7 — a stale suggestion can be updated and sent again
                         without costing another quota slot. */}
-                    {mine && suggestion.state === 'STALE' ? (
+                    {mine && suggestion.state === 'STALE' && !closed ? (
                       <Button
                         size="sm"
                         disabled={rebase.isPending}
@@ -114,7 +119,7 @@ export function SuggestionList({
                       </Button>
                     ) : null}
 
-                    {mine && suggestion.state === 'SUBMITTED' ? (
+                    {mine && suggestion.state === 'SUBMITTED' && !closed ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -141,19 +146,16 @@ export function SuggestionList({
   )
 }
 
-function StateBadge({ state }: { state: Suggestion['state'] }) {
+function StateBadge({ state, requestState }: { state: Suggestion['state']; requestState: string }) {
+  const label = suggestionStateLabel(state, requestState)
   const tone =
     state === 'ACCEPTED'
       ? 'border-moss/40 bg-moss-wash text-moss'
-      : state === 'STALE'
-        ? 'border-ochre/40 bg-ochre-wash text-ochre'
-        : state === 'PASSED'
-          ? 'border-rule bg-paper-sunk text-ink-faint'
+      : state === 'PASSED' || label === 'not accepted'
+        ? 'border-rule bg-paper-sunk text-ink-faint'
+        : state === 'STALE'
+          ? 'border-ochre/40 bg-ochre-wash text-ochre'
           : 'border-pencil/30 bg-pencil-wash text-pencil'
 
-  return (
-    <span className={`ml-2 border px-1.5 py-0.5 text-[11px] ${tone}`}>
-      {SUGGESTION_STATE_LABELS[state]}
-    </span>
-  )
+  return <span className={`ml-2 border px-1.5 py-0.5 text-[11px] ${tone}`}>{label}</span>
 }

@@ -104,4 +104,9 @@ test('every format FR-14.2 names can actually be downloaded', async ({ page }) =
   const epub = await (await page.request.get(`/api/export/${slug}?format=epub`)).body()
   expect(epub.subarray(0, 2).toString('ascii')).toBe('PK')
   expect(epub.subarray(30, 38).toString('ascii')).toBe('mimetype')
+
+  // A version that is not this story's is not found, not a server fault (it
+  // was a 500 until the 2026-10-16 spec review).
+  const stray = await page.request.get(`/api/export/${slug}?format=md&version=not-a-version`)
+  expect(stray.status()).toBe(404)
 })

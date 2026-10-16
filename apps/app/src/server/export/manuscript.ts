@@ -36,8 +36,29 @@ export async function assembleManuscript(
       type: true,
       rightsNote: true,
       owner: { select: { username: true, displayName: true } },
+      // FR-10.4 — where a spin-off came from. Named only while the original
+      // is public: a private or deleted one keeps its title and its author.
+      forkedFrom: {
+        select: {
+          slug: true,
+          title: true,
+          visibility: true,
+          deletedAt: true,
+          owner: { select: { username: true, displayName: true } },
+        },
+      },
     },
   })
+  const origin = storyboard.forkedFrom
+  const spunOffFrom = origin
+    ? origin.visibility === 'PUBLIC' && origin.deletedAt === null
+      ? {
+          title: origin.title,
+          author: nameOf(origin.owner),
+          url: `${env.NEXT_PUBLIC_APP_URL}/s/${origin.slug}`,
+        }
+      : { title: 'a story that is no longer public', author: null, url: null }
+    : null
 
   const version = await db.version.findFirst({
     where: versionId ? { id: versionId, storyboardId } : { storyboardId, isMain: true },
@@ -96,6 +117,7 @@ export async function assembleManuscript(
     author: nameOf(storyboard.owner),
     sourceUrl: `${env.NEXT_PUBLIC_APP_URL}/s/${storyboard.slug}`,
     rightsNote: storyboard.rightsNote,
+    spunOffFrom,
     contributors,
     isScreenplay: flavour === 'screenplay',
     exportedAt: new Date(),

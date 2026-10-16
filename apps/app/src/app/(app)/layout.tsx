@@ -1,9 +1,8 @@
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
-
 import Link from '@/components/link'
 
 import { auth, signOut } from '@/auth'
+import { redirectIfSessionEnded } from '@/auth/require-session'
+import { caller } from '@/trpc/server'
 
 /**
  * Chrome for the signed-in application. The reader at /s/{slug} has its own
@@ -13,17 +12,14 @@ import { auth, signOut } from '@/auth'
 export default async function AppLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const session = await auth()
 
-  // A session cookie the server has refused: one that signed in before a
-  // password reset (decision 0036). The proxy let it through because it never
-  // reads the database; this is the first place that can tell, so it sends the
-  // person to sign in again instead of rendering the app for nobody. The
-  // browser's own session check clears the cookie on the next page.
-  if (!session) {
-    const cookieStore = await cookies()
-    if (cookieStore.getAll().some((cookie) => cookie.name.includes('authjs.session-token'))) {
-      redirect('/signin?ended=1')
-    }
-  }
+  // A session the server has refused goes to sign in again. The browser's own
+  // session check clears the cookie on the next page.
+  await redirectIfSessionEnded(session)
+
+  // FR-12.1 — how many are waiting, beside the link to them. The count was
+  // served and never shown until the 2026-10-16 spec review. A header is not
+  // worth failing a page over, so a refusal shows no count.
+  const unread = session ? await caller.notification.unreadCount().catch(() => 0) : 0
 
   return (
     <div className="min-h-screen">
@@ -43,30 +39,54 @@ export default async function AppLayout({ children }: Readonly<{ children: React
             <Link href="/browse" className="text-ink-soft hover:text-ink">
               Browse
             </Link>
-            <Link href="/new" className="text-pencil hover:underline">
-              Start a story
-            </Link>
-            <Link href="/notifications" className="text-ink-soft hover:text-ink">
-              Notifications
-            </Link>
-            <Link href="/settings" className="text-ink-soft hover:text-ink">
-              Settings
-            </Link>
-            {session?.user.username ? (
-              <Link href={`/@${session.user.username}`} className="text-ink-faint hover:text-ink">
-                @{session.user.username}
-              </Link>
-            ) : null}
-            <form
-              action={async () => {
-                'use server'
-                await signOut({ redirectTo: '/signin' })
-              }}
-            >
-              <button type="submit" className="text-ink-soft hover:text-ink">
-                Sign out
-              </button>
-            </form>
+            {session ? (
+              <>
+                <Link href="/new" className="text-pencil hover:underline">
+                  Start a story
+                </Link>
+                <Link href="/notifications" className="text-ink-soft hover:text-ink">
+                  Notifications
+                  {unread > 0 ? (
+                    <span className="ml-1.5 rounded-full bg-pencil px-1.5 py-px text-[11px] text-paper tabular-nums">
+                      {unread > 99 ? '99+' : unread}
+                      <span className="sr-only"> unread</span>
+                    </span>
+                  ) : null}
+                </Link>
+                <Link href="/settings" className="text-ink-soft hover:text-ink">
+                  Settings
+                </Link>
+                {session.user.username ? (
+                  <Link
+                    href={`/@${session.user.username}`}
+                    className="text-ink-faint hover:text-ink"
+                  >
+                    @{session.user.username}
+                  </Link>
+                ) : null}
+                <form
+                  action={async () => {
+                    'use server'
+                    await signOut({ redirectTo: '/signin' })
+                  }}
+                >
+                  <button type="submit" className="text-ink-soft hover:text-ink">
+                    Sign out
+                  </button>
+                </form>
+              </>
+            ) : (
+              // FR-1.2 — /browse is open to a guest, who was offered Settings
+              // and Sign out here and no way in (2026-10-16 spec review).
+              <>
+                <Link href="/signin" className="text-ink-soft hover:text-ink">
+                  Sign in
+                </Link>
+                <Link href="/signup" className="text-pencil hover:underline">
+                  Create an account
+                </Link>
+              </>
+            )}
           </nav>
         </div>
       </header>

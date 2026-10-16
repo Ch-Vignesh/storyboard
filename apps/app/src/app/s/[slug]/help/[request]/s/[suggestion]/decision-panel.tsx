@@ -25,15 +25,19 @@ export function DecisionPanel({
   comparison,
   contributorName,
   canDecide,
-  isStale,
+  continues,
+  headRevisionId,
   backHref,
 }: {
   suggestionId: string
+  /** The section's text as the comparison above shows it (FR-6.6). */
+  headRevisionId: string | null
   state: 'DRAFT' | 'SUBMITTED' | 'ACCEPTED' | 'PASSED' | 'STALE' | 'WITHDRAWN'
   comparison: ComparisonResult
   contributorName: string
   canDecide: boolean
-  isStale: boolean
+  /** A "what comes next" request: accepting adds after the text (decision 0038). */
+  continues: boolean
   backHref: string
 }) {
   const trpc = useTRPC()
@@ -50,7 +54,12 @@ export function DecisionPanel({
         router.refresh()
       },
       onError: (error) => {
-        if (error.data?.code === 'CONFLICT') setConflict(true)
+        // FR-6.6 — show the section as it is now, so a second Accept is a
+        // decision about what the author has actually seen.
+        if (error.data?.code === 'CONFLICT') {
+          setConflict(true)
+          router.refresh()
+        }
       },
     }),
   )
@@ -78,8 +87,8 @@ export function DecisionPanel({
           {conflict ? (
             // FR-6.6 — someone else changed the section while this page was open.
             <p className="mb-4 border-l-2 border-ochre bg-ochre-wash px-4 py-3 text-[13.5px] leading-relaxed text-ink">
-              This section changed a moment ago, so the comparison above is out of date. Reload to
-              see where it stands, or accept anyway and this version becomes the current text.
+              This section changed a moment ago. The comparison above now shows it as it is. Look
+              again, and accept if you still want this.
             </p>
           ) : null}
 
@@ -89,9 +98,7 @@ export function DecisionPanel({
                 variant="accept"
                 size="lg"
                 disabled={accept.isPending}
-                onClick={() =>
-                  accept.mutate({ suggestionId, acknowledgedChange: conflict || isStale })
-                }
+                onClick={() => accept.mutate({ suggestionId, acknowledgedHeadId: headRevisionId })}
               >
                 {accept.isPending ? 'Accepting' : 'Accept into the main draft'}
               </Button>
@@ -99,8 +106,9 @@ export function DecisionPanel({
                 Go a different way
               </Button>
               <p className="w-full text-[12.5px] leading-relaxed text-ink-faint">
-                Accepting writes this into your draft and credits {contributorName} permanently.
-                Your earlier version stays in the history.
+                {continues
+                  ? `Accepting adds this after the end of the section and credits ${contributorName} permanently. What you wrote before it stays as it is.`
+                  : `Accepting writes this into your draft and credits ${contributorName} permanently. Your earlier version stays in the history.`}
               </p>
             </div>
           ) : (

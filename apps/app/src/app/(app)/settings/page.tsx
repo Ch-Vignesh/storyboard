@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 
+import { requireSession } from '@/auth/require-session'
 import { HydrateClient, prefetch, trpc } from '@/trpc/server'
 
 import { SettingsForm } from './settings-form'
@@ -8,7 +9,8 @@ export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Settings' }
 
 /** Screen 16 — account, genres, notifications, reading. */
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  await requireSession()
   prefetch(trpc.settings.get.queryOptions())
   prefetch(trpc.user.genres.queryOptions())
 

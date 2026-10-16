@@ -79,9 +79,17 @@
   text-indent: 0;
 }
 
-/* FR-4.2 — screenplay elements at industry margins, in Courier Prime. */
-.manuscript:has(.sp-scene_heading),
-.manuscript:has(.sp-dialogue) {
+/* FR-4.2 — screenplay elements at industry margins, in Courier Prime. Any
+   element, not only a scene heading or dialogue: a new script starts as one
+   action line, and was set in the prose face until it had one of those. */
+.manuscript:has(
+  .sp-scene_heading,
+  .sp-action,
+  .sp-character,
+  .sp-parenthetical,
+  .sp-dialogue,
+  .sp-transition
+) {
   font-family: var(--font-screenplay);
 }
 

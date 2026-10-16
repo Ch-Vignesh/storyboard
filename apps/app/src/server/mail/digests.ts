@@ -14,7 +14,9 @@ import {
   QUIET_REQUEST_NUDGE_DAYS,
   WEEKLY_DIGEST_DAYS,
 } from '@/lib/schemas/constants'
+import { ANSWERS } from '@/server/answers'
 import { pruneRateLimits } from '@/server/limits'
+import { targetsFor, type Target } from '@/server/notification-targets'
 import { purgeDeletedAccounts } from '@/server/purge/accounts'
 import { purgeAbandonedImports } from '@/server/purge/imports'
 import { purgeDeletedStoryboards } from '@/server/purge'
@@ -58,22 +60,20 @@ async function emailAllowed(db: Db, userId: string, type: NotificationType): Pro
   return pref?.email ?? true
 }
 
-/** Where a notification points, built from its payload. */
-function urlFor(type: NotificationType, payload: Prisma.JsonValue, appUrl: string): string {
-  const data = (payload ?? {}) as Record<string, unknown>
-  const slug = typeof data.slug === 'string' ? data.slug : null
-  const requestPublicId = typeof data.requestPublicId === 'string' ? data.requestPublicId : null
-
-  if (slug && requestPublicId) return `${appUrl}/s/${slug}/help/${requestPublicId}`
-  if (slug) return `${appUrl}/s/${slug}`
-  void type
-  return `${appUrl}/notifications`
-}
-
-/** The human-readable thing a notification is about, if its payload carries one. */
-function subjectFor(payload: Prisma.JsonValue): string | undefined {
-  const data = (payload ?? {}) as Record<string, unknown>
-  return typeof data.title === 'string' ? data.title : undefined
+/**
+ * A notification as a line of an email: where it leads and what it names,
+ * worked out against what its recipient may read now, exactly as the in-app
+ * list does (`notification-targets.ts`). Built from the payload until the
+ * 2026-10-16 spec review, which most payloads could not support. A row that
+ * leads nowhere still links somewhere: the list, which says what happened.
+ */
+function lineFor(row: Pending, targets: Map<string, Target>, appUrl: string): NotificationLine {
+  const target = targets.get(row.id)
+  return {
+    type: row.type,
+    url: `${appUrl}${target?.path ?? '/notifications'}`,
+    subject: target?.title ?? undefined,
+  }
 }
 
 type Pending = {
@@ -222,11 +222,7 @@ export async function runImmediate(db: Db, options: RunOptions = {}): Promise<Ru
       continue
     }
 
-    const line: NotificationLine = {
-      type: row.type,
-      url: urlFor(row.type, row.payload, appUrl),
-      subject: subjectFor(row.payload),
-    }
+    const line = lineFor(row, await targetsFor(db, row.user.id, [row]), appUrl)
     const mail = notificationMail({ to: row.user.email, line, appUrl })
     if (await run.send(mail, { notificationId: row.id, userId: row.user.id })) {
       // Marked the moment it went, so nothing after this can send it twice.
@@ -272,6 +268,7 @@ export async function runHourlyDigest(db: Db, options: RunOptions = {}): Promise
     skipped += switchedOff.length
     if (allowed.length === 0) continue
 
+    const targets = await targetsFor(db, userId, allowed)
     const went = await run.send(
       digestMail({
         to: entry.email,
@@ -283,11 +280,7 @@ export async function runHourlyDigest(db: Db, options: RunOptions = {}): Promise
           allowed.length === 1
             ? NOTIFICATIONS[allowed[0]!.type].sentence
             : 'Since the last time we wrote:',
-        lines: allowed.map((row) => ({
-          type: row.type,
-          url: urlFor(row.type, row.payload, appUrl),
-          subject: subjectFor(row.payload),
-        })),
+        lines: allowed.map((row) => lineFor(row, targets, appUrl)),
         appUrl,
       }),
       { userId },
@@ -418,7 +411,7 @@ export async function runQuietNudge(
     where: {
       state: 'OPEN',
       createdAt: { lt: cutoff },
-      suggestions: { none: {} },
+      suggestions: { none: ANSWERS },
       ideas: { none: {} },
       storyboard: { deletedAt: null },
     },
@@ -474,7 +467,6 @@ export async function runQuietNudge(
           to: request.openedBy.email,
           requestTitle: request.title,
           requestUrl,
-          widenUrl: `${requestUrl}?widen=1`,
           appUrl,
         }),
         { requestId: request.id },

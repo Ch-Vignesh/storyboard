@@ -28,6 +28,7 @@ export default async function StoryboardSettingsPage({ params }: Params) {
   if (!data.permissions.canSetVisibility) notFound()
 
   const impact = await caller.storyboard.deletionImpact({ storyboardId: data.storyboard.id })
+  const genres = await caller.user.genres()
 
   return (
     <main className="mx-auto max-w-xl px-6 py-12">
@@ -49,6 +50,8 @@ export default async function StoryboardSettingsPage({ params }: Params) {
         // An erased contributor has no name to show in the confirmation, so
         // they are not listed — but they are still counted by the credits page.
         contributors={impact.contributors.filter((person) => person !== null)}
+        genres={genres}
+        genreIds={data.storyboard.genres.map((genre) => genre.id)}
       />
     </main>
   )

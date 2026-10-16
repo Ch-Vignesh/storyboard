@@ -71,6 +71,29 @@ test('a writer creates a storyboard and writes a section', async ({ page }) => {
   await expect(versions.first().getByRole('button', { name: /restore this version/i })).toHaveCount(
     0,
   )
+
+  // FR-8.3 with FR-7 — what a version changed, shown, not described. Until
+  // 2026-10-16 this was a placeholder naming two word counts, and nobody could
+  // see what an accepted suggestion had put in.
+  await versions.first().getByRole('button', { name: 'What changed' }).click()
+  await expect(versions.first().getByRole('button', { name: 'Hide' })).toBeVisible()
+  await expect(page.getByText(/side-by-side view arrives/i)).toHaveCount(0)
+  await expect(
+    page.getByText(/the harbour had been empty for a year before she noticed/i).first(),
+  ).toBeVisible()
+
+  // FR-13.6 — the hash is on screen, and its writer can take a signed proof
+  // of it. The route existed and nothing linked to it until 2026-10-16.
+  await expect(versions.first()).toContainText('Fingerprint')
+  const proof = versions.first().getByRole('link', { name: /proof that you wrote this/i })
+  const proofResponse = await page.request.get((await proof.getAttribute('href')) ?? '')
+  expect(proofResponse.status()).toBe(200)
+  expect(proofResponse.headers()['content-type']).toContain('pdf')
+
+  // FR-7.5 — any two versions, picked from the list.
+  await versions.first().getByLabel('Compare', { exact: true }).check()
+  await versions.last().getByLabel('Compare', { exact: true }).check()
+  await expect(page.getByText(/comparing the two versions you picked/i)).toBeVisible()
 })
 
 test('a guest reads a public storyboard and is asked to sign in only to help', async ({

@@ -36,5 +36,10 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     environment: 'node',
+    // The router suites drive real Postgres through many round trips; under
+    // the whole suite's load one took 5.9 s against the 5 s default, and CI
+    // is slower than a laptop. The database package allows the same.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 })

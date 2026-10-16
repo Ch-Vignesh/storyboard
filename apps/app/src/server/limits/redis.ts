@@ -65,40 +65,48 @@ function redisKey(key: string): string {
   return `storyboard:limit:${key}`
 }
 
+/**
+ * Records the hit first, then counts, and takes the hit back if that put the
+ * key over. It counted and then added, in two round trips, so callers
+ * arriving together all counted before any added and all got through (the
+ * Postgres window had the same fault; 2026-10-16 spec review).
+ *
+ * Adding first cannot let two through: whichever counts second sees the
+ * first one's hit. Two arriving together at the last slot can both see too
+ * many and both be refused, which is the safe way to be wrong; the slot is
+ * there for the next attempt.
+ */
 export async function consumeRedis(key: string, { limit, windowMs }: Limit): Promise<Verdict> {
   const now = Date.now()
   const cutoff = now - windowMs
   const full = redisKey(key)
+  // Unique, or two hits in the same millisecond collapse into one and the
+  // window silently under-counts.
+  const member = `${String(now)}-${Math.random().toString(36).slice(2, 10)}`
 
-  const [, count, oldest] = await pipeline([
+  const [, , , count, oldest] = await pipeline([
     // Everything that has fallen out of the window.
     ['ZREMRANGEBYSCORE', full, 0, cutoff],
+    ['ZADD', full, now, member],
+    // So a key nobody touches again does not live forever.
+    ['PEXPIRE', full, windowMs],
     ['ZCARD', full],
-    // The oldest survivor, for the "try again at" the refusal needs.
+    // The oldest survivor, for the "try again at" a refusal needs.
     ['ZRANGE', full, 0, 0, 'WITHSCORES'],
   ])
 
   const used = typeof count === 'number' ? count : 0
+  if (used <= limit) return { ok: true, remaining: limit - used, retryAt: null }
 
-  if (used >= limit) {
-    // ZRANGE ... WITHSCORES answers [member, score]; the score is the timestamp.
-    const score = Array.isArray(oldest) ? Number(oldest[1]) : Number.NaN
-    return {
-      ok: false,
-      remaining: 0,
-      retryAt: Number.isFinite(score) ? new Date(score + windowMs) : null,
-    }
+  // Over: this hit is taken back, so a refusal never counts against the limit.
+  await pipeline([['ZREM', full, member]])
+  // ZRANGE ... WITHSCORES answers [member, score]; the score is the timestamp.
+  const score = Array.isArray(oldest) ? Number(oldest[1]) : Number.NaN
+  return {
+    ok: false,
+    remaining: 0,
+    retryAt: Number.isFinite(score) ? new Date(score + windowMs) : null,
   }
-
-  await pipeline([
-    // The member must be unique or two hits in the same millisecond collapse
-    // into one and the window silently under-counts.
-    ['ZADD', full, now, `${String(now)}-${Math.random().toString(36).slice(2, 10)}`],
-    // So a key nobody touches again does not live forever.
-    ['PEXPIRE', full, windowMs],
-  ])
-
-  return { ok: true, remaining: limit - used - 1, retryAt: null }
 }
 
 export async function usedRedis(key: string, windowMs: number): Promise<number> {

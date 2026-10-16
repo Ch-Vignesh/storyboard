@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { visibleStoryboardsWhere } from '@/lib/authz/guard'
 import { AGE_FILTERS, browseFiltersSchema } from '@/lib/schemas/browse'
+import { ANSWERS } from '@/server/answers'
 import {
   BROWSE_LIMITS,
   GENRE_SELECTION_MAX,
@@ -37,6 +38,9 @@ export const browseRouter = createTRPCRouter({
       storyboard: {
         ...visibleStoryboardsWhere(actor),
         visibility: 'PUBLIC',
+        // FR-14.1 — finishing closes a story's requests and nothing can open
+        // one since; this is the second lock on the same door.
+        state: { not: 'FINISHED' },
         ...(input.genreIds?.length
           ? { genres: { some: { genreId: { in: input.genreIds } } } }
           : {}),
@@ -54,7 +58,9 @@ export const browseRouter = createTRPCRouter({
       },
       // "No answers yet" is a filter as well as a sort: a request with
       // nothing on it is the one most worth showing to a helper.
-      ...(input.sort === 'NO_ANSWERS' ? { suggestions: { none: {} }, ideas: { none: {} } } : {}),
+      ...(input.sort === 'NO_ANSWERS'
+        ? { suggestions: { none: ANSWERS }, ideas: { none: {} } }
+        : {}),
     }
 
     const orderBy: Prisma.ContributionRequestOrderByWithRelationInput =
@@ -86,7 +92,7 @@ export const browseRouter = createTRPCRouter({
             genres: { select: { genre: { select: { id: true, name: true } } } },
           },
         },
-        _count: { select: { suggestions: true, ideas: true } },
+        _count: { select: { suggestions: { where: ANSWERS }, ideas: true } },
       },
     })
 

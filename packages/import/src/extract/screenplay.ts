@@ -185,6 +185,10 @@ export function extractFdx(source: string): NormalisedDoc {
     // Keep text nodes so a <Text> split across styled runs can be rejoined.
     preserveOrder: false,
     trimValues: false,
+    // Character references, `&#8220;` and `&#x2019;`: how Final Draft files
+    // often carry curly quotes, apostrophes and dashes. Without this they
+    // arrived as markup in the manuscript (2026-10-16 spec review).
+    htmlEntities: true,
   })
 
   let parsed: unknown

@@ -44,6 +44,16 @@ export async function closeRequestsOnSections(
   return closeRequestsWhere(db, { sectionId: { in: [...sectionIds] } })
 }
 
+/**
+ * One request, closed by its author without accepting (FR-5.10). It used to
+ * change the state and tell nobody, so a helper part-way through a draft, or
+ * waiting on a decision, never heard (2026-10-16 spec review). True if it was
+ * open and is now closed.
+ */
+export async function closeRequest(db: PrismaClient, requestId: string): Promise<boolean> {
+  return (await closeRequestsWhere(db, { id: requestId })) > 0
+}
+
 async function closeRequestsWhere(
   db: PrismaClient,
   where: Prisma.ContributionRequestWhereInput,

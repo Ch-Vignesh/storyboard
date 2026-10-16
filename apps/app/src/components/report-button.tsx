@@ -3,11 +3,18 @@
 import { Button } from '@storyboard/ui/components/button'
 import { Label } from '@storyboard/ui/components/label'
 import { Textarea } from '@storyboard/ui/components/textarea'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import Link from '@/components/link'
+import { useSession } from 'next-auth/react'
+import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 
-import { REPORT_CATEGORIES, TARGET_LABELS, type ReportTarget } from '@/lib/schemas/report'
+import {
+  REPORT_CATEGORIES,
+  REPORT_COPY,
+  TARGET_LABELS,
+  type ReportTarget,
+} from '@/lib/schemas/report'
 import { useTRPC } from '@/trpc/client'
 
 /**
@@ -34,13 +41,42 @@ export function ReportButton({
   const [category, setCategory] = useState<(typeof REPORT_CATEGORIES)[number]['value'] | null>(null)
   const [note, setNote] = useState('')
 
+  const { status } = useSession()
+  const pathname = usePathname()
   const report = useMutation(trpc.report.create.mutationOptions())
+  // Whether this person has reported it already, so the form is not offered
+  // for a report that would only be swallowed (`report.mine`, unused until
+  // the 2026-10-16 spec review).
+  const mine = useQuery({
+    ...trpc.report.mine.queryOptions({ targetType, targetId }),
+    enabled: status === 'authenticated',
+  })
 
   if (report.data) {
     return (
       <p className={`text-[12.5px] leading-relaxed text-ink-faint ${className ?? ''}`}>
         {report.data.message}
       </p>
+    )
+  }
+
+  if (mine.data?.reported) {
+    return (
+      <p className={`text-[12.5px] leading-relaxed text-ink-faint ${className ?? ''}`}>
+        {REPORT_COPY.duplicate}
+      </p>
+    )
+  }
+
+  // A guest was shown the form, and the submit failed (2026-10-16 review).
+  if (status === 'unauthenticated') {
+    return (
+      <Link
+        href={`/signin?next=${encodeURIComponent(pathname)}`}
+        className={`text-[12.5px] text-ink-faint underline-offset-4 hover:text-ink hover:underline ${className ?? ''}`}
+      >
+        Sign in to report {TARGET_LABELS[targetType]}
+      </Link>
     )
   }
 

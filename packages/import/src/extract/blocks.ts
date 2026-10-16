@@ -68,14 +68,54 @@ export function blockFromLine(line: string): Block {
  * space rather than kept as hard breaks: manuscripts wrapped at 80 columns are
  * common, and preserving that wrapping would hard-break every line of the book.
  */
+/**
+ * FR-3.4 — "a run of two or more blank lines" is a scene break, read as one
+ * when it is longer than this manuscript's usual gap between paragraphs. Many
+ * manuscripts put two blank lines between every paragraph, and an RTF's empty
+ * paragraphs do the same, so taken literally the rule would cut after every
+ * paragraph. Runs were not read at all until the 2026-10-16 spec review.
+ *
+ * Each entry is a block and the blank lines before it.
+ */
+export function withBlankLineBreaks(
+  entries: ReadonlyArray<{ block: Block; blanksBefore: number }>,
+): Block[] {
+  const gaps = new Map<number, number>()
+  for (const [index, entry] of entries.entries()) {
+    if (index === 0 || entry.block.isSceneBreak || entries[index - 1]?.block.isSceneBreak) continue
+    gaps.set(entry.blanksBefore, (gaps.get(entry.blanksBefore) ?? 0) + 1)
+  }
+  // The most common gap; the smaller on a tie, which reads fewer breaks.
+  let usual = 0
+  let seen = -1
+  for (const [gap, count] of [...gaps.entries()].sort((a, b) => a[0] - b[0])) {
+    if (count > seen) {
+      usual = gap
+      seen = count
+    }
+  }
+
+  const out: Block[] = []
+  for (const [index, { block, blanksBefore }] of entries.entries()) {
+    const run = index > 0 && blanksBefore >= 2 && blanksBefore > usual
+    if (run && !block.isSceneBreak && out.length > 0 && !out.at(-1)?.isSceneBreak) {
+      out.push({ ...sceneBreak(), fromBlankLines: true })
+    }
+    out.push(block)
+  }
+  return out
+}
+
 export function blocksFromPlainText(source: string): Block[] {
-  const blocks: Block[] = []
+  const entries: Array<{ block: Block; blanksBefore: number }> = []
   let buffer: string[] = []
+  let blanks = 0
+  let startBlanks = 0
 
   const flush = () => {
     if (buffer.length === 0) return
     const joined = buffer.join(' ').replaceAll(/\s+/gu, ' ').trim()
-    if (joined.length > 0) blocks.push(blockFromLine(joined))
+    if (joined.length > 0) entries.push({ block: blockFromLine(joined), blanksBefore: startBlanks })
     buffer = []
   }
 
@@ -83,19 +123,25 @@ export function blocksFromPlainText(source: string): Block[] {
     const line = rawLine.trim()
     if (line.length === 0) {
       flush()
+      blanks += 1
       continue
     }
     // A scene break stands alone even without blank lines around it.
     if (isSceneBreakLine(line)) {
       flush()
-      blocks.push(sceneBreak())
+      entries.push({ block: sceneBreak(), blanksBefore: blanks })
+      blanks = 0
       continue
+    }
+    if (buffer.length === 0) {
+      startBlanks = blanks
+      blanks = 0
     }
     buffer.push(line)
   }
   flush()
 
-  return blocks
+  return withBlankLineBreaks(entries)
 }
 
 /** Words, counted the way the rest of the product counts them. */

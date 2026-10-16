@@ -2,12 +2,14 @@ import { Prisma, type PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
-import { loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
+import { assertNotFinished, loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
 import { recordActivity, recordActivityFor } from '@/server/activity'
 import { afterCommit } from '@/server/after-commit'
+import { notifyAuthors } from '@/server/notify-authors'
 import { canReadSuggestionSentAt, quotaFor } from '@/lib/authz'
 import { emptyDoc, flavourForStoryType, parseDoc } from '@/lib/doc/schema'
-import { derive, hashContent } from '@/lib/doc/text'
+import { derive } from '@/lib/doc/text'
+import { acceptedDoc } from '@/server/accepted-text'
 import { publicId } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import { DAILY_LIMITS } from '@/lib/schemas/constants'
@@ -154,7 +156,12 @@ export const suggestionRouter = createTRPCRouter({
       const suggestion = await requireOwnDraft(ctx, input.suggestionId)
       const { request } = suggestion
       const userId = ctx.session.user.id
-      assertTakingSuggestions(request.state)
+      // FR-6.7 — a stale suggestion, updated and sent again. It was counted
+      // when it was first sent, so it is not counted again, and it may go to a
+      // request that has been answered since: an author may accept a second
+      // suggestion after a first (FR-6.8), and only an accept makes one stale.
+      const resend = suggestion.submittedAt !== null
+      assertTakingSuggestions(request.state, resend)
 
       // FR-13.1 — word bounds, enforced server-side as well as in the composer.
       if (suggestion.wordCount < request.minWords || suggestion.wordCount > request.maxWords) {
@@ -166,22 +173,28 @@ export const suggestionRouter = createTRPCRouter({
 
       const actor = actorFrom(ctx.session, ctx.account)
       const storyboard = await loadStoryboard(ctx.db, actor, { id: request.storyboardId })
+      // A re-send may go to a resolved request, which finishing a story does
+      // not close; it must not reopen one on a finished story.
+      assertNotFinished(storyboard.resource, 'by a helper')
       // FR-13.2 with OD-6 resolved (decision 0016): three tiers, not an
       // exemption. The owner has no ceiling on their own storyboard; a
       // co-author has a generous one, because the quota protects the owner's
       // attention and a co-author is trusted with it, not exempt from it.
-      const quota = quotaFor(actor, storyboard.resource)
+      const quota = resend ? Number.POSITIVE_INFINITY : quotaFor(actor, storyboard.resource)
       const overQuota = () =>
         new TRPCError({
           code: 'TOO_MANY_REQUESTS',
           message: `You can have ${String(quota)} suggestions waiting on this story at once. Wait for a decision on one, or withdraw it.`,
         })
+      // Waiting on a request that is still open. One the author closed
+      // without accepting is not waiting on anyone (FR-5.10), and held its
+      // writer's place here for good until the 2026-10-16 spec review.
       const held = (db: Pick<PrismaClient, 'suggestion'>) =>
         db.suggestion.count({
           where: {
             contributorId: userId,
             state: 'SUBMITTED',
-            request: { storyboardId: request.storyboardId },
+            request: { storyboardId: request.storyboardId, state: { in: ['OPEN', 'ANSWERED'] } },
           },
         })
 
@@ -192,14 +205,17 @@ export const suggestionRouter = createTRPCRouter({
       // lock, because this read alone can race.
       if (Number.isFinite(quota) && (await held(ctx.db)) >= quota) throw overQuota()
 
-      // FR-13.3 — ten in any twenty-four hours, not ten since midnight.
-      await enforce(
-        ctx.db,
-        key.suggestionsSent(userId),
-        { limit: DAILY_LIMITS.suggestionsSent, windowMs: DAY_MS },
-        (retryAt) =>
-          `You can send ${String(DAILY_LIMITS.suggestionsSent)} suggestions a day. Try again ${whenToRetry(retryAt)}.`,
-      )
+      // FR-13.3 — ten in any twenty-four hours, not ten since midnight. A
+      // re-send was counted the first time.
+      if (!resend) {
+        await enforce(
+          ctx.db,
+          key.suggestionsSent(userId),
+          { limit: DAILY_LIMITS.suggestionsSent, windowMs: DAY_MS },
+          (retryAt) =>
+            `You can send ${String(DAILY_LIMITS.suggestionsSent)} suggestions a day. Try again ${whenToRetry(retryAt)}.`,
+        )
+      }
 
       const result = await ctx.db.$transaction(async (tx) => {
         if (Number.isFinite(quota)) {
@@ -238,10 +254,13 @@ export const suggestionRouter = createTRPCRouter({
       })
 
       await afterCommit('suggestion.submit.notify', () =>
-        notifyAuthors(ctx.db, request.storyboardId, 'SUGGESTION_RECEIVED', {
-          requestId: request.id,
-          suggestionId: suggestion.id,
-        }),
+        notifyAuthors(
+          ctx.db,
+          request.storyboardId,
+          'SUGGESTION_RECEIVED',
+          { requestId: request.id, suggestionId: suggestion.id },
+          userId,
+        ),
       )
       await recordActivity(ctx.db, userId)
 
@@ -312,6 +331,7 @@ export const suggestionRouter = createTRPCRouter({
               publicId: true,
               title: true,
               kind: true,
+              state: true,
               minWords: true,
               maxWords: true,
               storyboardId: true,
@@ -363,8 +383,13 @@ export const suggestionRouter = createTRPCRouter({
     .input(
       z.object({
         suggestionId: z.string().min(1),
-        /** The author has seen that the section moved and wants it anyway. */
-        acknowledgedChange: z.boolean().default(false),
+        /**
+         * FR-6.6 — the head the author was looking at when they decided, so
+         * "accept anyway" covers the change they saw and no later one. It was
+         * a plain yes, which also waved through a change made a second ago by
+         * somebody else (2026-10-16 spec review).
+         */
+        acknowledgedHeadId: z.string().min(1).nullish(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -385,7 +410,9 @@ export const suggestionRouter = createTRPCRouter({
               storyboardId: true,
               sectionId: true,
               state: true,
+              kind: true,
               section: { select: { lineageId: true } },
+              storyboard: { select: { type: true } },
             },
           },
         },
@@ -400,6 +427,7 @@ export const suggestionRouter = createTRPCRouter({
         { id: suggestion.request.storyboardId },
         'suggestion:decide',
       )
+      const flavour = flavourForStoryType(suggestion.request.storyboard.type)
 
       if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') throw alreadyDecided()
       // Closed by the author, or by the story going private or finished: what
@@ -413,96 +441,113 @@ export const suggestionRouter = createTRPCRouter({
 
       const deciderId = ctx.session.user.id
       const { sectionId, id: requestId } = suggestion.request
-      const derived = {
-        contentText: suggestion.contentText,
-        wordCount: suggestion.wordCount,
-      }
 
-      const accepted = await ctx.db.$transaction(
-        async (tx) => {
-          // Row lock: two acceptances on the same section serialise here rather
-          // than both writing a revision.
-          const locked = await tx.$queryRaw<
-            Array<{ currentRevisionId: string | null; gone: boolean }>
-          >`
+      const accepted = await serialisedOrChanged(() =>
+        ctx.db.$transaction(
+          async (tx) => {
+            // Row lock: two acceptances on the same section serialise here rather
+            // than both writing a revision.
+            const locked = await tx.$queryRaw<
+              Array<{ currentRevisionId: string | null; gone: boolean }>
+            >`
             select "currentRevisionId", ("deletedAt" is not null or "mergedIntoId" is not null) as gone
             from "Section" where id = ${sectionId} for update
           `
-          // Accepted into a section that is no longer in the story, it was
-          // credited and announced as accepted and appeared nowhere (phase 12 audit).
-          if (locked[0]?.gone) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message:
-                'That section is no longer in this story, so nothing can be accepted into it.',
+            // Accepted into a section that is no longer in the story, it was
+            // credited and announced as accepted and appeared nowhere (phase 12 audit).
+            if (locked[0]?.gone) {
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message:
+                  'That section is no longer in this story, so nothing can be accepted into it.',
+              })
+            }
+            const head = locked[0]?.currentRevisionId ?? null
+
+            if (head !== suggestion.baseRevisionId && input.acknowledgedHeadId !== head) {
+              throw changedAMomentAgo()
+            }
+
+            // FR-8.1 and decision 0038: a rewrite becomes the section's text; a
+            // continuation goes after the text it was written to follow, which
+            // is the head unless the section moved since. If it moved, FR-6.8:
+            // what the helper wrote against is what goes in, and a second
+            // continuation replaces the first rather than stacking after it.
+            const baseDoc =
+              suggestion.request.kind === 'CONTINUE'
+                ? ((
+                    await tx.revision.findUnique({
+                      where: { id: suggestion.baseRevisionId },
+                      select: { contentJson: true },
+                    })
+                  )?.contentJson ?? null)
+                : null
+            const doc = acceptedDoc(
+              suggestion.request.kind,
+              baseDoc,
+              suggestion.contentJson,
+              flavour,
+            )
+            const derived = derive(doc)
+
+            const revision = await tx.revision.create({
+              data: {
+                sectionId,
+                parentId: head,
+                contentJson: doc,
+                contentText: derived.contentText,
+                wordCount: derived.wordCount,
+                contentHash: derived.contentHash,
+                source: 'ACCEPTED',
+                // FR-8.1 — the contributor wrote the words; the author let them in.
+                authorId: suggestion.contributorId,
+                acceptedById: deciderId,
+                suggestionId: suggestion.id,
+              },
+              select: { id: true },
             })
-          }
-          const head = locked[0]?.currentRevisionId ?? null
 
-          if (head !== suggestion.baseRevisionId && !input.acknowledgedChange) {
-            throw new TRPCError({
-              code: 'CONFLICT',
-              message: 'This section changed a moment ago. Look at it again before deciding.',
+            await tx.section.update({
+              where: { id: sectionId },
+              data: { currentRevisionId: revision.id, wordCount: derived.wordCount },
             })
-          }
 
-          const revision = await tx.revision.create({
-            data: {
-              sectionId,
-              parentId: head,
-              contentJson: suggestion.contentJson ?? {},
-              contentText: derived.contentText,
-              wordCount: derived.wordCount,
-              contentHash: hashContent(derived.contentText),
-              source: 'ACCEPTED',
-              // FR-8.1 — the contributor wrote the words; the author let them in.
-              authorId: suggestion.contributorId,
-              acceptedById: deciderId,
-              suggestionId: suggestion.id,
-            },
-            select: { id: true },
-          })
+            // Only if nobody decided it, or withdrew it, since it was read above.
+            const decided = await tx.suggestion.updateMany({
+              where: { id: suggestion.id, state: { in: ['SUBMITTED', 'STALE'] } },
+              data: { state: 'ACCEPTED', decidedAt: new Date(), decidedById: deciderId },
+            })
+            if (decided.count !== 1) throw alreadyDecided()
 
-          await tx.section.update({
-            where: { id: sectionId },
-            data: { currentRevisionId: revision.id, wordCount: derived.wordCount },
-          })
+            // FR-6.7 — everything else waiting on this request is now written
+            // against a head that has moved.
+            await tx.suggestion.updateMany({
+              where: { requestId, state: 'SUBMITTED', id: { not: suggestion.id } },
+              data: { state: 'STALE' },
+            })
 
-          // Only if nobody decided it, or withdrew it, since it was read above.
-          const decided = await tx.suggestion.updateMany({
-            where: { id: suggestion.id, state: { in: ['SUBMITTED', 'STALE'] } },
-            data: { state: 'ACCEPTED', decidedAt: new Date(), decidedById: deciderId },
-          })
-          if (decided.count !== 1) throw alreadyDecided()
+            // FR-9.1 — permanent, and it survives the text being replaced later.
+            await tx.credit.create({
+              data: {
+                storyboardId: suggestion.request.storyboardId,
+                contributorId: suggestion.contributorId,
+                type: 'PROSE',
+                sectionLineage: suggestion.request.section.lineageId,
+                revisionId: revision.id,
+                suggestionId: suggestion.id,
+                isLive: true,
+              },
+            })
 
-          // FR-6.7 — everything else waiting on this request is now written
-          // against a head that has moved.
-          await tx.suggestion.updateMany({
-            where: { requestId, state: 'SUBMITTED', id: { not: suggestion.id } },
-            data: { state: 'STALE' },
-          })
+            await tx.contributionRequest.update({
+              where: { id: requestId },
+              data: { state: 'RESOLVED', resolvedAt: new Date() },
+            })
 
-          // FR-9.1 — permanent, and it survives the text being replaced later.
-          await tx.credit.create({
-            data: {
-              storyboardId: suggestion.request.storyboardId,
-              contributorId: suggestion.contributorId,
-              type: 'PROSE',
-              sectionLineage: suggestion.request.section.lineageId,
-              revisionId: revision.id,
-              suggestionId: suggestion.id,
-              isLive: true,
-            },
-          })
-
-          await tx.contributionRequest.update({
-            where: { id: requestId },
-            data: { state: 'RESOLVED', resolvedAt: new Date() },
-          })
-
-          return { revisionId: revision.id }
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+            return { revisionId: revision.id }
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        ),
       )
 
       // After the transaction, never inside it.
@@ -654,7 +699,11 @@ export const suggestionRouter = createTRPCRouter({
 
       const updated = await ctx.db.suggestion.update({
         where: { id: suggestion.id },
-        data: { state: 'DRAFT', baseRevisionId: head, submittedAt: null },
+        // `submittedAt` is kept: it is the record that this was sent once,
+        // which is what lets it be sent again to a request that has since been
+        // answered, without spending quota (FR-6.7). Clearing it stranded every
+        // updated suggestion (2026-10-16 spec review).
+        data: { state: 'DRAFT', baseRevisionId: head },
         select: { id: true, publicId: true, state: true, baseRevisionId: true },
       })
       log.info({ event: 'suggestion.rebase', suggestionId: suggestion.id, userId }, 'rebased')
@@ -684,6 +733,9 @@ export const suggestionRouter = createTRPCRouter({
           select: {
             title: true,
             publicId: true,
+            // So a suggestion on a request closed without accepting reads
+            // "not accepted" (FR-5.10).
+            state: true,
             storyboard: { select: { slug: true, title: true } },
           },
         },
@@ -691,6 +743,30 @@ export const suggestionRouter = createTRPCRouter({
     }),
   ),
 })
+
+/** FR-6.6's sentence, for every way two decisions on one section can collide. */
+const changedAMomentAgo = () =>
+  new TRPCError({
+    code: 'CONFLICT',
+    message: 'This section changed a moment ago. Look at it again before deciding.',
+  })
+
+/**
+ * Two accepts on one section: the second waits on the row lock, and at
+ * SERIALIZABLE it then fails with a serialization error once the first
+ * commits. That is FR-6.6's case exactly, and it reached the author as a
+ * server fault until the 2026-10-16 spec review.
+ */
+async function serialisedOrChanged<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work()
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+      throw changedAMomentAgo()
+    }
+    throw error
+  }
+}
 
 const alreadyDecided = () =>
   new TRPCError({ code: 'BAD_REQUEST', message: 'That suggestion has already been decided.' })
@@ -701,8 +777,12 @@ const alreadyDecided = () =>
  * ones do not; until the phase 12 audit nothing here checked, so a closed
  * request kept collecting suggestions, notifications and quota.
  */
-function assertTakingSuggestions(state: string): void {
+function assertTakingSuggestions(state: string, resend = false): void {
   if (state === 'OPEN' || state === 'ANSWERED') return
+  // FR-6.7 with FR-6.8: an answered request still takes back what was sent to
+  // it before the answer, updated against the new text. Refusing it stranded
+  // every updated stale suggestion (2026-10-16 spec review).
+  if (state === 'RESOLVED' && resend) return
   throw new TRPCError({
     code: 'BAD_REQUEST',
     message:
@@ -737,6 +817,7 @@ async function requireOwnDraft(
       contributorId: true,
       state: true,
       wordCount: true,
+      submittedAt: true,
       request: {
         select: { id: true, storyboardId: true, minWords: true, maxWords: true, state: true },
       },
@@ -752,26 +833,4 @@ async function requireOwnDraft(
     })
   }
   return suggestion
-}
-
-/** In-app rows for the owner and every co-author (FR-12.1; email is phase 3). */
-async function notifyAuthors(
-  db: PrismaClient,
-  storyboardId: string,
-  type: 'SUGGESTION_RECEIVED' | 'IDEA_RECEIVED',
-  payload: Record<string, string>,
-): Promise<void> {
-  const storyboard = await db.storyboard.findUnique({
-    where: { id: storyboardId },
-    select: {
-      ownerId: true,
-      collaborators: { where: { acceptedAt: { not: null } }, select: { userId: true } },
-    },
-  })
-  if (!storyboard) return
-
-  const recipients = [storyboard.ownerId, ...storyboard.collaborators.map((c) => c.userId)]
-  await db.notification.createMany({
-    data: recipients.map((userId) => ({ userId, type, payload })),
-  })
 }
