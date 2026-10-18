@@ -38,7 +38,14 @@ describe.skipIf(!databaseUrl)('committing an import (FR-3.2, phase 12 audit)', (
     return createCallerFactory(importRouter)({
       db,
       session: { user: { id, username, onboarded: true }, expires: '' },
-      account: { status: 'ACTIVE', isAdmin: false, deletionRequestedAt: null, username },
+      account: {
+        status: 'ACTIVE',
+        isAdmin: false,
+        role: 'USER' as const,
+        grants: [],
+        deletionRequestedAt: null,
+        username,
+      },
       headers: new Headers(),
     })
   }

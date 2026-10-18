@@ -34,6 +34,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   return [
     { url: `${app}/browse`, changeFrequency: 'daily', priority: 0.8 },
     { url: `${app}/rules`, changeFrequency: 'yearly', priority: 0.3 },
+    { url: `${app}/contact`, changeFrequency: 'yearly', priority: 0.3 },
+    { url: `${app}/privacy`, changeFrequency: 'yearly', priority: 0.3 },
+    { url: `${app}/terms`, changeFrequency: 'yearly', priority: 0.3 },
     ...storyboards.map((storyboard) => ({
       url: `${app}/s/${storyboard.slug}`,
       lastModified: storyboard.updatedAt,

@@ -7,6 +7,7 @@ import {
   IMMEDIATE_TYPES,
   NOTIFICATIONS,
   type NotificationType,
+  sentenceFor,
 } from '@/lib/schemas/notifications'
 import {
   DIGEST_FAILURES_BEFORE_STOPPING,
@@ -14,9 +15,13 @@ import {
   QUIET_REQUEST_NUDGE_DAYS,
   WEEKLY_DIGEST_DAYS,
 } from '@/lib/schemas/constants'
+import { PUBLICLY_LISTED } from '@/lib/authz/guard'
+import { closeStaleRequests } from '@/server/close-requests'
+import { REQUEST_KINDS } from '@/lib/schemas/help'
 import { ANSWERS } from '@/server/answers'
 import { pruneRateLimits } from '@/server/limits'
 import { targetsFor, type Target } from '@/server/notification-targets'
+import { pruneDeadTokens, pruneUnconfirmedAccounts } from '@/server/prune'
 import { purgeDeletedAccounts } from '@/server/purge/accounts'
 import { purgeAbandonedImports } from '@/server/purge/imports'
 import { purgeDeletedStoryboards } from '@/server/purge'
@@ -28,6 +33,7 @@ import {
   quietRequestMail,
   type NotificationLine,
 } from './templates/notification'
+import { unsubscribeUrlFor } from './unsubscribe'
 
 /**
  * Email delivery (FR-12.3, FR-12.4).
@@ -73,6 +79,8 @@ function lineFor(row: Pending, targets: Map<string, Target>, appUrl: string): No
     type: row.type,
     url: `${appUrl}${target?.path ?? '/notifications'}`,
     subject: target?.title ?? undefined,
+    // Item 6.9 — who did what, in the words the in-app row uses.
+    sentence: sentenceFor(row.type, target ?? {}),
   }
 }
 
@@ -223,7 +231,12 @@ export async function runImmediate(db: Db, options: RunOptions = {}): Promise<Ru
     }
 
     const line = lineFor(row, await targetsFor(db, row.user.id, [row]), appUrl)
-    const mail = notificationMail({ to: row.user.email, line, appUrl })
+    const mail = notificationMail({
+      to: row.user.email,
+      line,
+      appUrl,
+      unsubscribeUrl: unsubscribeUrlFor(appUrl, row.user.id, [row.type]),
+    })
     if (await run.send(mail, { notificationId: row.id, userId: row.user.id })) {
       // Marked the moment it went, so nothing after this can send it twice.
       await markEmailed(db, [row.id])
@@ -269,6 +282,7 @@ export async function runHourlyDigest(db: Db, options: RunOptions = {}): Promise
     if (allowed.length === 0) continue
 
     const targets = await targetsFor(db, userId, allowed)
+    const lines = allowed.map((row) => lineFor(row, targets, appUrl))
     const went = await run.send(
       digestMail({
         to: entry.email,
@@ -277,11 +291,14 @@ export async function runHourlyDigest(db: Db, options: RunOptions = {}): Promise
             ? NOTIFICATIONS[allowed[0]!.type].label
             : `${String(allowed.length)} things happened`,
         intro:
-          allowed.length === 1
-            ? NOTIFICATIONS[allowed[0]!.type].sentence
+          lines.length === 1
+            ? (lines[0]?.sentence ?? NOTIFICATIONS[allowed[0]!.type].sentence)
             : 'Since the last time we wrote:',
-        lines: allowed.map((row) => lineFor(row, targets, appUrl)),
+        lines,
         appUrl,
+        unsubscribeUrl: unsubscribeUrlFor(appUrl, userId, [
+          ...new Set(allowed.map((row) => row.type)),
+        ]),
       }),
       { userId },
     )
@@ -348,8 +365,7 @@ export async function runWeeklyDigest(
         // Never digest someone their own request.
         openedById: { not: reader.id },
         storyboard: {
-          visibility: 'PUBLIC',
-          deletedAt: null,
+          ...PUBLICLY_LISTED,
           genres: { some: { genreId: { in: genreIds } } },
         },
       },
@@ -380,8 +396,11 @@ export async function runWeeklyDigest(
           type: 'WEEKLY_DIGEST' as const,
           url: `${appUrl}/s/${request.storyboard.slug}/help/${request.publicId}`,
           subject: request.title,
+          // What each one asks for, under its title.
+          sentence: REQUEST_KINDS.find((kind) => kind.value === request.kind)?.label,
         })),
         appUrl,
+        unsubscribeUrl: unsubscribeUrlFor(appUrl, reader.id, ['WEEKLY_DIGEST']),
       }),
       { userId: reader.id },
     )
@@ -412,8 +431,11 @@ export async function runQuietNudge(
       state: 'OPEN',
       createdAt: { lt: cutoff },
       suggestions: { none: ANSWERS },
-      ideas: { none: {} },
-      storyboard: { deletedAt: null },
+      // No idea clause: a "help me think" request with an idea from outside
+      // the story is ANSWERED, not OPEN (item 1.12), and the author's own
+      // thinking aloud used to take it out of here.
+      // Nor a hidden story's (item 2.7).
+      storyboard: { deletedAt: null, hiddenAt: null },
     },
     select: {
       id: true,
@@ -467,7 +489,12 @@ export async function runQuietNudge(
           to: request.openedBy.email,
           requestTitle: request.title,
           requestUrl,
+          // Item 6.16 — the fix, where it is made (item 6.1).
+          editUrl: `${requestUrl}/edit`,
           appUrl,
+          unsubscribeUrl: unsubscribeUrlFor(appUrl, request.openedById, [
+            'REQUEST_QUIET_SEVEN_DAYS',
+          ]),
         }),
         { requestId: request.id },
       )
@@ -488,7 +515,12 @@ export const CRON_JOBS = {
   nudge: (db: Db) => runQuietNudge(db),
   // Not mail, but the same runner: one scheduler is easier to reason about
   // than two, and this is the only other thing that wants a daily tick.
-  prune: (db: Db) => pruneRateLimits(db as PrismaClient),
+  prune: async (db: Db) => ({
+    limits: await pruneRateLimits(db as PrismaClient),
+    // Item 3.12 — dead sign-in links, then sign-ups nobody finished.
+    links: await pruneDeadTokens(db as PrismaClient),
+    unconfirmed: await pruneUnconfirmedAccounts(db as PrismaClient),
+  }),
   /*
    * FR-2.6 and OD-3's second half. Storyboards whose thirty days are up, then
    * accounts whose seven are (decision 0024).
@@ -504,8 +536,13 @@ export const CRON_JOBS = {
    *
    * Then imports nobody finished, whose uploads would otherwise stay in the
    * bucket for good. Last, because an account purge removes its own.
+   *
+   * And before any of it, the requests whose thirty days are up (FR-11.3 with
+   * D-8, item 6.15, decision 0050): the same daily tick, and a request on a
+   * storyboard about to be purged closes with it either way.
    */
   purge: async (db: Db) => ({
+    requests: await closeStaleRequests(db as PrismaClient),
     storyboards: await purgeDeletedStoryboards(db as PrismaClient),
     accounts: await purgeDeletedAccounts(db as PrismaClient),
     imports: await purgeAbandonedImports(db as PrismaClient),

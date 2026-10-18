@@ -94,7 +94,9 @@ function SummaryBar({ stats }: { stats: ComparisonResult['stats'] }) {
 function SideBySide({ result, leftLabel, rightLabel }: Props) {
   return (
     <div className="mt-5">
-      <div className="grid grid-cols-2 gap-x-8 border-b border-rule pb-2">
+      {/* Item 4.4 — two columns from `md` up; below that one column, and the
+          column heads move into each row, where the eye is. */}
+      <div className="hidden grid-cols-2 gap-x-8 border-b border-rule pb-2 md:grid">
         <h3 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
           {leftLabel}
         </h3>
@@ -103,16 +105,33 @@ function SideBySide({ result, leftLabel, rightLabel }: Props) {
         </h3>
       </div>
 
-      <div className="manuscript grid grid-cols-2 gap-x-8">
+      <div className="manuscript grid gap-x-8 md:grid-cols-2">
         {result.rows.map((row, index) => (
-          <Row key={index} row={row} />
+          <Row key={index} row={row} leftLabel={leftLabel} rightLabel={rightLabel} />
         ))}
       </div>
     </div>
   )
 }
 
-function Row({ row }: { row: ComparisonRow }) {
+/** Below `md`, each cell says whose text it is; from `md` up the column head does. */
+function CellLabel({ children }: { children: string }) {
+  return (
+    <span className="mb-1 block text-[11px] font-medium tracking-wide text-ink-faint uppercase not-italic md:hidden">
+      {children}
+    </span>
+  )
+}
+
+function Row({
+  row,
+  leftLabel,
+  rightLabel,
+}: {
+  row: ComparisonRow
+  leftLabel: string
+  rightLabel: string
+}) {
   const tone =
     row.kind === 'added'
       ? 'bg-moss-wash/50'
@@ -120,20 +139,40 @@ function Row({ row }: { row: ComparisonRow }) {
         ? 'bg-ochre-wash/40'
         : undefined
 
+  // FR-7.1, NFR-4 (phase 14, item 1.19) — a wholly added or removed paragraph
+  // is said in a word at its start, beside the tint. The placeholder opposite
+  // it is hidden from screen readers, so until now the tint alone carried it.
+  const label =
+    row.kind === 'added' ? (
+      <span className="mr-2 border border-moss/40 bg-moss-wash px-1 align-middle text-[11px] tracking-wide text-moss uppercase not-italic">
+        Added
+      </span>
+    ) : row.kind === 'removed' ? (
+      <span className="mr-2 border border-ochre/40 bg-ochre-wash px-1 align-middle text-[11px] tracking-wide text-ochre uppercase not-italic">
+        Removed
+      </span>
+    ) : null
+
   return (
     <>
       <div className={`border-t border-rule/60 py-3 pr-2 ${tone ?? ''}`}>
+        <CellLabel>{leftLabel}</CellLabel>
         {row.left ? (
-          <p>{row.left.marks ? <Marked marks={row.left.marks} side="left" /> : row.left.text}</p>
+          <p>
+            {row.kind === 'removed' ? label : null}
+            {row.left.marks ? <Marked marks={row.left.marks} side="left" /> : row.left.text}
+          </p>
         ) : (
           <p aria-hidden className="text-[13px] text-ink-faint italic">
             —
           </p>
         )}
       </div>
-      <div className={`border-t border-rule/60 py-3 pl-2 ${tone ?? ''}`}>
+      <div className={`border-t border-rule/60 py-3 pl-2 md:border-t ${tone ?? ''}`}>
+        <CellLabel>{rightLabel}</CellLabel>
         {row.right ? (
           <p>
+            {row.kind === 'added' ? label : null}
             {row.right.marks ? <Marked marks={row.right.marks} side="right" /> : row.right.text}
           </p>
         ) : (

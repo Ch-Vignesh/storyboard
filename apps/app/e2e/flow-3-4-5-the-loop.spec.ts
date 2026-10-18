@@ -1,6 +1,6 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
-import { signIn, signUpAndOnboard } from './helpers'
+import { passage, signIn, signUpAndOnboard, writeInEditor } from './helpers'
 
 /**
  * Critical flows 3, 4 and 5 (architecture section 8), which together are the
@@ -15,7 +15,7 @@ import { signIn, signUpAndOnboard } from './helpers'
  * the criterion describes: two accounts and one storyboard, start to finish.
  */
 
-const PASSWORD = 'a-long-enough-passphrase'
+const PASSWORD = 'A-long-enough-passphrase-1!'
 
 type Account = { email: string; username: string }
 
@@ -31,25 +31,6 @@ const ASK =
 
 const PRE_CONTEXT =
   'Ruth has been the harbourmaster of a small northern port for eleven years, and on her first morning in the job she logged a ship as arriving. It never arrived. She has written the same entry every morning since, has never explained it to anyone, and nobody in the town has ever asked her about it, which she has come to rely on more than she would like to admit to herself or to anybody else who might think to enquire. The logbook itself is a physical object kept on a shelf in the harbour office at a height she has never changed, and she treats it as the only authority in her life that she has not had to argue with. She inherited it from a predecessor who cut several pages out of the front of it before he left the job without notice, and she has never looked at what is missing, which is the closest thing she has to a principle worth the name.'
-
-/** Writes some prose into whichever editor is on screen. */
-async function writeInEditor(page: Page, paragraphs: readonly string[]) {
-  const editor = page.getByRole('textbox', { name: /your suggestion/i })
-  await editor.click()
-  for (const [index, paragraph] of paragraphs.entries()) {
-    if (index > 0) await page.keyboard.press('Enter')
-    await editor.pressSequentially(paragraph)
-  }
-}
-
-/** Enough words to clear a 150-word minimum, in whole sentences. */
-function passage(opening: string): string[] {
-  const body =
-    'She wrote the date at the top of the page and then sat looking at it, and the light moved across the floor the way it had the day before. ' +
-    'Nobody came, which was the arrangement, and she had made the arrangement herself and was not going to complain about it now. ' +
-    'By the afternoon the tide was out and the boats were leaning where they always leaned, and none of it required anything from her at all. '
-  return [opening, body.repeat(2).trim(), body.repeat(2).trim()]
-}
 
 test.describe.configure({ mode: 'serial' })
 
@@ -124,7 +105,12 @@ test('flow 3 — a guest reads, signs in, and sends a suggestion', async ({ brow
   await helperPage.getByRole('textbox', { name: /your suggestion/i }).click()
   await helperPage.keyboard.press('Control+a')
   await helperPage.keyboard.press('Delete')
-  await writeInEditor(helperPage, passage('She did not write the ship down that morning.'))
+  // One paragraph more than the original, so the comparison has a wholly
+  // added paragraph to label (FR-7.1, NFR-4; phase 14 item 1.19).
+  await writeInEditor(helperPage, [
+    ...passage('She did not write the ship down that morning.'),
+    'That was the whole of it, and she knew it.',
+  ])
 
   await helperPage.getByLabel(/a note to the author/i).fill('Made the omission the event.')
   const send = helperPage.getByRole('button', { name: /send this to the author/i })
@@ -137,9 +123,18 @@ test('flow 3 — a guest reads, signs in, and sends a suggestion', async ({ brow
   // And it can be found again from the dashboard, while it waits. Nothing
   // listed a helper's own suggestions until the 2026-10-16 spec review.
   await helperPage.goto('/')
-  await helperPage.getByRole('link', { name: 'Your suggestions' }).click()
+  // Item 4.1 put the link in the header too; the dashboard's own is the one
+  // this flow has always followed.
+  await helperPage.locator('#main').getByRole('link', { name: 'Your suggestions' }).click()
   await expect(helperPage.getByRole('heading', { name: 'Your suggestions' })).toBeVisible()
   await expect(helperPage.getByText(/waiting on the author/i)).toBeVisible()
+
+  // Item 6.10 — your own profile says where it is changed.
+  await helperPage.goto(`/@${helper.username}`)
+  await expect(helperPage.getByRole('link', { name: /edit your profile/i })).toHaveAttribute(
+    'href',
+    '/settings',
+  )
   await helperContext.close()
 })
 
@@ -150,6 +145,14 @@ test('flow 4 — the author compares, accepts, and the credit appears', async ({
   const page = await context.newPage()
   await signIn(page, author.email, PASSWORD)
 
+  // Item 6.14 — the dashboard leads with what needs the author: the
+  // suggestion that is waiting, with Compare.
+  await page.goto('/')
+  const needsYou = page.getByRole('region', { name: 'Needs you' })
+  await expect(needsYou).toContainText(/sent a suggestion for/u)
+  await needsYou.getByRole('link', { name: 'Compare' }).first().click()
+  await expect(page).toHaveURL(/\/help\/[^/]+\/s\/[^/]+$/u)
+
   // FR-12.1 — the author hears of it, and the notification leads to it. Until
   // the 2026-10-16 spec review it named nothing and led nowhere.
   await page.goto('/notifications')
@@ -158,6 +161,13 @@ test('flow 4 — the author compares, accepts, and the credit appears', async ({
     .first()
     .click()
   await expect(page).toHaveURL(/\/help\/[^/]+\/s\/[^/]+$/)
+  // Item 6.9 — opening the row marked it read, and it says who sent what where.
+  await page.goto('/notifications')
+  const opened = page.getByRole('link', { name: /a suggestion arrived/i }).first()
+  await expect(opened).not.toContainText('(unread)')
+  await expect(opened).toContainText(
+    /sent a suggestion for the passage you opened for help in chapter/i,
+  )
 
   await page.goto(requestUrl)
   await page
@@ -173,6 +183,12 @@ test('flow 4 — the author compares, accepts, and the credit appears', async ({
   await expect(summary).toContainText('added')
   await expect(summary).toContainText('removed')
   await expect(page.getByRole('button', { name: /side by side/i })).toBeVisible()
+  // FR-7.1, NFR-4 (item 1.19) — a wholly added paragraph is labelled in words,
+  // not by a tint alone; the placeholder opposite it was hidden from screen
+  // readers and nothing else said so. This comparison is a rewrite, so it
+  // opens in read-through (FR-7.2.3); the rows are behind the toggle.
+  await page.getByRole('button', { name: /side by side/i }).click()
+  await expect(page.getByText('Added', { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('button', { name: /read it straight/i })).toBeVisible()
   await expect(page.getByText(/made the omission the event/i)).toBeVisible()
 
@@ -187,6 +203,13 @@ test('flow 4 — the author compares, accepts, and the credit appears', async ({
   // role as plain text, so each now appears twice on this page by design.
   await expect(page.getByText(helper.username).first()).toBeVisible()
   await expect(page.getByText(/wrote a passage/i).first()).toBeVisible()
+  // Item 6.17 — and how much of the draft is the author's own, now that it is not all.
+  await expect(page.getByText(/\d+% of the main draft is the author’s own words/u)).toBeVisible()
+  // Item 6.10 — and where, counted as the reader counts, linked.
+  await expect(page.getByRole('link', { name: /chapter 1, section 1/i }).first()).toHaveAttribute(
+    'href',
+    /\/c\/1\/1$/,
+  )
 
   /*
    * FR-9.6 — and the same credit as plain text, for a manuscript's front
@@ -212,8 +235,17 @@ test('flow 4 — the author compares, accepts, and the credit appears', async ({
 
   // FR-9.1 — and on the contributor's own profile.
   await page.goto(`/@${helper.username}`)
-  await expect(page.getByRole('heading', { name: helper.username })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'The logbook' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: helper.username, exact: true })).toBeVisible()
+  // Item 6.13 — the calendar counts the help: one day, the suggestion sent in flow 3.
+  await expect(
+    page.getByRole('heading', { name: `Days ${helper.username} wrote something for someone` }),
+  ).toBeVisible()
+  await expect(page.getByText('Helped on 1 day in the last year.', { exact: true })).toBeVisible()
+  // Item 6.10 — the credit leads to the passage, not the story's front page.
+  await expect(page.getByRole('link', { name: 'The logbook' })).toHaveAttribute(
+    'href',
+    /\/c\/1\/1$/,
+  )
 
   await context.close()
 })

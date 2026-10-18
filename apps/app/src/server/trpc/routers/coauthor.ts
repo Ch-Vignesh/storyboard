@@ -235,7 +235,12 @@ export const coauthorRouter = createTRPCRouter({
           data: {
             userId: invitation.invitedById,
             type: 'COAUTHOR_ACCEPTED',
-            payload: { storyboardId: invitation.storyboardId },
+            // Item 6.9 — which invitation, so the row can name who accepted.
+            payload: {
+              storyboardId: invitation.storyboardId,
+              invitationId: invitation.id,
+              byId: userId,
+            },
           },
         }),
       )

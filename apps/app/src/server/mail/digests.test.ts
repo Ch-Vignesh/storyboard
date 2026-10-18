@@ -87,8 +87,11 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     // The count is asserted so that adding a type is a deliberate act — a new
     // one with no label and no delivery class would otherwise be silently
     // undeliverable. It went from twelve to thirteen when REQUEST_CLOSED
-    // arrived with FR-2.7, and to fourteen with REQUEST_REOPENED (FR-5.9).
-    expect(NOTIFICATION_TYPES).toHaveLength(14)
+    // arrived with FR-2.7, to fourteen with REQUEST_REOPENED (FR-5.9), to
+    // fifteen with IDEA_REPLY (FR-6.9, phase 14 item 1.9), to sixteen with
+    // SUGGESTION_WITHDRAWN (FR-6.5, item 1.10) and to seventeen with
+    // REQUEST_AUTO_CLOSED (FR-11.3 with D-8, item 6.15).
+    expect(NOTIFICATION_TYPES).toHaveLength(17)
     for (const type of NOTIFICATION_TYPES) {
       const definition = NOTIFICATIONS[type]
       expect(definition.label.length, `${type} needs a label`).toBeGreaterThan(0)
@@ -378,10 +381,18 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
       to: 'someone@example.test',
       requestTitle: 'Chapter four will not start',
       requestUrl: 'https://example.test/s/a/help/b',
+      editUrl: 'https://example.test/s/a/help/b/edit',
       appUrl: 'https://example.test',
+      unsubscribeUrl: 'http://t/unsubscribe?t=x',
     })
 
     expect(mail.text).toMatch(/not a verdict/i)
+    // Item 6.16 — the fix is offered where it is made: the request's edit page.
+    expect(mail.text).toContain('Change the word range: https://example.test/s/a/help/b/edit')
+    expect(mail.html).toContain(
+      'href="https://example.test/s/a/help/b/edit">Change the word range</a>',
+    )
+    expect(mail.text).not.toMatch(/close it and ask again/i)
     // What a writer can actually do, and nothing that is not built: it
     // offered a one-click widening and a place in a digest that never takes a
     // week-old request, until the 2026-10-16 spec review.

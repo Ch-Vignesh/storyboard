@@ -45,6 +45,22 @@ test('a writer creates a storyboard and writes a section', async ({ page }) => {
   // FR-2.5 — a live word count.
   await expect(page.getByText(/\b11 words\b/)).toBeVisible()
 
+  // FR-4.4, FR-8.3 (phase 14, item 1.4) — a formatting click is not a save.
+  // Every toolbar click blurred the editor, and the blur saved a version, so
+  // typing and then pressing Italic put two near-identical versions in History
+  // a second apart. The draft autosave that follows the click is waited for,
+  // so anything the click itself saved has landed before History is read.
+  await page.keyboard.press('Control+Home')
+  await page.keyboard.press('Shift+Control+ArrowRight')
+  const drafted = page.waitForResponse((response) => response.url().includes('section.saveDraft'))
+  await page.getByRole('button', { name: 'Italic', exact: true }).click()
+  await expect(editor.locator('em')).toContainText('The')
+  await drafted
+  const history = await page.context().newPage()
+  await history.goto(page.url().replace(/\/edit$/, '/history'))
+  await expect(history.getByRole('listitem')).toHaveCount(1)
+  await history.close()
+
   // FR-4.4 — a durable version on demand, and on blur.
   await page.getByRole('button', { name: /save now/i }).click()
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
@@ -115,6 +131,22 @@ test('a guest reads a public storyboard and is asked to sign in only to help', a
   // A guest gets no authoring affordances at all.
   await expect(page.getByRole('link', { name: 'Edit' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Settings' })).toHaveCount(0)
+
+  // FR-11.5, SRS section 4 (phase 14, item 1.14) — the chapter lives in the
+  // address. Switching chapters was state alone, so a reload went back to
+  // chapter one and Back left the story.
+  const contents = page.getByRole('navigation', { name: 'Contents' })
+  await contents.getByRole('link', { name: /^2\./ }).click()
+  await expect(page).toHaveURL(/\/c\/2$/)
+  await expect(contents.getByRole('link', { name: /^2\./ })).toHaveAttribute('aria-current', 'page')
+  await page.reload()
+  await expect(page).toHaveURL(/\/c\/2$/)
+  await expect(contents.getByRole('link', { name: /^2\./ })).toHaveAttribute('aria-current', 'page')
+  await page.goBack()
+  // The story's own address, not merely "not chapter two": the rail is read
+  // only once the page behind the address has rendered.
+  await expect(page).toHaveURL(/seedyellow1$/u)
+  await expect(contents.getByRole('link', { name: /^1\./ })).toHaveAttribute('aria-current', 'page')
 
   await context.close()
 })

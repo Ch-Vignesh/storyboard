@@ -9,14 +9,19 @@ import { derive } from '@/lib/doc/text'
 import { TITLE_MAX_CHARS } from '@/lib/schemas/constants'
 import { afterCommit } from '@/server/after-commit'
 import { closeRequestsOnSections } from '@/server/close-requests'
+import { sectionsRequestImpact } from '@/server/impact'
+import { logger } from '@/lib/logger'
+import { SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
 
-import { activeProcedure, actorFrom, createTRPCRouter } from '../init'
+import { activeProcedure, actorFrom, createTRPCRouter, protectedProcedure } from '../init'
 
 const titleSchema = z
   .string()
   .trim()
   .min(1, 'Give the chapter a name.')
   .max(TITLE_MAX_CHARS, 'That name is too long.')
+
+const log = logger.child({ router: 'chapter' })
 
 export const chapterRouter = createTRPCRouter({
   /** FR-2.3 — a new chapter goes to the end and arrives with one empty section. */
@@ -154,6 +159,151 @@ export const chapterRouter = createTRPCRouter({
    * The last chapter of a version cannot go: FR-2.2 promises a writer is never
    * shown a storyboard with no structure.
    */
+  /**
+   * Phase 14, item 5.2 — what removing this chapter would do, for the dialog
+   * that asks first: its sections and their words, the requests on them that
+   * would close, and the people who would be told. Read with the right the
+   * removal itself needs, so nobody learns the shape of a chapter they may
+   * not change.
+   */
+  removalImpact: protectedProcedure
+    .input(z.object({ chapterId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { chapterId } = await loadChapter(
+        ctx.db,
+        actor,
+        input.chapterId,
+        'storyboard:structure',
+      )
+      const sections = await ctx.db.section.findMany({
+        where: { chapterId, deletedAt: null, mergedIntoId: null },
+        select: { id: true, wordCount: true },
+      })
+      const requests = await sectionsRequestImpact(
+        ctx.db,
+        sections.map((section) => section.id),
+      )
+      return {
+        sections: sections.length,
+        words: sections.reduce((total, section) => total + section.wordCount, 0),
+        ...requests,
+      }
+    }),
+
+  /**
+   * Phase 14, item 5.7 (decision 0008) — what was removed from this version
+   * in the last `SOFT_DELETE_GRACE_DAYS`, and can be brought back: chapters,
+   * and sections whose chapter is still in the story (a section in a removed
+   * chapter comes back with the chapter). Nothing from a deleted version.
+   */
+  removed: protectedProcedure
+    .input(z.object({ versionId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { versionId } = await loadVersion(
+        ctx.db,
+        actor,
+        input.versionId,
+        'storyboard:structure',
+      )
+      const since = new Date(Date.now() - SOFT_DELETE_GRACE_DAYS * 24 * 60 * 60 * 1000)
+      const [chapters, sections] = await Promise.all([
+        ctx.db.chapter.findMany({
+          where: { versionId, deletedAt: { gte: since } },
+          orderBy: { deletedAt: 'desc' },
+          select: {
+            id: true,
+            title: true,
+            deletedAt: true,
+            sections: { where: { mergedIntoId: null }, select: { wordCount: true } },
+          },
+        }),
+        ctx.db.section.findMany({
+          where: {
+            chapter: { versionId, deletedAt: null },
+            deletedAt: { gte: since },
+            mergedIntoId: null,
+          },
+          orderBy: { deletedAt: 'desc' },
+          select: {
+            id: true,
+            title: true,
+            wordCount: true,
+            deletedAt: true,
+            chapter: { select: { title: true } },
+          },
+        }),
+      ])
+      return {
+        chapters: chapters.map((chapter) => ({
+          id: chapter.id,
+          title: chapter.title,
+          removedAt: chapter.deletedAt,
+          sections: chapter.sections.length,
+          words: chapter.sections.reduce((total, section) => total + section.wordCount, 0),
+        })),
+        sections: sections.map((section) => ({
+          id: section.id,
+          title: section.title,
+          chapterTitle: section.chapter.title,
+          removedAt: section.deletedAt,
+          words: section.wordCount,
+        })),
+      }
+    }),
+
+  /**
+   * Item 5.7 — a removed chapter comes back, with the sections that went with
+   * it, at the end of its version. Its lineage is unchanged, so its history
+   * and credits are where they were. Requests closed by the removal stay
+   * closed. Not from a deleted version (item 1.1), and not after the grace.
+   */
+  restore: activeProcedure
+    .input(z.object({ chapterId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { chapterId, versionId } = await loadChapter(
+        ctx.db,
+        actor,
+        input.chapterId,
+        'storyboard:structure',
+      )
+      const chapter = await ctx.db.chapter.findUniqueOrThrow({
+        where: { id: chapterId },
+        select: { deletedAt: true, version: { select: { deletedAt: true } } },
+      })
+      if (!chapter.deletedAt) return { ok: true, restored: false }
+      if (chapter.version.deletedAt) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That version was deleted.' })
+      }
+      if (chapter.deletedAt.getTime() < Date.now() - SOFT_DELETE_GRACE_DAYS * 24 * 60 * 60 * 1000) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `A removed chapter can be brought back for ${String(SOFT_DELETE_GRACE_DAYS)} days.`,
+        })
+      }
+
+      await ctx.db.$transaction(async (tx) => {
+        const last = await tx.chapter.findFirst({
+          where: { versionId, deletedAt: null },
+          orderBy: { order: 'desc' },
+          select: { order: true },
+        })
+        await tx.chapter.update({
+          where: { id: chapterId },
+          data: { deletedAt: null, order: (last?.order ?? -1) + 1 },
+        })
+        // The sections that went with it: removed at the same instant.
+        await tx.section.updateMany({
+          where: { chapterId, deletedAt: chapter.deletedAt ?? undefined },
+          data: { deletedAt: null },
+        })
+      })
+      log.info({ event: 'chapter.restore', chapterId }, 'removed chapter brought back')
+      return { ok: true, restored: true }
+    }),
+
   delete: activeProcedure
     .input(z.object({ chapterId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {

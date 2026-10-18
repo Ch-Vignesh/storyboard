@@ -1,4 +1,4 @@
-import { prisma } from '@storyboard/db'
+import { grantAdmin, prisma } from '@storyboard/db'
 import { expect, test, type Page } from '@playwright/test'
 
 import { signIn, signUpAndOnboard } from './helpers'
@@ -12,12 +12,13 @@ import { signIn, signUpAndOnboard } from './helpers'
  *   route including the API.
  *
  * The middle one needs an administrator, and there is no interface for making
- * somebody one — by design: `isAdmin` is set in the database by whoever runs
- * the deployment. So that one flag is set directly here, and everything after
- * it goes through the real screens.
+ * somebody one — by design (decision 0043): the one admin is set from the
+ * command line by whoever runs the deployment. So the function behind that
+ * command is called directly here, and everything after it goes through the
+ * real screens.
  */
 
-const PASSWORD = 'a-long-enough-passphrase'
+const PASSWORD = 'A-long-enough-passphrase-1!'
 
 const ASK =
   'The section under this request is meant to turn on a single decision the narrator makes without admitting to herself that she is making it, and at the moment it simply reports what happens in order, which is why it is falling flat and reads like minutes of a meeting rather than a turning point.'
@@ -103,13 +104,26 @@ test('a fourth submitted suggestion is refused, and says why', async ({ browser 
     })
   }
 
-  await sendSuggestion(helperPage, requestPath, 'Fourth.')
-  // The refusal names the number and says what to do about it, rather than
-  // saying "rate limited".
-  await expect(helperPage.getByText(/3 suggestions waiting on this story/i)).toBeVisible({
-    timeout: 15_000,
-  })
-  await expect(helperPage.getByText(/wait for a decision on one, or withdraw it/i)).toBeVisible()
+  // Item 6.4 — the fourth is known before it is written: the request page
+  // says the three are waiting, the draft still opens, and Send is off with
+  // the reason rather than a refusal after the fact (the server still
+  // refuses; the integrity tests hold it to that).
+  await helperPage.goto(requestPath)
+  await expect(
+    helperPage.getByText(/3 of your 3 suggestions waiting on this story/i).first(),
+  ).toBeVisible()
+  await expect(
+    helperPage.getByText(/you can write now and send when one of your 3 is decided/i).first(),
+  ).toBeVisible()
+  await helperPage.getByRole('button', { name: /write a suggestion/i }).click()
+  await expect(helperPage).toHaveURL(/\/write$/)
+  await helperPage
+    .getByRole('textbox', { name: /your suggestion/i })
+    .pressSequentially('Fourth. The lamp turned the way it always had and the clock did not.')
+  await expect(helperPage.getByRole('button', { name: /send this to the author/i })).toBeDisabled()
+  await expect(
+    helperPage.getByText(/you can write now and send when one of your 3 is decided/i).first(),
+  ).toBeVisible()
 
   await helperContext.close()
 })
@@ -159,6 +173,9 @@ test('a private storyboard is 404 to a signed-in stranger, at every route and in
 })
 
 test('ten upheld reports suspend an account, and its work stays', async ({ browser }) => {
+  // Ten reporters sign in one after another, each leaving by the header first
+  // (item 3.11): three times the usual budget.
+  test.slow()
   // The person who will be reported, and something of theirs to report.
   const targetContext = await browser.newContext()
   const targetPage = await targetContext.newPage()
@@ -230,18 +247,26 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   await expect(reporterPage.getByRole('button', { name: /report this story/i })).toHaveCount(0)
   await reporterContext.close()
 
-  // An administrator upholds it. `isAdmin` has no interface by design.
+  // An administrator upholds it. The role has no interface by design: what
+  // `pnpm admin:grant` does, this does, and whoever was the admin of this
+  // database before is demoted by it.
   const adminContext = await browser.newContext()
   const adminPage = await adminContext.newPage()
   const admin = await signUpAndOnboard(adminPage)
-  await prisma.user.update({
-    where: { email: admin.email },
-    data: { isAdmin: true },
-  })
-  // The flag is read per request, so a new session is not needed — but signing
+  await grantAdmin(prisma, admin.email)
+  // The role is read per request, so a new session is not needed — but signing
   // in again proves that too.
-  await adminPage.goto('/admin')
-  await expect(adminPage.getByRole('heading', { name: 'Moderation' })).toBeVisible()
+  await adminPage.goto('/admin/reports')
+  await expect(adminPage.getByRole('heading', { name: 'Reports' })).toBeVisible()
+  // Item 2b.7 — the panel's frame: the screens down the side, and "Admin" in
+  // the header, for someone who may open them.
+  const screens = adminPage.getByRole('navigation', { name: 'Admin screens' })
+  await expect(screens.getByRole('link', { name: 'People' })).toBeVisible()
+  await expect(screens.getByRole('link', { name: 'Reports' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+  await expect(adminPage.getByRole('link', { name: 'Admin', exact: true })).toBeVisible()
 
   const row = adminPage.getByRole('listitem').filter({ hasText: title })
   await expect(row).toHaveCount(1)
@@ -273,11 +298,14 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   await lockedOutPage.getByLabel('Password').fill(PASSWORD)
   await lockedOutPage.getByRole('button', { name: /sign in/i }).click()
   await expect(lockedOutPage).toHaveURL(/\/signin/)
+  // Decision 0018 (phase 14, item 1.15) — after a correct password, told so,
+  // and where to write. It read "do not match" until then.
+  await expect(lockedOutPage.getByText(/this account is suspended/i)).toBeVisible()
   await lockedOut.close()
 
-  // "Pending review": the review lifts it, from the same screen. Nothing
-  // listed suspended accounts until the 2026-10-16 spec review.
-  await adminPage.reload()
+  // "Pending review": the review lifts it, from the People screen (item
+  // 2b.7). Nothing listed suspended accounts until the 2026-10-16 spec review.
+  await adminPage.goto('/admin/people')
   const suspendedRow = adminPage
     .getByRole('listitem')
     .filter({ hasText: target.username })
@@ -292,6 +320,57 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
       })
     ).status,
   ).toBe('ACTIVE')
+
+  // Decision 0043 (phase 14, item 2b.5) — the People screen. The account is
+  // found by its exact username, banned with a note, and a ban is what "Lift
+  // the suspension" cannot undo; lifting the ban makes it active again.
+  await adminPage.goto('/admin/people')
+  await adminPage.getByLabel(/username or email address/i).fill(target.username)
+  await adminPage.getByRole('button', { name: /find the account/i }).click()
+  const card = adminPage.getByRole('article', { name: target.username })
+  await expect(card.getByText('Active', { exact: true })).toBeVisible()
+  await card.getByRole('button', { name: 'Ban', exact: true }).click()
+  await card.getByLabel(/note, for administrators/i).fill('Spam across three stories.')
+  await card.getByRole('button', { name: /ban this account/i }).click()
+  await expect(card.getByText(/^Banned /)).toBeVisible()
+  const banned = await prisma.user.findUniqueOrThrow({
+    where: { id: targetUser.id },
+    select: { status: true, bannedAt: true, standingNote: true },
+  })
+  expect(banned.status).toBe('SUSPENDED')
+  expect(banned.bannedAt).not.toBeNull()
+  expect(banned.standingNote).toBe('Spam across three stories.')
+
+  await card.getByRole('button', { name: /lift the ban/i }).click()
+  await expect(card.getByText('Active', { exact: true })).toBeVisible()
+  expect(
+    (
+      await prisma.user.findUniqueOrThrow({
+        where: { id: targetUser.id },
+        select: { status: true, bannedAt: true },
+      })
+    ).bannedAt,
+  ).toBeNull()
+
+  // Item 2.7 (decision 0045) — from the Upheld tab, the story the reports were
+  // about can be hidden: a guest then finds nothing at its address, and
+  // "Show it again" brings it back. Nothing is deleted.
+  await adminPage.goto('/admin/reports')
+  await adminPage.getByRole('button', { name: /^Upheld/ }).click()
+  const upheldRow = adminPage.getByRole('listitem').filter({ hasText: title }).first()
+  await upheldRow.getByRole('button', { name: 'Hide it' }).click()
+  await expect(upheldRow.getByText('hidden', { exact: true })).toBeVisible()
+  const hiddenContext = await browser.newContext()
+  const hiddenPage = await hiddenContext.newPage()
+  expect((await hiddenPage.goto(targetPath))?.status()).toBe(404)
+  await hiddenContext.close()
+
+  await upheldRow.getByRole('button', { name: 'Show it again' }).click()
+  await expect(upheldRow.getByText('hidden', { exact: true })).toHaveCount(0)
+  const shownContext = await browser.newContext()
+  const shownPage = await shownContext.newPage()
+  expect((await shownPage.goto(targetPath))?.status()).toBe(200)
+  await shownContext.close()
   await adminContext.close()
 
   // A non-admin gets 404 from the admin screen, not 403.
@@ -302,4 +381,44 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   const adminResponse = await nosyPage.goto('/admin')
   expect(adminResponse?.status()).toBe(404)
   await nosyContext.close()
+})
+
+/**
+ * Decision 0046 (phase 14, item 2.9; D-9) — blocking a person. The author
+ * blocks from the helper's profile and reads what a block does first; the
+ * helper still reads the story, finds a sentence where the button was, and
+ * settings lists the block with the way back.
+ */
+test('someone you block can still read, and cannot help', async ({ browser }) => {
+  const authorContext = await browser.newContext()
+  const authorPage = await authorContext.newPage()
+  await signUpAndOnboard(authorPage)
+  const { path, requestPath } = await storyboardWithRequest(authorPage, 'The weir in winter')
+
+  const helperContext = await browser.newContext()
+  const helperPage = await helperContext.newPage()
+  const helper = await signUpAndOnboard(helperPage)
+  await helperPage.goto(requestPath)
+  await expect(helperPage.getByRole('button', { name: /write a suggestion/i })).toBeVisible()
+
+  await authorPage.goto(`/@${helper.username}`)
+  await authorPage.getByRole('button', { name: /^Block / }).click()
+  await expect(authorPage.getByText(/they can still read your stories/i)).toBeVisible()
+  await authorPage.getByRole('button', { name: /^Block / }).click()
+  await expect(authorPage.getByText(/you have blocked/i)).toBeVisible()
+
+  await helperPage.goto(requestPath)
+  await expect(helperPage.getByRole('button', { name: /write a suggestion/i })).toHaveCount(0)
+  await expect(helperPage.getByText(/taking suggestions from you/i)).toBeVisible()
+  expect((await helperPage.goto(path))?.status()).toBe(200)
+
+  await authorPage.goto('/settings')
+  await expect(authorPage.getByRole('heading', { name: 'Blocked people' })).toBeVisible()
+  await authorPage.getByRole('button', { name: 'Unblock' }).click()
+  await expect(authorPage.getByText(/^Nobody\./)).toBeVisible()
+
+  await helperPage.goto(requestPath)
+  await expect(helperPage.getByRole('button', { name: /write a suggestion/i })).toBeVisible()
+  await authorContext.close()
+  await helperContext.close()
 })

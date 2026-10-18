@@ -20,7 +20,8 @@ describe('which routes need a session', () => {
     ['/invitations', 'invitations to co-author'],
     ['/s/the-ship-abc123/coauthors', "a story's co-authors"],
     ['/settings', 'settings'],
-    ['/settings/email', 'a settings subpage'],
+    ['/settings/notifications', 'a settings subpage'],
+    ['/settings/emails', 'a settings subpage whose name merely starts like the exception'],
     ['/onboarding/username', 'onboarding'],
     ['/onboarding/genres', 'onboarding'],
     ['/import', 'import'],
@@ -52,6 +53,7 @@ describe('which routes need a session', () => {
     ['/signin', 'signing in'],
     ['/signup', 'signing up'],
     ['/verify', 'the verification link'],
+    ['/settings/email', 'confirming a new address from its link, signed out (item 3.2)'],
     ['/@someone', 'a profile'],
   ])('%s does not — %s', (path) => {
     expect(needsAnAccount(path)).toBe(false)

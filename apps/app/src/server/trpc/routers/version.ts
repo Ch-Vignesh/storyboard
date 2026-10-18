@@ -37,7 +37,8 @@ export const versionRouter = createTRPCRouter({
       })
 
       const versions = await ctx.db.version.findMany({
-        where: { storyboardId },
+        // A removed alternate stays out of the list (FR-10.1, phase 14 item 1.1).
+        where: { storyboardId, deletedAt: null },
         orderBy: [{ isMain: 'desc' }, { createdAt: 'asc' }],
         select: {
           id: true,
@@ -141,17 +142,36 @@ export const versionRouter = createTRPCRouter({
     .input(z.object({ versionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
-      const { versionId, storyboardId, isMain } = await loadVersion(
+      const { versionId, storyboardId, isMain, deletedAt } = await loadVersion(
         ctx.db,
         actor,
         input.versionId,
         'version:create',
+        { allowDeleted: true },
       )
 
       if (isMain) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'That is already the main draft.',
+        })
+      }
+      // FR-10.1 with FR-2.2 (phase 14, item 1.1) — a removed version, or one
+      // with no chapter, would make a story with no reading order at all.
+      // Until this check a deleted alternate could still be promoted from a
+      // list fetched before the delete: the main draft became an empty
+      // version, and every open request was closed on the way.
+      if (deletedAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That version was deleted, so it cannot become the main draft.',
+        })
+      }
+      const liveChapters = await ctx.db.chapter.count({ where: { versionId, deletedAt: null } })
+      if (liveChapters === 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That version has no chapters, so it cannot become the main draft.',
         })
       }
 
@@ -165,7 +185,25 @@ export const versionRouter = createTRPCRouter({
         if (previous) {
           await tx.version.update({ where: { id: previous.id }, data: { isMain: false } })
         }
-        await tx.version.update({ where: { id: versionId }, data: { isMain: true } })
+        // Conditional on what was checked above still holding at the moment
+        // of writing: a delete landing between the check and here would
+        // otherwise make a removed version the main draft. A refusal here
+        // rolls the demotion back with it.
+        const promoted = await tx.version.updateMany({
+          where: {
+            id: versionId,
+            isMain: false,
+            deletedAt: null,
+            chapters: { some: { deletedAt: null } },
+          },
+          data: { isMain: true },
+        })
+        if (promoted.count !== 1) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'That version was removed a moment ago, so it cannot become the main draft.',
+          })
+        }
 
         const stranded = previous ? await carryRequestsOver(tx, previous.id, versionId) : []
         return {
@@ -221,6 +259,10 @@ export const versionRouter = createTRPCRouter({
 
       const removed = await ctx.db.$transaction(async (tx) => {
         const now = new Date()
+        // The version itself is marked (phase 14, item 1.1). Without this it
+        // stayed listed as "0 chapters", was offered in Compare, and could be
+        // promoted.
+        await tx.version.update({ where: { id: versionId }, data: { deletedAt: now } })
         const chapters = await tx.chapter.findMany({
           where: { versionId, deletedAt: null },
           select: { id: true },

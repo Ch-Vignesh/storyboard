@@ -79,6 +79,14 @@ export default function HomePage() {
             <a href="#credit" className="text-ink-soft hover:text-ink hover:underline">
               Credit
             </a>
+            {/* FR-1.2 (phase 14, item 4.10) — reading needs no account, and a
+                member arriving here has somewhere to go. */}
+            <a href={`${appUrl}/browse`} className="text-ink-soft hover:text-ink hover:underline">
+              Browse stories
+            </a>
+            <a href={`${appUrl}/signin`} className="text-ink-soft hover:text-ink hover:underline">
+              Sign in
+            </a>
             <a href={`${appUrl}/signup`} className="text-ink-soft hover:text-ink hover:underline">
               Start
             </a>
@@ -443,6 +451,15 @@ export default function HomePage() {
           <span className="font-manuscript text-[16px] font-medium text-ink">Draftboard</span>
           <a href={`${appUrl}/rules`} className="text-ink-soft hover:text-ink hover:underline">
             How this place works
+          </a>
+          <a href={`${appUrl}/privacy`} className="text-ink-soft hover:text-ink hover:underline">
+            Privacy
+          </a>
+          <a href={`${appUrl}/terms`} className="text-ink-soft hover:text-ink hover:underline">
+            Terms
+          </a>
+          <a href={`${appUrl}/contact`} className="text-ink-soft hover:text-ink hover:underline">
+            Contact
           </a>
           <a
             href="https://github.com/Ch-Vignesh/storyboard"

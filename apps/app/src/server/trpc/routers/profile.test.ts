@@ -38,7 +38,14 @@ describe.skipIf(!databaseUrl)('profiles (phase 12 audit)', () => {
         ? { user: { id: who.id, username: who.username, onboarded: true }, expires: '' }
         : null,
       account: who
-        ? { status: 'ACTIVE', isAdmin: false, deletionRequestedAt: null, username: who.username }
+        ? {
+            status: 'ACTIVE',
+            isAdmin: false,
+            role: 'USER' as const,
+            grants: [],
+            deletionRequestedAt: null,
+            username: who.username,
+          }
         : null,
       headers: new Headers(),
     })

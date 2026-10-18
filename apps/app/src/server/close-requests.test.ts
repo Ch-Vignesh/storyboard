@@ -228,6 +228,64 @@ describe.skipIf(!databaseUrl)('closing the open requests on a storyboard', () =>
     expect(await db.notification.count({ where: { userId: author } })).toBe(0)
   })
 
+  /**
+   * FR-11.3 with D-8 (phase 14, item 6.15; decision 0050) — the nightly close
+   * for requests past their thirty days.
+   */
+  it('closes a request open past REQUEST_OPEN_DAYS, tells its author once, and leaves the rest', async () => {
+    const { closeStaleRequests } = await import('./close-requests')
+    const { REQUEST_OPEN_DAYS } = await import('@/lib/schemas/constants')
+    const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+
+    const stale = await aStoryboardBeingHelped('ANSWERED')
+    await db.contributionRequest.update({
+      where: { id: stale.request.id },
+      data: { openedAt: daysAgo(REQUEST_OPEN_DAYS + 1) },
+    })
+    const fresh = await aStoryboardBeingHelped()
+    await db.contributionRequest.update({
+      where: { id: fresh.request.id },
+      data: { openedAt: daysAgo(REQUEST_OPEN_DAYS - 1) },
+    })
+    const resolved = await aStoryboardBeingHelped()
+    await db.contributionRequest.update({
+      where: { id: resolved.request.id },
+      data: {
+        state: 'RESOLVED',
+        resolvedAt: new Date(),
+        openedAt: daysAgo(REQUEST_OPEN_DAYS + 10),
+      },
+    })
+
+    expect(await closeStaleRequests(db)).toBe(1)
+    const states = async () =>
+      Promise.all(
+        [stale, fresh, resolved].map(
+          async ({ request }) =>
+            (
+              await db.contributionRequest.findUniqueOrThrow({
+                where: { id: request.id },
+                select: { state: true },
+              })
+            ).state,
+        ),
+      )
+    expect(await states()).toEqual(['CLOSED', 'OPEN', 'RESOLVED'])
+    // The people answering it are told as the author's own close tells them...
+    expect(
+      await db.notification.count({ where: { userId: stale.submitted, type: 'REQUEST_CLOSED' } }),
+    ).toBe(1)
+    // ...and the author once, by a kind of its own.
+    const toldAuthor = () =>
+      db.notification.count({ where: { userId: stale.author, type: 'REQUEST_AUTO_CLOSED' } })
+    expect(await toldAuthor()).toBe(1)
+
+    // Tomorrow's run finds nothing new, and says nothing again.
+    expect(await closeStaleRequests(db)).toBe(0)
+    expect(await toldAuthor()).toBe(1)
+    expect(await states()).toEqual(['CLOSED', 'OPEN', 'RESOLVED'])
+  })
+
   it('does nothing, and says so, when there is nothing open', async () => {
     const { storyboard } = await aStoryboardBeingHelped()
     await close(storyboard.id)

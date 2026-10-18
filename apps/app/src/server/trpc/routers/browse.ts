@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { visibleStoryboardsWhere } from '@/lib/authz/guard'
 import { AGE_FILTERS, browseFiltersSchema } from '@/lib/schemas/browse'
-import { ANSWERS } from '@/server/answers'
+import { ANSWERS, AUTHORS_SELECT, withIdeaAnswers } from '@/server/answers'
 import {
   BROWSE_LIMITS,
   GENRE_SELECTION_MAX,
@@ -58,8 +58,14 @@ export const browseRouter = createTRPCRouter({
       },
       // "No answers yet" is a filter as well as a sort: a request with
       // nothing on it is the one most worth showing to a helper.
+      // A "help me think" request's state carries its answers (item 1.12):
+      // OPEN is "no idea from outside the story yet". A prose request takes
+      // no ideas at all.
       ...(input.sort === 'NO_ANSWERS'
-        ? { suggestions: { none: ANSWERS }, ideas: { none: {} } }
+        ? {
+            suggestions: { none: ANSWERS },
+            AND: [{ OR: [{ kind: { not: 'UNBLOCK' as const } }, { state: 'OPEN' as const }] }],
+          }
         : {}),
     }
 
@@ -82,6 +88,7 @@ export const browseRouter = createTRPCRouter({
         minWords: true,
         maxWords: true,
         createdAt: true,
+        openedAt: true,
         storyboard: {
           select: {
             slug: true,
@@ -90,21 +97,27 @@ export const browseRouter = createTRPCRouter({
             isSeed: true,
             owner: { select: { username: true, displayName: true } },
             genres: { select: { genre: { select: { id: true, name: true } } } },
+            ...AUTHORS_SELECT,
           },
         },
-        _count: { select: { suggestions: { where: ANSWERS }, ideas: true } },
+        _count: { select: { suggestions: { where: ANSWERS } } },
+        // Idea answers are counted in code (item 1.12): see `answers.ts`.
+        ideas: { where: { parentId: null }, select: { authorId: true } },
       },
     })
 
     const nudgeAt = Date.now() - QUIET_REQUEST_NUDGE_DAYS * 24 * 60 * 60 * 1000
     return {
-      requests: requests.map((request) => ({
-        ...request,
-        /** FR-12.4 — past this, the author gets nudged. Shown as context, not a score. */
-        quiet:
-          request._count.suggestions + request._count.ideas === 0 &&
-          request.createdAt.getTime() < nudgeAt,
-      })),
+      requests: requests.map((raw) => {
+        const request = withIdeaAnswers(raw)
+        return {
+          ...request,
+          /** FR-12.4 — past this, the author gets nudged. Shown as context, not a score. */
+          quiet:
+            request._count.suggestions + request._count.ideas === 0 &&
+            request.createdAt.getTime() < nudgeAt,
+        }
+      }),
     }
   }),
 
@@ -119,6 +132,8 @@ export const browseRouter = createTRPCRouter({
       z.object({
         query: z.string().trim().max(BROWSE_LIMITS.queryMaxChars).optional(),
         genreIds: z.array(z.string().min(1)).max(GENRE_SELECTION_MAX).optional(),
+        // FR-11.3 — the page's type filter never reached this query (item 1.17).
+        types: browseFiltersSchema.shape.types,
         take: z.number().int().min(1).max(BROWSE_LIMITS.pageMax).default(BROWSE_LIMITS.pageDefault),
       }),
     )
@@ -132,6 +147,7 @@ export const browseRouter = createTRPCRouter({
           ...(input.genreIds?.length
             ? { genres: { some: { genreId: { in: input.genreIds } } } }
             : {}),
+          ...(input.types?.length ? { type: { in: input.types } } : {}),
           ...(input.query
             ? {
                 OR: [

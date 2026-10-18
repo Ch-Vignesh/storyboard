@@ -10,10 +10,14 @@ import {
 } from '@/auth/tokens'
 import { env } from '@/env'
 import { logger } from '@/lib/logger'
+import { maskEmail } from '@/lib/mask-email'
 import { emailSchema, passwordSchema } from '@/lib/schemas/auth'
+import { safeNext } from '@/lib/safe-next'
+import { contactAddress } from '@/lib/site'
 import { afterResponse } from '@/server/after-response'
 import { getMailer } from '@/server/mail/mailer'
 import { accountExistsMail } from '@/server/mail/templates/account-exists'
+import { emailChangedNoticeMail } from '@/server/mail/templates/email-change'
 import { passwordChangedMail } from '@/server/mail/templates/password-changed'
 import { passwordResetMail } from '@/server/mail/templates/password-reset'
 import { verifyEmailMail } from '@/server/mail/templates/verify-email'
@@ -69,11 +73,22 @@ async function beforeAuthEmail(
   return (await inQuietCooldown(ctx.db, rhythm)) ? 'cooldown' : null
 }
 
-/** Issue a fresh verification link. The caller has already kept FR-1.4's rhythm. */
-async function issueVerification(db: Context['db'], user: { id: string; email: string }) {
+/**
+ * Issue a fresh verification link. The caller has already kept FR-1.4's
+ * rhythm. `next` (item 3.5) is where the person was going before they signed
+ * up; it rides on the link, already validated, and the onboarding steps carry
+ * it the rest of the way.
+ */
+async function issueVerification(
+  db: Context['db'],
+  user: { id: string; email: string },
+  next = '/',
+) {
   const { token, tokenHash, expiresAt } = createVerificationToken()
   await db.emailVerificationToken.create({ data: { userId: user.id, tokenHash, expiresAt } })
-  const url = `${env.NEXT_PUBLIC_APP_URL}/verify?token=${token}`
+  const url = `${env.NEXT_PUBLIC_APP_URL}/verify?token=${token}${
+    next === '/' ? '' : `&next=${encodeURIComponent(next)}`
+  }`
   // Resolved here, in the request: a half-configured provider throws, and that
   // has to surface as an error now rather than vanish after the response.
   const mailer = getMailer()
@@ -112,7 +127,11 @@ async function inQuietCooldown(db: Context['db'], cooldownKey: string): Promise<
  * read that. Before the note, they were told a link was on its way and nothing
  * came (2026-10-15, the first sign-up attempt on production).
  */
-async function noticeExistingAccount(user: { id: string; email: string }) {
+async function noticeExistingAccount(user: {
+  id: string
+  email: string
+  passwordHash?: string | null
+}) {
   const mailer = getMailer()
   // After the response, like the verification email, so neither path is the
   // slower one: the time an answer takes must not say which kind it was.
@@ -123,6 +142,8 @@ async function noticeExistingAccount(user: { id: string; email: string }) {
           to: user.email,
           signInUrl: `${env.NEXT_PUBLIC_APP_URL}/signin`,
           forgotUrl: `${env.NEXT_PUBLIC_APP_URL}/forgot-password`,
+          // Item 3.4 — a Google-only account is told the way in it has.
+          googleOnly: user.passwordHash === null,
         }),
       )
       logger.info(
@@ -273,7 +294,13 @@ const expiredResetLink = () =>
 export const authRouter = createTRPCRouter({
   /** FR-1.3 step one: email in, verification link out. Never reveals whether the address exists. */
   signUp: publicProcedure
-    .input(z.object({ email: emailSchema }))
+    .input(
+      z.object({
+        email: emailSchema,
+        /** Item 3.5 — where they were going; rides on the confirmation link. */
+        next: z.string().max(2_000).optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       // Keyed on the address rather than the person: there is no person yet.
       // An address is not an identity, but it is what the action is about, and
@@ -291,17 +318,20 @@ export const authRouter = createTRPCRouter({
         logger.info({ event: 'auth.signup.existing' }, 'sign-up attempted for a verified address')
         return { status: await noticeExistingAccount(existing) }
       }
-      // FR-13.4 — the rules are on the screen that produced this call, so
-      // this records that they were shown rather than claiming they were read.
+      // Item 2.3 — the button that produced this call said "By creating an
+      // account you agree to the terms and the privacy policy". The rules are
+      // read, and recorded as read, on the last onboarding step (FR-13.4).
       const user =
         existing ??
-        (await ctx.db.user.create({ data: { email: input.email, rulesSeenAt: new Date() } }))
-      return { status: await issueVerification(ctx.db, user) }
+        (await ctx.db.user.create({
+          data: { email: input.email, termsAcceptedAt: new Date() },
+        }))
+      return { status: await issueVerification(ctx.db, user, safeNext(input.next)) }
     }),
 
   /** FR-1.4: re-sendable with a 60-second cooldown. */
   resendVerification: publicProcedure
-    .input(z.object({ email: emailSchema }))
+    .input(z.object({ email: emailSchema, next: z.string().max(2_000).optional() }))
     .mutation(async ({ ctx, input }) => {
       // The one-minute rhythm is about not spamming one person; the hourly
       // limit is about not letting this endpoint send mail all day.
@@ -317,7 +347,7 @@ export const authRouter = createTRPCRouter({
       const user = await ctx.db.user.findUnique({ where: { email: input.email } })
       if (user?.emailVerifiedAt) return { status: await noticeExistingAccount(user) }
       if (!user) return { status: 'sent' as const }
-      return { status: await issueVerification(ctx.db, user) }
+      return { status: await issueVerification(ctx.db, user, safeNext(input.next)) }
     }),
 
   /**
@@ -327,8 +357,25 @@ export const authRouter = createTRPCRouter({
    */
   verifyEmail: publicProcedure.input(tokenInput).query(async ({ ctx, input }) => {
     const record = await findLiveToken(ctx.db, input.token)
-    if (!record) throw expiredLink()
-    return { email: record.user.email, hasPassword: record.user.passwordHash !== null }
+    if (record) {
+      // A live link on an account that already has a password cannot change it
+      // (decision 0036); the screen says the account is ready.
+      return record.user.passwordHash
+        ? { status: 'finished' as const, email: record.user.email }
+        : { status: 'live' as const, email: record.user.email }
+    }
+    // Not live: used, or expired. Which, and whether the account was finished,
+    // decides what the screen says (FR-1.4; phase 14, item 1.16). Setting a
+    // password uses up every link of the account, so the "ready" screen was
+    // unreachable, and an honest "send me a new one" needed the address.
+    const spent = await ctx.db.emailVerificationToken.findUnique({
+      where: { tokenHash: hashToken(input.token) },
+      select: { user: { select: { email: true, passwordHash: true, emailVerifiedAt: true } } },
+    })
+    if (!spent) throw expiredLink()
+    return spent.user.passwordHash && spent.user.emailVerifiedAt
+      ? { status: 'finished' as const, email: spent.user.email }
+      : { status: 'expired' as const, email: spent.user.email }
   }),
 
   /** FR-1.3 step two: consumes the link, marks the email verified and stores the first password. */
@@ -444,4 +491,86 @@ export const authRouter = createTRPCRouter({
       })
       return { email: record.user.email }
     }),
+
+  /** Item 3.2 — reads a change-of-address link without using it, so the page can render. */
+  checkEmailChange: publicProcedure.input(tokenInput).query(async ({ ctx, input }) => {
+    const record = await findLiveEmailChange(ctx.db, input.token)
+    if (!record) throw expiredLink()
+    return { newEmail: record.newEmail }
+  }),
+
+  /**
+   * Item 3.2, step two: the new address becomes the account's, once per link,
+   * from the new address's own mailbox and signed in or not. In one
+   * transaction the link is claimed, the address is checked to be still free,
+   * and the account takes it, confirmed; every session ends (item 3.3), since
+   * the address is the account's key. The old address is told afterwards,
+   * with the new one shown in part and where to write if it was not them.
+   */
+  confirmEmailChange: publicProcedure.input(tokenInput).mutation(async ({ ctx, input }) => {
+    const record = await findLiveEmailChange(ctx.db, input.token)
+    if (!record) throw expiredLink()
+    const now = new Date()
+    const oldEmail = record.user.email
+
+    const outcome = await ctx.db.$transaction(async (tx) => {
+      const claimed = await tx.emailChangeToken.updateMany({
+        where: { id: record.id, consumedAt: null, expiresAt: { gt: now } },
+        data: { consumedAt: now },
+      })
+      if (claimed.count !== 1) return 'expired' as const
+      const taken = await tx.user.findUnique({
+        where: { email: record.newEmail },
+        select: { id: true },
+      })
+      if (taken && taken.id !== record.user.id) return 'taken' as const
+      await tx.emailChangeToken.updateMany({
+        where: { userId: record.user.id, consumedAt: null },
+        data: { consumedAt: now },
+      })
+      await tx.user.update({
+        where: { id: record.user.id },
+        data: { email: record.newEmail, emailVerifiedAt: now, sessionsEndedAt: now },
+      })
+      return 'changed' as const
+    })
+    if (outcome === 'expired') throw expiredLink()
+    if (outcome === 'taken') {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'That address is now used by another account.',
+      })
+    }
+
+    logger.info(
+      { event: 'settings.email.changed', userId: record.user.id },
+      'email address changed; every session is refused',
+    )
+    const mailer = getMailer()
+    await afterResponse(async () => {
+      try {
+        await mailer.send(
+          emailChangedNoticeMail({
+            to: oldEmail,
+            newEmailMasked: maskEmail(record.newEmail),
+            supportAddress: contactAddress(),
+          }),
+        )
+      } catch (error) {
+        logger.error(
+          { event: 'settings.email.notice_failed', userId: record.user.id, error: String(error) },
+          'address-changed notice not sent',
+        )
+      }
+    })
+    return { email: record.newEmail }
+  }),
 })
+
+/** Item 3.2 — a change-of-address link that is unused and in date. */
+function findLiveEmailChange(db: Context['db'], token: string) {
+  return db.emailChangeToken.findFirst({
+    where: { tokenHash: hashToken(token), consumedAt: null, expiresAt: { gt: new Date() } },
+    include: { user: { select: { id: true, email: true } } },
+  })
+}

@@ -1,30 +1,65 @@
 'use client'
 
 import { Button } from '@storyboard/ui/components/button'
-import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import Link from '@/components/link'
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseInfiniteQuery,
+  useSuspenseQuery,
+} from '@tanstack/react-query'
+import { useRouter } from 'next/navigation'
+import type { MouseEvent } from 'react'
 
+import Link from '@/components/link'
 import { NOTIFICATIONS } from '@/lib/schemas/notifications'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
-export function NotificationList() {
+/**
+ * FR-12.1 — the rows, newest first, a page at a time (phase 14, item 6.9).
+ * Opening a row marks it read and then goes where it leads; "Show older"
+ * fetches the next page by its cursor; the unread count is the server's, over
+ * every row and not only the ones on the screen; and each row says who did
+ * what, in words worked out on the server against what this person may read.
+ * Dates are in the zone the account keeps (item 1.18).
+ */
+export function NotificationList({ timeZone }: { timeZone: string }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
+  const router = useRouter()
 
-  const { data: notifications } = useSuspenseQuery(
-    trpc.notification.list.queryOptions({ take: 50 }),
+  const list = useSuspenseInfiniteQuery(
+    trpc.notification.list.infiniteQueryOptions(
+      {},
+      { getNextPageParam: (page) => page.nextCursor },
+    ),
   )
+  const { data: unread } = useSuspenseQuery(trpc.notification.unreadCount.queryOptions())
+  const notifications = list.data.pages.flatMap((page) => page.items)
 
+  // The list and the count here, and the header's count, which the server reads.
+  const settle = () => {
+    void queryClient.invalidateQueries({ queryKey: trpc.notification.list.queryKey() })
+    void queryClient.invalidateQueries({ queryKey: trpc.notification.unreadCount.queryKey() })
+    router.refresh()
+  }
   const markAllRead = useMutation(
-    trpc.notification.markAllRead.mutationOptions({
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: trpc.notification.list.queryKey() })
-        await queryClient.invalidateQueries({ queryKey: trpc.notification.unreadCount.queryKey() })
-      },
-    }),
+    trpc.notification.markAllRead.mutationOptions({ onSuccess: settle }),
   )
+  const markRead = useMutation(trpc.notification.markRead.mutationOptions({ onSuccess: settle }))
 
-  const unread = notifications.filter((notification) => notification.readAt === null).length
+  /** Read first, then there. A click meant for a new tab is left to the browser. */
+  function open(event: MouseEvent<HTMLAnchorElement>, id: string, href: string, isUnread: boolean) {
+    if (!isUnread) return
+    const plain =
+      event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+    if (!plain) {
+      markRead.mutate({ ids: [id] })
+      return
+    }
+    event.preventDefault()
+    markRead.mutate({ ids: [id] }, { onSettled: () => router.push(href) })
+  }
 
   if (notifications.length === 0) {
     return (
@@ -34,6 +69,8 @@ export function NotificationList() {
       </p>
     )
   }
+
+  const failure = markAllRead.error ?? markRead.error
 
   return (
     <div className="mt-6">
@@ -48,9 +85,9 @@ export function NotificationList() {
         </div>
       ) : null}
       {/* It failed without a word until the phase 12 audit. */}
-      {markAllRead.error ? (
+      {failure ? (
         <p role="alert" className="mt-2 text-[13px] text-crimson">
-          {markAllRead.error.message}
+          {failure.message}
         </p>
       ) : null}
 
@@ -59,7 +96,6 @@ export function NotificationList() {
           const definition = NOTIFICATIONS[notification.type]
           // Resolved on the server, against what this person may read now.
           const href = notification.path
-          const title = notification.title
           const isUnread = notification.readAt === null
 
           const body = (
@@ -73,24 +109,21 @@ export function NotificationList() {
                   <span aria-hidden className="mt-1.5 size-1.5 shrink-0" />
                 )}
                 <span className={isUnread ? 'font-medium' : undefined}>
-                  {definition?.label ?? notification.type}
+                  {definition.label}
                   {isUnread ? <span className="sr-only"> (unread)</span> : null}
                 </span>
               </p>
               <p className="mt-1 pl-3.5 text-[13px] leading-relaxed text-ink-soft">
-                {definition?.sentence}
+                {notification.sentence}
               </p>
-              {title ? (
-                <p className="mt-1 pl-3.5 font-manuscript text-[15px] text-ink">{title}</p>
+              {notification.title ? (
+                <p className="mt-1 pl-3.5 font-manuscript text-[15px] text-ink">
+                  {notification.title}
+                </p>
               ) : null}
               <p className="mt-1 pl-3.5 text-[12px] text-ink-faint">
                 <time dateTime={notification.createdAt.toISOString()}>
-                  {notification.createdAt.toLocaleString('en-GB', {
-                    day: 'numeric',
-                    month: 'long',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {formatInZone(notification.createdAt, 'dateTime', timeZone)}
                 </time>
               </p>
             </>
@@ -99,16 +132,44 @@ export function NotificationList() {
           return (
             <li key={notification.id} className="py-4">
               {href ? (
-                <Link href={href} className="-mx-3 block rounded-control px-3 hover:bg-paper-sunk">
+                <Link
+                  href={href}
+                  onClick={(event) => open(event, notification.id, href, isUnread)}
+                  className="-mx-3 block rounded-control px-3 hover:bg-paper-sunk"
+                >
                   {body}
                 </Link>
               ) : (
-                body
+                <div className="flex items-start justify-between gap-4">
+                  <div>{body}</div>
+                  {isUnread ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={markRead.isPending}
+                      onClick={() => markRead.mutate({ ids: [notification.id] })}
+                    >
+                      Mark as read
+                    </Button>
+                  ) : null}
+                </div>
               )}
             </li>
           )
         })}
       </ul>
+
+      {list.hasNextPage ? (
+        <div className="mt-6">
+          <Button
+            size="sm"
+            disabled={list.isFetchingNextPage}
+            onClick={() => void list.fetchNextPage()}
+          >
+            {list.isFetchingNextPage ? 'Reading' : 'Show older'}
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }

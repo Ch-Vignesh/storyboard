@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 
 import {
+  EMAIL_CHANGE_TTL_MINUTES,
   PASSWORD_RESET_TTL_MINUTES,
   VERIFICATION_RESEND_COOLDOWN_SECONDS,
   VERIFICATION_TOKEN_TTL_HOURS,
@@ -36,5 +37,15 @@ export function createPasswordResetToken(now = new Date()) {
     token,
     tokenHash: hashToken(token),
     expiresAt: new Date(now.getTime() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000),
+  }
+}
+
+/** Item 3.2: a link that confirms a new email address, an hour long. */
+export function createEmailChangeToken(now = new Date()) {
+  const token = generateToken()
+  return {
+    token,
+    tokenHash: hashToken(token),
+    expiresAt: new Date(now.getTime() + EMAIL_CHANGE_TTL_MINUTES * 60 * 1000),
   }
 }

@@ -2,32 +2,42 @@ import 'server-only'
 
 import type { Prisma, PrismaClient } from '@storyboard/db'
 
+import { DEFAULT_TIME_ZONE, dayKeyInZone } from '@/lib/time-zone'
+
 /**
  * The contribution calendar's data (FR-9.3).
  *
- * `ActivityDay` is one row per user per day with a count. It is written on the
- * events that represent work — a version saved, a suggestion sent, an idea
- * posted, a decision made — and read as a 365-day grid on the profile.
+ * `ActivityDay` is one row per user per day with a count. Since phase 14's
+ * item 6.13 it counts help given on other people's stories and nothing else
+ * (D-6, decision 0049): a suggestion sent, or an idea posted, on a story the
+ * sender does not write. Not a save of one's own, not a request opened, not a
+ * decision made: sending is the work, and acceptance is the author's. It
+ * counted all of those until then; the migration that came with the item
+ * rebuilt every row from the suggestions and ideas themselves.
  *
  * Deliberately a counter rather than a query over the source tables: the grid
  * asks "how much did this person do on each of the last 365 days", and
- * answering that from four tables with different shapes, every time a profile
+ * answering that from two tables with different shapes, every time a profile
  * loads, is the kind of query that is fine at ten users and a problem at ten
  * thousand.
  *
+ * A day is the sender's own (item 1.18): the zone the browser sent with the
+ * call decides which date a late evening falls on. The days from before the
+ * rebuild are UTC days, and the decision record says so.
+ *
  * Called *after* the transaction that did the work, never inside it. A missing
- * square is a cosmetic loss; a failed acceptance is not.
+ * square is a cosmetic loss; a failed send is not.
  */
 
 type Db = PrismaClient | Prisma.TransactionClient
 
-/** Midnight UTC for the day an instant falls in. The column is a `date`. */
-function dayOf(when: Date): Date {
-  return new Date(Date.UTC(when.getUTCFullYear(), when.getUTCMonth(), when.getUTCDate()))
+/** The row's `date` for a day key: midnight UTC of it, which is how a `date` column reads back. */
+function dateOf(dayKey: string): Date {
+  return new Date(`${dayKey}T00:00:00Z`)
 }
 
 /**
- * Record one unit of work for a user today.
+ * Record one piece of help given by a person, on the day it is where they are.
  *
  * Never throws: it is called from paths whose real work has already committed,
  * and a calendar square is not worth failing a request over.
@@ -36,8 +46,9 @@ export async function recordActivity(
   db: Db,
   userId: string,
   when: Date = new Date(),
+  timeZone: string = DEFAULT_TIME_ZONE,
 ): Promise<void> {
-  const day = dayOf(when)
+  const day = dateOf(dayKeyInZone(when, timeZone))
   try {
     await db.activityDay.upsert({
       where: { userId_day: { userId, day } },
@@ -49,19 +60,11 @@ export async function recordActivity(
   }
 }
 
-/** Several people at once, for an event that credits more than one. */
-export async function recordActivityFor(
-  db: Db,
-  userIds: readonly string[],
-  when: Date = new Date(),
-): Promise<void> {
-  await Promise.all([...new Set(userIds)].map((userId) => recordActivity(db, userId, when)))
-}
-
 export type CalendarDay = { day: string; count: number }
 
 /**
- * The last 365 days, every day present, oldest first.
+ * The last 365 days, every day present, oldest first, ending on the day it is
+ * now where the reader is.
  *
  * Days with no activity are returned as zeroes rather than omitted, because the
  * grid has to render a square for every day and filling the gaps in the
@@ -71,8 +74,9 @@ export async function activityCalendar(
   db: Db,
   userId: string,
   today: Date = new Date(),
+  timeZone: string = DEFAULT_TIME_ZONE,
 ): Promise<CalendarDay[]> {
-  const end = dayOf(today)
+  const end = dateOf(dayKeyInZone(today, timeZone))
   const start = new Date(end)
   start.setUTCDate(start.getUTCDate() - 364)
 

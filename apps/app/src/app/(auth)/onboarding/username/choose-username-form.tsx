@@ -8,11 +8,20 @@ import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { useDeferredValue, useState } from 'react'
 
-import { USERNAME_PATTERN, usernameSchema } from '@/lib/schemas/auth'
+import { withNext } from '@/lib/safe-next'
+import { usernameSchema } from '@/lib/schemas/auth'
+import { USERNAME_CHARS } from '@/lib/schemas/constants'
 import { USERNAME_PERMANENCE_WARNING } from '@/lib/schemas/onboarding'
 import { useTRPC } from '@/trpc/client'
 
-export function ChooseUsernameForm() {
+/**
+ * FR-1.3 step 3. Item 3.7: a refused name says why, under the field, instead
+ * of only greying out the button; the browser's own pattern check is gone
+ * (its hyphen was invalid in `v` mode, so it never ran); and password
+ * managers are not invited to fill the address in, which `autoComplete=
+ * "username"` did.
+ */
+export function ChooseUsernameForm({ next = '/' }: { next?: string }) {
   const trpc = useTRPC()
   const router = useRouter()
   const { update } = useSession()
@@ -21,7 +30,10 @@ export function ChooseUsernameForm() {
 
   // Deferred so a fast typist does not fire a query per keystroke.
   const candidate = useDeferredValue(username.trim().toLowerCase())
-  const wellFormed = usernameSchema.safeParse(candidate).success
+  const parsed = usernameSchema.safeParse(candidate)
+  const wellFormed = parsed.success
+  // The first thing wrong with it, in the schema's words; nothing while empty.
+  const problem = candidate && !parsed.success ? (parsed.error.issues[0]?.message ?? null) : null
 
   const availability = useQuery({
     ...trpc.user.usernameAvailable.queryOptions({ username: candidate }),
@@ -34,7 +46,7 @@ export function ChooseUsernameForm() {
       onSuccess: async (result) => {
         // Refresh the token so the proxy stops sending us back here.
         await update({ username: result.username })
-        router.replace('/onboarding/genres')
+        router.replace(withNext('/onboarding/genres', next))
       },
     }),
   )
@@ -59,32 +71,30 @@ export function ChooseUsernameForm() {
           <Input
             id="username"
             name="username"
-            autoComplete="username"
+            autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
-            pattern={USERNAME_PATTERN.source}
-            minLength={3}
-            maxLength={30}
+            maxLength={USERNAME_CHARS.max}
             required
             value={username}
             onChange={(event) => setUsername(event.target.value)}
-            aria-invalid={taken || chooseUsername.isError || undefined}
-            aria-describedby="username-hint"
+            aria-invalid={Boolean(problem) || taken || chooseUsername.isError || undefined}
+            aria-describedby="username-hint username-status"
           />
         </div>
         <p id="username-hint" className="text-[12.5px] text-ink-faint">
-          Lowercase letters, numbers and hyphens. 3 to 30 characters.
+          Lowercase letters, numbers and hyphens. {USERNAME_CHARS.min} to {USERNAME_CHARS.max}{' '}
+          characters.
         </p>
-        {taken ? (
-          <p role="status" className="text-[13px] text-ochre">
-            @{candidate} is taken.
-          </p>
-        ) : null}
-        {wellFormed && availability.data?.available === true ? (
-          <p role="status" className="text-[13px] text-moss">
-            @{candidate} is available.
-          </p>
-        ) : null}
+        <p id="username-status" role="status" aria-live="polite" className="text-[13px]">
+          {problem ? (
+            <span className="text-ochre">{problem}</span>
+          ) : taken ? (
+            <span className="text-ochre">That name is taken.</span>
+          ) : wellFormed && availability.data?.available === true ? (
+            <span className="text-moss">@{candidate} is available.</span>
+          ) : null}
+        </p>
       </div>
 
       {/* FR-1.3: warn at the point of choosing, and make the warning cost a click. */}

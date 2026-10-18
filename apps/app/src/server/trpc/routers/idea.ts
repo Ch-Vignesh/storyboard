@@ -2,14 +2,16 @@ import { Prisma } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
-import { loadStoryboard } from '@/lib/authz/guard'
+import { assertNotBlocked, loadStoryboard } from '@/lib/authz/guard'
 import { recordActivity } from '@/server/activity'
+import { timeZoneFromHeaders } from '@/lib/time-zone'
 import { afterCommit } from '@/server/after-commit'
 import { notifyAuthors } from '@/server/notify-authors'
 import { logger } from '@/lib/logger'
-import { DAILY_LIMITS } from '@/lib/schemas/constants'
+import { DAILY_LIMITS, IDEA_EDIT_MINUTES } from '@/lib/schemas/constants'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
-import { ideaBodySchema } from '@/lib/schemas/help'
+import { ideaBodySchema, ideaChangeCutoff, ideaReplySchema, ideaTakenNow } from '@/lib/schemas/help'
+import { AUTHORS_SELECT, authorsOf, isIdeaAnswer } from '@/server/answers'
 
 import { activeProcedure, actorFrom, createTRPCRouter } from '../init'
 
@@ -23,12 +25,25 @@ const log = logger.child({ router: 'idea' })
 export const ideaRouter = createTRPCRouter({
   post: activeProcedure
     .input(
-      z.object({
-        requestId: z.string().min(1),
-        body: ideaBodySchema,
-        /** One level of threading: a reply to an idea, never a reply to a reply. */
-        parentId: z.string().min(1).optional(),
-      }),
+      z
+        .object({
+          requestId: z.string().min(1),
+          body: z.string().trim(),
+          /** One level of threading: a reply to an idea, never a reply to a reply. */
+          parentId: z.string().min(1).optional(),
+        })
+        // Item 6.8 (D-7) — an idea is 20 to 400 words; a reply, 1 to 400.
+        .superRefine((value, issues) => {
+          const schema = value.parentId ? ideaReplySchema : ideaBodySchema
+          const result = schema.safeParse(value.body)
+          if (!result.success) {
+            issues.addIssue({
+              code: 'custom',
+              message: result.error.issues[0]?.message ?? 'Say a little more.',
+              path: ['body'],
+            })
+          }
+        }),
     )
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
@@ -40,34 +55,49 @@ export const ideaRouter = createTRPCRouter({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That request does not exist.' })
       }
 
-      const { permissions } = await loadStoryboard(ctx.db, actor, { id: request.storyboardId })
+      const { permissions, resource } = await loadStoryboard(ctx.db, actor, {
+        id: request.storyboardId,
+      })
       if (!permissions.canPostIdea) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot post here.' })
       }
-      if (request.state === 'CLOSED') {
+      // Decision 0046 (item 2.9) — not on a story whose author has blocked you.
+      await assertNotBlocked(ctx.db, actor, resource)
+      // FR-5.2 (phase 14, item 1.8) — ideas answer a "help me think" request.
+      // A request for prose took them too, and nobody was told.
+      if (request.kind !== 'UNBLOCK') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'This request is closed.',
+          message: 'This request is asking for prose, not ideas. Write a suggestion instead.',
         })
+      }
+      // FR-5.9 with FR-6.9 — and only while it takes them. It refused closed
+      // requests alone, so a resolved one went on taking new openings.
+      const taken = ideaTakenNow(request.state, input.parentId !== undefined)
+      if (!taken.ok) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: taken.reason })
       }
 
       const userId = ctx.session.user.id
 
+      // The idea a reply answers, and who wrote it (item 1.9).
+      let parent: { id: string; authorId: string } | null = null
       if (input.parentId) {
-        const parent = await ctx.db.idea.findUnique({
+        const found = await ctx.db.idea.findUnique({
           where: { id: input.parentId },
-          select: { id: true, requestId: true, parentId: true },
+          select: { id: true, requestId: true, parentId: true, authorId: true },
         })
-        if (parent?.requestId !== request.id) {
+        if (found?.requestId !== request.id) {
           throw new TRPCError({ code: 'NOT_FOUND', message: 'That idea does not exist.' })
         }
         // FR-6.9 — one level deep, so a thread cannot become a forum.
-        if (parent.parentId) {
+        if (found.parentId) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message: 'Replies only go one level deep. Reply to the idea itself.',
           })
         }
+        parent = { id: found.id, authorId: found.authorId }
       }
 
       // Three per request — which is a cap on a conversation rather than a
@@ -105,18 +135,47 @@ export const ideaRouter = createTRPCRouter({
         select: { id: true, body: true, createdAt: true, parentId: true },
       })
 
+      // FR-5.9 (phase 14, item 1.12) — the first idea from outside the story
+      // answers the request, as the first suggestion does. Not a reply, and
+      // not the author thinking aloud under their own request.
+      const fromOutside = permissions.role !== 'owner' && permissions.role !== 'coauthor'
+      if (!input.parentId && fromOutside) {
+        await ctx.db.contributionRequest.updateMany({
+          where: { id: request.id, state: 'OPEN' },
+          data: { state: 'ANSWERED' },
+        })
+      }
+
       // FR-12.2 — "an idea arrived", hourly (FR-12.3). Never sent until the
-      // 2026-10-16 spec review.
-      await afterCommit('idea.post.notify', () =>
-        notifyAuthors(
+      // 2026-10-16 spec review. A reply also tells the writer of the idea it
+      // answers, unless that is who replied; replies told only the authors
+      // until phase 14 (item 1.9), so a helper never learned the author had
+      // answered them. An author who is that writer hears once, as the writer.
+      const repliedTo = parent && parent.authorId !== userId ? parent : null
+      await afterCommit('idea.post.notify', async () => {
+        if (repliedTo) {
+          await ctx.db.notification.create({
+            data: {
+              userId: repliedTo.authorId,
+              type: 'IDEA_REPLY',
+              payload: { requestId: request.id, ideaId: repliedTo.id, replyId: idea.id },
+            },
+          })
+        }
+        await notifyAuthors(
           ctx.db,
           request.storyboardId,
           'IDEA_RECEIVED',
           { requestId: request.id, ideaId: idea.id },
           userId,
-        ),
-      )
-      await recordActivity(ctx.db, userId)
+          repliedTo ? [repliedTo.authorId] : [],
+        )
+      })
+      // FR-9.3 with D-6 (item 6.13) — an idea from outside the story marks the
+      // calendar, on the day it is where its writer is. Not a reply.
+      if (!input.parentId && fromOutside) {
+        await recordActivity(ctx.db, userId, new Date(), timeZoneFromHeaders(ctx.headers))
+      }
 
       log.info(
         { event: 'idea.post', ideaId: idea.id, requestId: request.id, userId },
@@ -132,6 +191,79 @@ export const ideaRouter = createTRPCRouter({
    * The partial unique index in the migration is the real guard; this check
    * turns the constraint into a sentence.
    */
+  /**
+   * Phase 14, item 6.8 (FR-6.9) — an idea changed by its writer, within
+   * `IDEA_EDIT_MINUTES` of posting it and not once it was marked as having
+   * helped: by then somebody has acted on the words as they were. One
+   * conditional write, so the window and the mark are checked as it is made.
+   */
+  edit: activeProcedure
+    .input(z.object({ ideaId: z.string().min(1), body: z.string().trim() }))
+    .mutation(async ({ ctx, input }) => {
+      const idea = await ctx.db.idea.findFirst({
+        where: { id: input.ideaId, authorId: ctx.session.user.id },
+        select: { parentId: true, markedHelpful: true, deletedAt: true, createdAt: true },
+      })
+      if (!idea) throw new TRPCError({ code: 'NOT_FOUND', message: 'That idea is not yours.' })
+      const schema = idea.parentId ? ideaReplySchema : ideaBodySchema
+      const body = schema.safeParse(input.body)
+      if (!body.success) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: body.error.issues[0]?.message ?? 'Say a little more.',
+        })
+      }
+      const { count } = await ctx.db.idea.updateMany({
+        where: {
+          id: input.ideaId,
+          authorId: ctx.session.user.id,
+          markedHelpful: false,
+          deletedAt: null,
+          createdAt: { gt: ideaChangeCutoff() },
+        },
+        data: { body: body.data, editedAt: new Date() },
+      })
+      if (count === 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: idea.markedHelpful
+            ? 'This idea was marked as the one that helped, so it stays as it was.'
+            : idea.deletedAt
+              ? 'This idea was removed.'
+              : `An idea can be changed for ${String(IDEA_EDIT_MINUTES)} minutes after it is posted.`,
+        })
+      }
+      log.info({ event: 'idea.edit', ideaId: input.ideaId }, 'idea changed')
+      return { ok: true }
+    }),
+
+  /**
+   * Item 6.8 — an idea removed by its writer: it reads "Removed by its
+   * writer", and its replies stay, because they are other people's. Not one
+   * marked as having helped: that is part of the request's record.
+   */
+  remove: activeProcedure
+    .input(z.object({ ideaId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const { count } = await ctx.db.idea.updateMany({
+        where: {
+          id: input.ideaId,
+          authorId: ctx.session.user.id,
+          markedHelpful: false,
+          deletedAt: null,
+        },
+        data: { deletedAt: new Date() },
+      })
+      if (count === 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That idea is not yours to remove, or it was the one that helped.',
+        })
+      }
+      log.info({ event: 'idea.remove', ideaId: input.ideaId }, 'idea removed by its writer')
+      return { ok: true }
+    }),
+
   markHelpful: activeProcedure
     .input(z.object({ ideaId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
@@ -141,9 +273,16 @@ export const ideaRouter = createTRPCRouter({
         select: {
           id: true,
           authorId: true,
+          parentId: true,
           markedHelpful: true,
+          hiddenAt: true,
           request: {
-            select: { id: true, storyboardId: true, section: { select: { lineageId: true } } },
+            select: {
+              id: true,
+              storyboardId: true,
+              section: { select: { lineageId: true } },
+              storyboard: { select: AUTHORS_SELECT },
+            },
           },
         },
       })
@@ -151,6 +290,22 @@ export const ideaRouter = createTRPCRouter({
 
       await loadStoryboard(ctx.db, actor, { id: idea.request.storyboardId }, 'suggestion:decide')
       if (idea.markedHelpful) return { ideaId: idea.id, markedHelpful: true }
+      // Hidden after a report (item 2.7, decision 0045): not an answer.
+      if (idea.hiddenAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This idea was removed after a report, so it cannot be the one that helped.',
+        })
+      }
+      // FR-6.9, FR-9.1 (item 1.7; decision 0041) — a credit is for help from
+      // outside the story: not a reply, and not an author's own idea. Both
+      // were taken, and credited, until phase 14.
+      if (!isIdeaAnswer(idea, authorsOf(idea.request.storyboard))) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Only an idea from outside the story can be the one that helped.',
+        })
+      }
 
       let marked = false
       try {
@@ -173,6 +328,12 @@ export const ideaRouter = createTRPCRouter({
               isLive: true,
             },
           })
+          // FR-5.9 — the request is resolved by the idea that helped (phase
+          // 14, item 1.12). A closed one stays closed; the credit still stands.
+          await tx.contributionRequest.updateMany({
+            where: { id: idea.request.id, state: { in: ['OPEN', 'ANSWERED'] } },
+            data: { state: 'RESOLVED', resolvedAt: new Date() },
+          })
           return true
         })
       } catch (error) {
@@ -194,7 +355,8 @@ export const ideaRouter = createTRPCRouter({
           data: {
             userId: idea.authorId,
             type: 'IDEA_MARKED_HELPFUL',
-            payload: { ideaId: idea.id, requestId: idea.request.id },
+            // Item 6.9 — who marked it, for the row to name.
+            payload: { ideaId: idea.id, requestId: idea.request.id, byId: ctx.session.user.id },
           },
         }),
       )

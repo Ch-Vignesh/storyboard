@@ -1,49 +1,30 @@
 import type { Metadata } from 'next'
-import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
-import { auth } from '@/auth'
-import { isActiveAdmin } from '@/server/trpc/init'
-import { prisma } from '@storyboard/db'
+import { canAdmin } from '@/lib/authz/admin'
 
-import { ReportQueue } from './report-queue'
+import { currentAdminActor } from './current-actor'
+import { OverviewPanel } from './overview-panel'
 
 export const dynamic = 'force-dynamic'
-export const metadata: Metadata = { title: 'Moderation', robots: { index: false, follow: false } }
+export const metadata: Metadata = { title: 'Overview', robots: { index: false, follow: false } }
 
 /**
- * FR-13.7 and FR-15.5 — the moderation screen.
- *
- * One screen, because moderation in v1 is the owner's own time and a tool
- * spread across five pages is a tool nobody finishes a queue in. A non-admin
- * gets 404 rather than 403: that an admin screen exists is not something to
- * confirm to somebody probing for it.
+ * FR-15.5, decision 0043 (items 2b.4 and 2b.7) — the panel opens on the
+ * numbers. A 404 to anyone without `overview.read`, as every admin screen is
+ * to anyone without its capability: that an admin screen exists is not
+ * something to confirm to somebody probing for it.
  */
 export default async function AdminPage() {
-  const session = await auth()
-  if (!session?.user) notFound()
-
-  const account = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { isAdmin: true, status: true, deletionRequestedAt: true },
-  })
-  if (!isActiveAdmin(account)) notFound()
+  if (!canAdmin(await currentAdminActor(), 'overview.read')) notFound()
 
   return (
-    <main id="main" className="mx-auto max-w-4xl px-6 py-12">
-      <nav className="mb-6 text-[12.5px] text-ink-faint">
-        <Link href="/" className="hover:text-ink hover:underline">
-          Your dashboard
-        </Link>
-      </nav>
-
-      <h1 className="font-manuscript text-[28px] leading-tight font-medium text-ink">Moderation</h1>
+    <main id="main" tabIndex={-1}>
+      <h1 className="font-manuscript text-[28px] leading-tight font-medium text-ink">Overview</h1>
       <p className="mt-3 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
-        Reports, in the order they arrived. Upholding one counts towards the ten that suspend an
-        account; dismissing one does not count against anybody. Both are reversible.
+        How the place is doing, in numbers. The screens down the side are the ones you can open.
       </p>
-
-      <ReportQueue />
+      <OverviewPanel />
     </main>
   )
 }

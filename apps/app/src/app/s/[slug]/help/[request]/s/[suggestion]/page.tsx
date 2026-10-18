@@ -4,7 +4,10 @@ import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
 import { PASS_CHIPS, suggestionStateLabel, waitsOnClosedRequest } from '@/lib/schemas/help'
+import { CopyLink } from '@/components/copy-link'
 import { ReportButton } from '@/components/report-button'
+import { readTimeZone } from '@/lib/dates'
+import { formatInZone } from '@/lib/time-zone'
 import { caller } from '@/trpc/server'
 
 import { DecisionPanel } from './decision-panel'
@@ -16,6 +19,7 @@ export const metadata: Metadata = { title: 'Comparison' }
 
 /** Screen 10 — side by side, accept or pass at the foot (FR-7, FR-6.10). */
 export default async function SuggestionPage({ params }: Params) {
+  const timeZone = await readTimeZone()
   const { slug, request: requestPublicId, suggestion: suggestionPublicId } = await params
 
   let data
@@ -26,17 +30,18 @@ export default async function SuggestionPage({ params }: Params) {
     throw error
   }
 
-  const comparison = await caller.compare.suggestionAgainstHead({
-    suggestionId: data.suggestion.id,
-  })
-
   const { suggestion, permissions } = data
+  // Hidden after a report (item 2.7, decision 0045): no comparison for anyone
+  // but the writer and a moderator; the page says what happened instead.
+  const comparison = suggestion.redacted
+    ? null
+    : await caller.compare.suggestionAgainstHead({ suggestionId: suggestion.id })
   const name =
     suggestion.contributor.displayName ?? suggestion.contributor.username ?? 'a contributor'
   const closed = waitsOnClosedRequest(suggestion.state, suggestion.request.state)
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-6 py-10">
       <nav className="mb-6 text-[12.5px] text-ink-faint">
         <Link href={`/s/${slug}`} className="hover:text-ink hover:underline">
           {suggestion.request.storyboard.title}
@@ -58,11 +63,15 @@ export default async function SuggestionPage({ params }: Params) {
           {suggestion.wordCount} words ·{' '}
           {suggestionStateLabel(suggestion.state, suggestion.request.state)}
           {suggestion.submittedAt
-            ? ` · sent ${suggestion.submittedAt.toLocaleDateString('en-GB', {
-                day: 'numeric',
-                month: 'long',
-              })}`
+            ? ` · sent ${formatInZone(suggestion.submittedAt, 'dayMonth', timeZone)}`
             : null}
+          {/* D-12 (item 6.7) — changed after it was sent, and when. */}
+          {suggestion.editedAt
+            ? ` · edited ${formatInZone(suggestion.editedAt, 'dateTime', timeZone)}`
+            : null}
+          {' · '}
+          {/* Item 6.11 — its own address, which is permanent (FR-9.4). */}
+          <CopyLink path={`/s/${slug}/help/${requestPublicId}/s/${suggestionPublicId}`} />
         </p>
 
         {/* FR-6.2 — the note goes above the prose, where it is read first. */}
@@ -80,8 +89,15 @@ export default async function SuggestionPage({ params }: Params) {
           </p>
         ) : null}
 
+        {suggestion.hidden && !suggestion.redacted ? (
+          <p className="mt-4 border-l-2 border-crimson bg-paper-sunk px-4 py-3 text-[13.5px] leading-relaxed text-ink">
+            Hidden after a report: it reads as removed to everyone but its writer and the
+            moderators, and it cannot be accepted. Nothing has been deleted.
+          </p>
+        ) : null}
+
         {/* FR-6.7 — written against text that has since moved. */}
-        {comparison.isStale && !closed ? (
+        {comparison?.isStale && !closed ? (
           <p className="mt-4 border-l-2 border-ochre bg-ochre-wash px-4 py-3 text-[13.5px] leading-relaxed text-ink">
             {suggestion.request.kind === 'CONTINUE'
               ? 'This was written to follow an earlier version of the section, which has changed since. Accepting it puts it after that version’s text, in place of what has been added since: the comparison below shows exactly what changes.'
@@ -97,17 +113,23 @@ export default async function SuggestionPage({ params }: Params) {
         ) : null}
       </header>
 
-      <DecisionPanel
-        suggestionId={suggestion.id}
-        state={suggestion.state}
-        comparison={comparison}
-        contributorName={name}
-        // A closed request takes no decision until it is opened again.
-        canDecide={permissions.canOpenRequest && !closed}
-        continues={suggestion.request.kind === 'CONTINUE'}
-        headRevisionId={comparison.headRevisionId}
-        backHref={`/s/${slug}/help/${requestPublicId}`}
-      />
+      {comparison ? (
+        <DecisionPanel
+          suggestionId={suggestion.id}
+          state={suggestion.state}
+          comparison={comparison}
+          contributorName={name}
+          // A closed request takes no decision until it is opened again.
+          canDecide={permissions.canOpenRequest && !closed}
+          continues={suggestion.request.kind === 'CONTINUE'}
+          headRevisionId={comparison.headRevisionId}
+          backHref={`/s/${slug}/help/${requestPublicId}`}
+        />
+      ) : (
+        <p className="mt-6 max-w-measure font-manuscript text-[17px] leading-relaxed text-ink-faint italic">
+          {suggestion.contentText}
+        </p>
+      )}
 
       {/* FR-13.5 — the person deciding on a suggestion is the person best
           placed to say it should not have been sent. */}

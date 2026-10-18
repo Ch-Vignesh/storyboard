@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { SessionProvider } from 'next-auth/react'
 
+import { TimeZoneCookie } from '@/components/time-zone-cookie'
+import { SiteFooter } from '@/components/site-footer'
 import { TRPCReactProvider } from '@/trpc/client'
 
 // The typefaces, from this repository rather than fetched from Google on every
@@ -43,11 +45,22 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
+        {/* NFR-4 (item 4.8) — one skip link, on every page, to the one `main`
+            every page has. The header and a contents rail are a lot to tab past. */}
+        <a href="#main" className="skip-link">
+          Skip to the main content
+        </a>
         {/* SessionProvider so onboarding can refresh the token after steps 3
             and 4 (FR-1.3); server components still read the session directly. */}
         <SessionProvider>
-          <TRPCReactProvider>{children}</TRPCReactProvider>
+          <TRPCReactProvider>
+            {children}
+            {/* Item 2.6 — on every page but the editor. */}
+            <SiteFooter />
+          </TRPCReactProvider>
         </SessionProvider>
+        {/* Item 1.18 — the browser's time zone, for the server's dates. */}
+        <TimeZoneCookie />
       </body>
     </html>
   )

@@ -10,25 +10,27 @@ import { describe, expect, it } from 'vitest'
 
 import {
   ACTION_LABELS,
-  MATRIX,
-  MATRIX_ACTIONS,
-  ROLES,
+  type Actor,
   assertCan,
+  blockedByAuthors,
   can,
   canReadRevisionAt,
   canReadSuggestionSentAt,
   isAuthor,
+  MATRIX,
+  MATRIX_ACTIONS,
+  type MatrixAction,
   permissionsFor,
+  revisionVisibilityWhere,
+  type Role,
+  roleOn,
+  ROLES,
   STORY_NOT_FOUND,
+  type StoryboardResource,
   suggestionVisibilityWhere,
   writtenWhilePrivate,
-  revisionVisibilityWhere,
-  roleOn,
-  type Actor,
-  type MatrixAction,
-  type Role,
-  type StoryboardResource,
 } from './index'
+import { visibleStoryboardsWhere } from './guard'
 
 const OWNER = 'user_owner'
 const COAUTHOR = 'user_coauthor'
@@ -53,6 +55,7 @@ function storyboard(overrides: Partial<StoryboardResource> = {}): StoryboardReso
     ownerId: OWNER,
     visibility: 'PUBLIC',
     deletedAt: null,
+    hiddenAt: null,
     coauthorIds: [COAUTHOR],
     ...overrides,
   }
@@ -418,5 +421,96 @@ describe('a later private stretch stays private too (FR-2.7, decision 0039)', ()
         },
       ],
     })
+  })
+})
+
+/**
+ * SRS section 2 (phase 14, item 1.13) — the labels reach the screen: the error
+ * formatter shows "You do not have permission to do that (…)" to the person,
+ * so a label is interface copy and keeps to the interface's words. The
+ * vocabulary linter does not read this folder (item 10.4 widens it), so this
+ * holds the line meanwhile, with the linter's own terms.
+ */
+describe('the action labels speak the interface’s words', () => {
+  const BANNED = [
+    /\bbranch(?:es|ed|ing)?\b/i,
+    /\bmerg(?:e|es|ed|ing)\b/i,
+    /\bcommit(?:s|ted|ting)?\b/i,
+    /\bfork(?:s|ed|ing)?\b/i,
+    /\bpull[ -]requests?\b/i,
+    /\bdiffs?\b/i,
+    /\brepositor(?:y|ies)\b/i,
+    /\bstoryboards?\b/i,
+  ]
+
+  it('uses no banned term in any label', () => {
+    for (const [action, label] of Object.entries(ACTION_LABELS)) {
+      for (const pattern of BANNED) {
+        expect(label, `${action}: "${label}" matches ${String(pattern)}`).not.toMatch(pattern)
+      }
+    }
+  })
+
+  it('reaches the person as a sentence', () => {
+    const resource = storyboard({ ownerId: OWNER })
+    expect(() => assertCan({ id: STRANGER }, 'storyboard:delete', resource)).toThrowError(
+      /^You do not have permission to do that \(Delete a story\)\.$/,
+    )
+  })
+})
+
+describe('hidden after a report (phase 14, item 2.7; decision 0045)', () => {
+  const hidden = storyboard({ hiddenAt: new Date('2026-10-18T00:00:00Z') })
+  const moderator: Actor = { id: 'user_moderator', status: 'ACTIVE', moderator: true }
+
+  it('is not there for a guest or a reader, exactly as if it did not exist', () => {
+    expect(can(null, 'storyboard:read', hidden)).toBe(false)
+    expect(can(actorFor('reader'), 'storyboard:read', hidden)).toBe(false)
+    expect(can(actorFor('reader'), 'suggestion:submit', hidden)).toBe(false)
+    expect(() => assertCan(actorFor('reader'), 'storyboard:read', hidden)).toThrow(STORY_NOT_FOUND)
+  })
+
+  it('stays as it was for its authors', () => {
+    expect(can(actorFor('owner'), 'storyboard:read', hidden)).toBe(true)
+    expect(can(actorFor('owner'), 'storyboard:edit', hidden)).toBe(true)
+    expect(can(actorFor('coauthor'), 'storyboard:edit', hidden)).toBe(true)
+  })
+
+  it('may be read by a moderator, and not written to', () => {
+    expect(can(moderator, 'storyboard:read', hidden)).toBe(true)
+    expect(
+      can(
+        moderator,
+        'storyboard:read',
+        storyboard({ hiddenAt: new Date(), visibility: 'PRIVATE' }),
+      ),
+    ).toBe(true)
+    expect(can(moderator, 'suggestion:submit', hidden)).toBe(false)
+    expect(can(moderator, 'storyboard:edit', hidden)).toBe(false)
+    // And nothing more than anyone else on a story that is not hidden.
+    expect(can(moderator, 'storyboard:read', storyboard({ visibility: 'PRIVATE' }))).toBe(false)
+  })
+
+  it('is listed for its authors and a moderator, and for nobody else', () => {
+    expect(JSON.stringify(visibleStoryboardsWhere(null))).toContain('"hiddenAt":null')
+    expect(JSON.stringify(visibleStoryboardsWhere(actorFor('reader')))).toContain('"hiddenAt":null')
+    expect(JSON.stringify(visibleStoryboardsWhere(moderator))).not.toContain('hiddenAt')
+  })
+})
+
+describe('blocked by an author (phase 14, item 2.9; decision 0046)', () => {
+  const story = storyboard()
+
+  it('keeps out someone the owner or a co-author has blocked', () => {
+    expect(blockedByAuthors(actorFor('reader'), story, [OWNER])).toBe(true)
+    expect(blockedByAuthors(actorFor('reader'), story, [COAUTHOR])).toBe(true)
+    expect(blockedByAuthors(actorFor('reader'), story, ['user_someone_else'])).toBe(false)
+    expect(blockedByAuthors(actorFor('reader'), story, [])).toBe(false)
+  })
+
+  it('never keeps an author or a guest out', () => {
+    expect(blockedByAuthors(actorFor('coauthor'), story, [OWNER])).toBe(false)
+    expect(blockedByAuthors(actorFor('owner'), story, [COAUTHOR])).toBe(false)
+    expect(blockedByAuthors(null, story, [OWNER])).toBe(false)
   })
 })

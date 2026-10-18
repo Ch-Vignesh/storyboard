@@ -7,10 +7,12 @@ it. A data exposure is the most serious class of bug this project can have.
 
 Please do not open a public issue for a security problem.
 
-Email **security@<your-domain>** (TODO: set a real address before the first
-public release) with a description, steps to reproduce, and the impact you
-believe it has. You will get an acknowledgement within 72 hours and a plan
-within 7 days.
+Email the address on the deployment's contact page,
+[draftboard-cyan.vercel.app/contact](https://draftboard-cyan.vercel.app/contact),
+with a description, steps to reproduce, and the impact you believe it has. That
+page shows the deployment's support address (`SUPPORT_EMAIL`, or the sender's
+address when none is set), so this file never goes stale. You will get an
+acknowledgement within 72 hours and a plan within 7 days.
 
 ## Scope
 

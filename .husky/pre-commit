@@ -1,1 +1,6 @@
-pnpm lint-staged
+# Windows cmd.exe caps a command line at 8191 characters. lint-staged sizes its
+# chunks against that cap using bare absolute paths, but the spawner then quotes
+# every path and escapes "(" and ")" (src/app/(app)/...), so a full chunk
+# overflows with "The command line is too long". Relative paths halve the
+# length and the explicit cap leaves room for the quoting.
+pnpm exec lint-staged --relative --max-arg-length 4000

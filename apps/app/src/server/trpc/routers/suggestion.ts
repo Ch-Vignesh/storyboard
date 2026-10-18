@@ -2,18 +2,27 @@ import { Prisma, type PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
-import { assertNotFinished, loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
-import { recordActivity, recordActivityFor } from '@/server/activity'
+import {
+  assertNotBlocked,
+  assertNotFinished,
+  loadStoryboard,
+  visibleStoryboardsWhere,
+} from '@/lib/authz/guard'
+import { recordActivity } from '@/server/activity'
+import { timeZoneFromHeaders } from '@/lib/time-zone'
 import { afterCommit } from '@/server/after-commit'
 import { notifyAuthors } from '@/server/notify-authors'
 import { canReadSuggestionSentAt, quotaFor } from '@/lib/authz'
+import { redactSuggestionText } from '@/server/hidden'
 import { emptyDoc, flavourForStoryType, parseDoc } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
 import { acceptedDoc } from '@/server/accepted-text'
 import { publicId } from '@/lib/ids'
 import { logger } from '@/lib/logger'
+import { nameOf } from '@/lib/people'
+import { AUTHORS_SELECT } from '@/server/answers'
 import { DAILY_LIMITS } from '@/lib/schemas/constants'
-import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
+import { DAY_MS, enforce, key, used, whenToRetry } from '@/server/limits'
 import { passChipSchema, suggestionNoteSchema } from '@/lib/schemas/help'
 
 import {
@@ -60,10 +69,18 @@ export const suggestionRouter = createTRPCRouter({
    * visible to anyone until it is sent.
    */
   startDraft: activeProcedure
-    .input(z.object({ requestId: z.string().min(1) }))
+    .input(
+      z.object({
+        requestId: z.string().min(1),
+        /** Item 5.6 — a suggestion of yours, withdrawn here, to start from. */
+        from: z.string().min(1).optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
       const { request, storyboard } = await loadRequestFor(ctx.db, actor, input.requestId)
+      // Decision 0046 (item 2.9) — not on a story whose author has blocked you.
+      await assertNotBlocked(ctx.db, actor, storyboard.resource)
 
       if (request.kind === 'UNBLOCK') {
         throw new TRPCError({
@@ -96,9 +113,33 @@ export const suggestionRouter = createTRPCRouter({
         })
       }
 
+      // Item 5.6 — "Start a new draft from it": the words of a suggestion the
+      // same person withdrew on this request, in place of the section's text.
+      const seed = input.from
+        ? await ctx.db.suggestion.findFirst({
+            where: {
+              id: input.from,
+              requestId: request.id,
+              contributorId: ctx.session.user.id,
+              state: 'WITHDRAWN',
+            },
+            select: { contentJson: true, note: true },
+          })
+        : null
+      if (input.from && !seed) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'That is not a suggestion of yours, withdrawn here, to start from.',
+        })
+      }
+
       const flavour = flavourForStoryType(request.storyboard.type)
       // FR-6.1 — pre-filled for a rewrite, empty for a continue.
-      const content = request.kind === 'REWRITE' && head ? head.contentJson : emptyDoc(flavour)
+      const content = seed
+        ? seed.contentJson
+        : request.kind === 'REWRITE' && head
+          ? head.contentJson
+          : emptyDoc(flavour)
       const derived = derive(parseDoc(content, flavour))
 
       return ctx.db.suggestion.create({
@@ -111,15 +152,78 @@ export const suggestionRouter = createTRPCRouter({
           contentJson: content ?? {},
           contentText: derived.contentText,
           wordCount: derived.wordCount,
+          note: seed?.note ?? null,
           state: 'DRAFT',
         },
         select: { id: true, publicId: true },
       })
     }),
 
+  /**
+   * Phase 14, items 6.3 and 6.4 (FR-13.2, FR-13.3) — what a person may still
+   * send on a story, before they write: how many of their suggestions are
+   * waiting on it against their quota (decision 0016's tiers), and how many
+   * sends the day has left. The same counts `submit` enforces, read ahead of
+   * time; `submit` still decides.
+   */
+  allowance: protectedProcedure
+    .input(z.object({ storyboardId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { storyboardId, resource } = await loadStoryboard(ctx.db, actor, {
+        id: input.storyboardId,
+      })
+      const userId = ctx.session.user.id
+      const quota = quotaFor(actor, resource)
+      const [waiting, sentToday] = await Promise.all([
+        ctx.db.suggestion.count({
+          where: {
+            contributorId: userId,
+            state: 'SUBMITTED',
+            hiddenAt: null,
+            request: { storyboardId, state: { in: ['OPEN', 'ANSWERED'] } },
+          },
+        }),
+        used(ctx.db, key.suggestionsSent(userId), DAY_MS),
+      ])
+      return {
+        quota: Number.isFinite(quota) ? quota : null,
+        waiting,
+        sendsLeftToday: Math.max(0, DAILY_LIMITS.suggestionsSent - sentToday),
+      }
+    }),
+
+  /**
+   * Item 6.5 (FR-6.1) — a draft thrown away by its writer. Only a DRAFT, and
+   * only their own; anything sent is withdrawn instead, which tells the
+   * author. Nothing refers to a draft, so the row simply goes.
+   */
+  discardDraft: activeProcedure
+    .input(z.object({ suggestionId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const { count } = await ctx.db.suggestion.deleteMany({
+        where: { id: input.suggestionId, contributorId: ctx.session.user.id, state: 'DRAFT' },
+      })
+      if (count === 0) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'That is not a draft of yours. A sent suggestion is withdrawn, not thrown away.',
+        })
+      }
+      log.info({ event: 'suggestion.discard', suggestionId: input.suggestionId }, 'draft discarded')
+      return { removed: true }
+    }),
+
   /** Autosave for the composer. A draft is private to its author (FR-6.1). */
   saveDraft: activeProcedure
-    .input(z.object({ suggestionId: z.string().min(1), contentJson: z.unknown() }))
+    .input(
+      z.object({
+        suggestionId: z.string().min(1),
+        contentJson: z.unknown(),
+        /** FR-6.2 — saved with the draft, so leaving keeps it (item 1.11). */
+        note: suggestionNoteSchema,
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const suggestion = await requireOwnDraft(ctx, input.suggestionId)
       const storyType = await ctx.db.storyboard.findUniqueOrThrow({
@@ -135,6 +239,8 @@ export const suggestionRouter = createTRPCRouter({
           contentJson: doc,
           contentText: derived.contentText,
           wordCount: derived.wordCount,
+          // Left out of the input, the note stands; emptied, it goes.
+          ...(input.note !== undefined ? { note: input.note || null } : {}),
         },
         select: { id: true, wordCount: true },
       })
@@ -176,6 +282,8 @@ export const suggestionRouter = createTRPCRouter({
       // A re-send may go to a resolved request, which finishing a story does
       // not close; it must not reopen one on a finished story.
       assertNotFinished(storyboard.resource, 'by a helper')
+      // Decision 0046 (item 2.9) — nor sent, nor re-sent, by someone an author blocked.
+      await assertNotBlocked(ctx.db, actor, storyboard.resource)
       // FR-13.2 with OD-6 resolved (decision 0016): three tiers, not an
       // exemption. The owner has no ceiling on their own storyboard; a
       // co-author has a generous one, because the quota protects the owner's
@@ -194,6 +302,8 @@ export const suggestionRouter = createTRPCRouter({
           where: {
             contributorId: userId,
             state: 'SUBMITTED',
+            // Hidden after a report (item 2.7): holds no place.
+            hiddenAt: null,
             request: { storyboardId: request.storyboardId, state: { in: ['OPEN', 'ANSWERED'] } },
           },
         })
@@ -231,7 +341,14 @@ export const suggestionRouter = createTRPCRouter({
         // Still a draft, still this person's: a second tab may have sent it.
         const sent = await tx.suggestion.updateMany({
           where: { id: suggestion.id, state: 'DRAFT' },
-          data: { state: 'SUBMITTED', submittedAt: new Date(), note: input.note ?? null },
+          data: {
+            state: 'SUBMITTED',
+            submittedAt: new Date(),
+            // A send that leaves the note out keeps the one saved with the
+            // draft: a stale suggestion updated and sent again used to lose
+            // it (item 1.11).
+            ...(input.note !== undefined ? { note: input.note || null } : {}),
+          },
         })
         if (sent.count !== 1) {
           throw new TRPCError({
@@ -262,13 +379,102 @@ export const suggestionRouter = createTRPCRouter({
           userId,
         ),
       )
-      await recordActivity(ctx.db, userId)
+      // FR-9.3 with D-6 (item 6.13) — help given marks the calendar: a send,
+      // on somebody else's story, on the day it is where the sender is.
+      if (storyboard.permissions.role !== 'owner' && storyboard.permissions.role !== 'coauthor') {
+        await recordActivity(ctx.db, userId, new Date(), timeZoneFromHeaders(ctx.headers))
+      }
 
       log.info(
         { event: 'suggestion.submit', suggestionId: suggestion.id, requestId: request.id, userId },
         'suggestion sent',
       )
       return result
+    }),
+
+  /**
+   * Phase 14, item 6.7 (D-12) — a sent suggestion changed by its writer,
+   * until an author opens it. One conditional write: the row must still be
+   * SUBMITTED and unopened at the moment it is written, so a read that saw it
+   * unopened a moment before an author opened it changes nothing. It costs
+   * neither the quota (nothing new waits) nor the day's sends. The comparison
+   * is computed on request and cached nowhere, so nothing is to clear.
+   */
+  edit: activeProcedure
+    .input(
+      z.object({
+        suggestionId: z.string().min(1),
+        contentJson: z.unknown(),
+        note: suggestionNoteSchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id
+      const suggestion = await ctx.db.suggestion.findFirst({
+        where: { id: input.suggestionId, contributorId: userId },
+        select: {
+          state: true,
+          openedAt: true,
+          request: {
+            select: {
+              minWords: true,
+              maxWords: true,
+              storyboardId: true,
+              storyboard: { select: { type: true } },
+            },
+          },
+        },
+      })
+      if (!suggestion) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'That suggestion is not yours to change.',
+        })
+      }
+      const cannotChangeNow = () =>
+        new TRPCError({
+          code: 'CONFLICT',
+          message:
+            "The author has started reading it, so it can't change now. Withdraw it and send a new one.",
+        })
+      if (suggestion.state !== 'SUBMITTED' || suggestion.openedAt) throw cannotChangeNow()
+
+      const flavour = flavourForStoryType(suggestion.request.storyboard.type)
+      const doc = parseDoc(input.contentJson, flavour)
+      const derived = derive(doc)
+      if (
+        derived.wordCount < suggestion.request.minWords ||
+        derived.wordCount > suggestion.request.maxWords
+      ) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `This request asks for between ${String(suggestion.request.minWords)} and ${String(suggestion.request.maxWords)} words. Yours is ${String(derived.wordCount)}.`,
+        })
+      }
+
+      const now = new Date()
+      const { count } = await ctx.db.suggestion.updateMany({
+        where: {
+          id: input.suggestionId,
+          contributorId: userId,
+          state: 'SUBMITTED',
+          openedAt: null,
+        },
+        data: {
+          contentJson: doc,
+          contentText: derived.contentText,
+          wordCount: derived.wordCount,
+          note: input.note ?? null,
+          editedAt: now,
+        },
+      })
+      // Opened between the read above and this write: the same answer.
+      if (count === 0) throw cannotChangeNow()
+      log.info(
+        { event: 'suggestion.edit', suggestionId: input.suggestionId },
+        'sent suggestion changed',
+      )
+      return { editedAt: now }
     }),
 
   /** FR-6.5 — withdraw before a decision. Frees a quota slot. */
@@ -278,7 +484,14 @@ export const suggestionRouter = createTRPCRouter({
       const userId = ctx.session.user.id
       const suggestion = await ctx.db.suggestion.findUnique({
         where: { id: input.suggestionId },
-        select: { id: true, contributorId: true, state: true, requestId: true },
+        select: {
+          id: true,
+          contributorId: true,
+          state: true,
+          requestId: true,
+          openedAt: true,
+          request: { select: { storyboardId: true } },
+        },
       })
       if (suggestion?.contributorId !== userId) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
@@ -294,12 +507,27 @@ export const suggestionRouter = createTRPCRouter({
       // deciding on it right now (phase 12 audit).
       const withdrawn = await ctx.db.suggestion.updateMany({
         where: { id: suggestion.id, state: { in: ['SUBMITTED', 'STALE'] } },
-        data: { state: 'WITHDRAWN' },
+        // `withdrawnAt` existed from the start and nothing wrote it (item 1.10).
+        data: { state: 'WITHDRAWN', withdrawnAt: new Date() },
       })
       if (withdrawn.count !== 1) throw stillWaitingOnly()
       // FR-5.9 — the last one waiting is gone, so the request is open again.
       // `pass` did this; `withdraw` did not (phase 12 audit).
       await reopenIfNothingWaits(ctx.db, suggestion.requestId)
+
+      // FR-6.5 — the authors hear of it only if one of them had opened it;
+      // one they never looked at was never waiting on them (item 1.10).
+      if (suggestion.openedAt) {
+        await afterCommit('suggestion.withdraw.notify', () =>
+          notifyAuthors(
+            ctx.db,
+            suggestion.request.storyboardId,
+            'SUGGESTION_WITHDRAWN',
+            { suggestionId: suggestion.id, requestId: suggestion.requestId },
+            userId,
+          ),
+        )
+      }
 
       log.info({ event: 'suggestion.withdraw', suggestionId: suggestion.id, userId }, 'withdrawn')
       return { id: suggestion.id, state: 'WITHDRAWN' as const }
@@ -323,6 +551,10 @@ export const suggestionRouter = createTRPCRouter({
           submittedAt: true,
           decidedAt: true,
           baseRevisionId: true,
+          hiddenAt: true,
+          // Item 6.7 — whether it may still be changed, and whether it was.
+          openedAt: true,
+          editedAt: true,
           contributor: { select: { id: true, username: true, displayName: true } },
           decidedBy: { select: { id: true, username: true, displayName: true } },
           request: {
@@ -360,11 +592,26 @@ export const suggestionRouter = createTRPCRouter({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
       }
 
+      // FR-6.5 (phase 14, item 1.10) — the first time an author opens it, and
+      // only once. A withdrawal tells the authors only if this is set, and
+      // item 6.7 lets a helper change a suggestion only until it is.
+      if (
+        permissions.canOpenRequest &&
+        (suggestion.state === 'SUBMITTED' || suggestion.state === 'STALE')
+      ) {
+        await ctx.db.suggestion.updateMany({
+          where: { id: suggestion.id, openedAt: null },
+          data: { openedAt: new Date() },
+        })
+      }
+
       const isStale =
         suggestion.state === 'SUBMITTED' &&
         suggestion.request.section.currentRevisionId !== suggestion.baseRevisionId
 
-      return { suggestion, permissions, isStale }
+      // Hidden after a report (item 2.7): its text reads as removed to
+      // everyone but its writer and a moderator.
+      return { suggestion: redactSuggestionText(suggestion, actor), permissions, isStale }
     }),
 
   /**
@@ -404,6 +651,7 @@ export const suggestionRouter = createTRPCRouter({
           contentJson: true,
           contentText: true,
           wordCount: true,
+          hiddenAt: true,
           request: {
             select: {
               id: true,
@@ -412,7 +660,7 @@ export const suggestionRouter = createTRPCRouter({
               state: true,
               kind: true,
               section: { select: { lineageId: true } },
-              storyboard: { select: { type: true } },
+              storyboard: { select: { type: true, ...AUTHORS_SELECT } },
             },
           },
         },
@@ -420,16 +668,25 @@ export const suggestionRouter = createTRPCRouter({
       if (!suggestion) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
       }
-
       await loadStoryboard(
         ctx.db,
         actor,
         { id: suggestion.request.storyboardId },
         'suggestion:decide',
       )
+      // Hidden after a report (item 2.7, decision 0045): not an answer, never
+      // accepted. After the authz check, so a stranger learns nothing.
+      if (suggestion.hiddenAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This suggestion was removed after a report, so it cannot be accepted.',
+        })
+      }
       const flavour = flavourForStoryType(suggestion.request.storyboard.type)
 
-      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') throw alreadyDecided()
+      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') {
+        throw await decisionRefusal(ctx.db, suggestion.id)
+      }
       // Closed by the author, or by the story going private or finished: what
       // was waiting there is not to be let in (phase 12 audit).
       if (suggestion.request.state === 'CLOSED') {
@@ -441,6 +698,13 @@ export const suggestionRouter = createTRPCRouter({
 
       const deciderId = ctx.session.user.id
       const { sectionId, id: requestId } = suggestion.request
+      // Item 1.7, decision 0041 — an owner or co-author at this moment is an
+      // author of the story, and earns no credit for help with their own work.
+      const contributorIsAuthor =
+        suggestion.contributorId === suggestion.request.storyboard.ownerId ||
+        suggestion.request.storyboard.collaborators.some(
+          (collaborator) => collaborator.userId === suggestion.contributorId,
+        )
 
       const accepted = await serialisedOrChanged(() =>
         ctx.db.$transaction(
@@ -517,7 +781,7 @@ export const suggestionRouter = createTRPCRouter({
               where: { id: suggestion.id, state: { in: ['SUBMITTED', 'STALE'] } },
               data: { state: 'ACCEPTED', decidedAt: new Date(), decidedById: deciderId },
             })
-            if (decided.count !== 1) throw alreadyDecided()
+            if (decided.count !== 1) throw await decisionRefusal(tx, suggestion.id)
 
             // FR-6.7 — everything else waiting on this request is now written
             // against a head that has moved.
@@ -526,18 +790,22 @@ export const suggestionRouter = createTRPCRouter({
               data: { state: 'STALE' },
             })
 
-            // FR-9.1 — permanent, and it survives the text being replaced later.
-            await tx.credit.create({
-              data: {
-                storyboardId: suggestion.request.storyboardId,
-                contributorId: suggestion.contributorId,
-                type: 'PROSE',
-                sectionLineage: suggestion.request.section.lineageId,
-                revisionId: revision.id,
-                suggestionId: suggestion.id,
-                isLive: true,
-              },
-            })
+            // FR-9.1 — permanent, and it survives the text being replaced
+            // later. Not for the story's own authors (item 1.7): a credit says
+            // somebody else helped, and the revision already names them.
+            if (!contributorIsAuthor) {
+              await tx.credit.create({
+                data: {
+                  storyboardId: suggestion.request.storyboardId,
+                  contributorId: suggestion.contributorId,
+                  type: 'PROSE',
+                  sectionLineage: suggestion.request.section.lineageId,
+                  revisionId: revision.id,
+                  suggestionId: suggestion.id,
+                  isLive: true,
+                },
+              })
+            }
 
             await tx.contributionRequest.update({
               where: { id: requestId },
@@ -571,9 +839,6 @@ export const suggestionRouter = createTRPCRouter({
           ],
         })
       })
-
-      // Both people did something: one wrote it, one decided on it.
-      await recordActivityFor(ctx.db, [suggestion.contributorId, deciderId])
 
       log.info(
         {
@@ -620,7 +885,9 @@ export const suggestionRouter = createTRPCRouter({
         { id: suggestion.request.storyboardId },
         'suggestion:decide',
       )
-      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') throw alreadyDecided()
+      if (suggestion.state !== 'SUBMITTED' && suggestion.state !== 'STALE') {
+        throw await decisionRefusal(ctx.db, suggestion.id)
+      }
 
       // Only if it is still undecided at the moment of writing. A co-author
       // passing while the owner accepted used to leave it PASSED with its text
@@ -634,7 +901,7 @@ export const suggestionRouter = createTRPCRouter({
           decidedById: ctx.session.user.id,
         },
       })
-      if (passed.count !== 1) throw alreadyDecided()
+      if (passed.count !== 1) throw await decisionRefusal(ctx.db, suggestion.id)
       const updated = {
         id: suggestion.id,
         state: 'PASSED' as const,
@@ -654,8 +921,6 @@ export const suggestionRouter = createTRPCRouter({
           },
         }),
       )
-
-      await recordActivity(ctx.db, ctx.session.user.id)
 
       log.info(
         { event: 'suggestion.passed', suggestionId: suggestion.id, reason: input.reason ?? null },
@@ -685,7 +950,9 @@ export const suggestionRouter = createTRPCRouter({
       if (suggestion?.contributorId !== userId) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
       }
-      if (suggestion.state !== 'STALE') {
+      // Item 6.6 — a draft started against text that has moved on may move
+      // its base too; its words are left as they are, which the composer says.
+      if (suggestion.state !== 'STALE' && suggestion.state !== 'DRAFT') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'That suggestion is already up to date.',
@@ -711,23 +978,28 @@ export const suggestionRouter = createTRPCRouter({
     }),
 
   /** Everything this person has written, for their profile (FR-6.11, FR-9.4). */
+  /**
+   * Everything of yours, drafts included (item 6.5): the page splits them
+   * into what is not sent yet, what needs updating and what was sent.
+   */
   listMine: protectedProcedure.query(({ ctx }) =>
     ctx.db.suggestion.findMany({
       where: {
         contributorId: ctx.session.user.id,
-        state: { not: 'DRAFT' },
         // Only stories they can still see. A story made private, renamed or
         // deleted since went on showing its title and address here (phase 12
         // audit).
         request: { storyboard: visibleStoryboardsWhere(actorFrom(ctx.session, ctx.account)) },
       },
-      orderBy: { submittedAt: 'desc' },
+      orderBy: [{ submittedAt: { sort: 'desc', nulls: 'first' } }, { updatedAt: 'desc' }],
       select: {
         id: true,
         publicId: true,
         state: true,
         wordCount: true,
         submittedAt: true,
+        updatedAt: true,
+        editedAt: true,
         passReason: true,
         request: {
           select: {
@@ -770,6 +1042,27 @@ async function serialisedOrChanged<T>(work: () => Promise<T>): Promise<T> {
 
 const alreadyDecided = () =>
   new TRPCError({ code: 'BAD_REQUEST', message: 'That suggestion has already been decided.' })
+
+/**
+ * Why a decision is refused: the helper withdrew it a moment ago, named
+ * (FR-6.5, phase 14 item 1.10), or somebody else decided it first.
+ */
+async function decisionRefusal(
+  db: Pick<PrismaClient, 'suggestion'>,
+  suggestionId: string,
+): Promise<TRPCError> {
+  const row = await db.suggestion.findUnique({
+    where: { id: suggestionId },
+    select: { state: true, contributor: { select: { username: true, displayName: true } } },
+  })
+  if (row?.state === 'WITHDRAWN') {
+    return new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `${nameOf(row.contributor)} withdrew this a moment ago.`,
+    })
+  }
+  return alreadyDecided()
+}
 
 /**
  * FR-5.9 — a request takes suggestions while it is open or answered. Closed

@@ -1,5 +1,7 @@
 import type { Prisma, PrismaClient } from '@storyboard/db'
 
+import { REQUEST_OPEN_DAYS } from '@/lib/schemas/constants'
+
 /**
  * Close every open request on a storyboard, and tell the people answering them.
  *
@@ -27,7 +29,7 @@ export async function closeOpenRequests(db: PrismaClient, storyboardId: string):
   // The denormalised column, not a walk up through section → chapter →
   // version. Same rows either way, and this one is the indexed field the
   // schema put there for the purpose.
-  return closeRequestsWhere(db, { storyboardId })
+  return (await closeRequestsWhere(db, { storyboardId })).length
 }
 
 /**
@@ -41,7 +43,7 @@ export async function closeRequestsOnSections(
   sectionIds: readonly string[],
 ): Promise<number> {
   if (sectionIds.length === 0) return 0
-  return closeRequestsWhere(db, { sectionId: { in: [...sectionIds] } })
+  return (await closeRequestsWhere(db, { sectionId: { in: [...sectionIds] } })).length
 }
 
 /**
@@ -50,14 +52,70 @@ export async function closeRequestsOnSections(
  * waiting on a decision, never heard (2026-10-16 spec review). True if it was
  * open and is now closed.
  */
-export async function closeRequest(db: PrismaClient, requestId: string): Promise<boolean> {
-  return (await closeRequestsWhere(db, { id: requestId })) > 0
+export async function closeRequest(
+  db: PrismaClient,
+  requestId: string,
+  /** Item 6.9 — the author closing it, for the row to name. */
+  closedById?: string,
+): Promise<boolean> {
+  return (await closeRequestsWhere(db, { id: requestId }, closedById)).length > 0
 }
 
+/**
+ * FR-11.3 with D-8 (phase 14, item 6.15; decision 0050) — the nightly close.
+ * Every request still open or answered `REQUEST_OPEN_DAYS` after it was
+ * opened, or last opened again, closes as the author's own close would, with
+ * the people answering it told the same way; and the author is told once per
+ * request, so they can open it again if they still want help. A resolved
+ * request is left alone: it has had its answer. Returns how many closed.
+ */
+export async function closeStaleRequests(
+  db: PrismaClient,
+  now: Date = new Date(),
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - REQUEST_OPEN_DAYS * 24 * 60 * 60 * 1000)
+  const stale = await db.contributionRequest.findMany({
+    where: {
+      state: { in: ['OPEN', 'ANSWERED'] },
+      openedAt: { lt: cutoff },
+      storyboard: { deletedAt: null },
+    },
+    select: { id: true, openedById: true },
+  })
+  if (stale.length === 0) return 0
+
+  const closed = new Set(
+    await closeRequestsWhere(db, { id: { in: stale.map((request) => request.id) } }),
+  )
+  // Once per request: a row already there means an earlier run told them.
+  for (const request of stale) {
+    if (!closed.has(request.id)) continue
+    const told = await db.notification.findFirst({
+      where: {
+        userId: request.openedById,
+        type: 'REQUEST_AUTO_CLOSED',
+        payload: { path: ['requestId'], equals: request.id },
+      },
+      select: { id: true },
+    })
+    if (told) continue
+    await db.notification.create({
+      data: {
+        userId: request.openedById,
+        type: 'REQUEST_AUTO_CLOSED',
+        payload: { requestId: request.id, after: REQUEST_OPEN_DAYS },
+      },
+    })
+  }
+  return closed.size
+}
+
+/** Closes what the `where` names and is still open or answered; returns the ids it closed. */
 async function closeRequestsWhere(
   db: PrismaClient,
   where: Prisma.ContributionRequestWhereInput,
-): Promise<number> {
+  closedById?: string,
+): Promise<string[]> {
   const open = await db.contributionRequest.findMany({
     // Answered as well as open: a request with a suggestion waiting is the one
     // whose people most need telling, and it was the one left out until the
@@ -71,7 +129,7 @@ async function closeRequestsWhere(
       },
     },
   })
-  if (open.length === 0) return 0
+  if (open.length === 0) return []
 
   await db.contributionRequest.updateMany({
     where: { id: { in: open.map((request) => request.id) }, state: { in: ['OPEN', 'ANSWERED'] } },
@@ -84,10 +142,10 @@ async function closeRequestsWhere(
     request.suggestions.map((suggestion) => ({
       userId: suggestion.contributorId,
       type: 'REQUEST_CLOSED' as const,
-      payload: { requestId: request.id },
+      payload: closedById ? { requestId: request.id, byId: closedById } : { requestId: request.id },
     })),
   )
   if (told.length > 0) await db.notification.createMany({ data: told })
 
-  return open.length
+  return open.map((request) => request.id)
 }

@@ -19,6 +19,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { ACCOUNT_DELETION_GRACE_DAYS } from '@/lib/schemas/constants'
 import { nameOf } from '@/lib/people'
+import type { Mail } from '@/server/mail/mailer'
 
 import { purgeDeletedAccounts } from './accounts'
 
@@ -64,6 +65,7 @@ describe.skipIf(!databaseUrl)('purging a deleted account (decision 0024)', () =>
         username: `del_${label}_${run}`,
         displayName: 'Someone Real',
         bio: 'A biography that identifies a person.',
+        standingNote: 'A note naming the person, left by an administrator.',
         passwordHash: 'argon2-placeholder',
         emailVerifiedAt: new Date(),
       },
@@ -144,10 +146,15 @@ describe.skipIf(!databaseUrl)('purging a deleted account (decision 0024)', () =>
 
   it('erases every identifying column once it is', async () => {
     const { user } = await aPersonWhoHasWritten('erased')
+    // Item 3.13 — a picture is the most identifying column of all.
+    await db.userAvatar.create({
+      data: { userId: user.id, bytes: Buffer.from('not really webp'), contentType: 'image/webp' },
+    })
     await askAndAge(user.id)
 
     const result = await purgeDeletedAccounts(db)
     expect(result.purged).toBeGreaterThanOrEqual(1)
+    expect(await db.userAvatar.findUnique({ where: { userId: user.id } })).toBeNull()
 
     const after = await db.user.findUniqueOrThrow({
       where: { id: user.id },
@@ -160,10 +167,12 @@ describe.skipIf(!databaseUrl)('purging a deleted account (decision 0024)', () =>
         avatarUrl: true,
         passwordHash: true,
         emailVerifiedAt: true,
+        standingNote: true,
       },
     })
 
     expect(after.status).toBe('DELETED')
+    expect(after.standingNote).toBeNull()
     expect(after.username).toBeNull()
     expect(after.displayName).toBeNull()
     expect(after.bio).toBeNull()
@@ -253,6 +262,8 @@ describe.skipIf(!databaseUrl)('purging a deleted account (decision 0024)', () =>
    */
   it('erases an account that never chose a username, and an admin’s power with it', async () => {
     const run = randomUUID().replaceAll('-', '').slice(0, 8)
+    // A sub-admin rather than the admin: the database allows one admin
+    // (decision 0043), and this must not take the role from whoever has it.
     const user = await db.user.create({
       data: {
         email: `del-nameless-${run}@example.test`,
@@ -260,10 +271,15 @@ describe.skipIf(!databaseUrl)('purging a deleted account (decision 0024)', () =>
         passwordHash: 'argon2-placeholder',
         emailVerifiedAt: new Date(),
         isAdmin: true,
+        role: 'SUB_ADMIN',
       },
       select: { id: true },
     })
     made.push(user.id)
+    // A sub-admin's grants go with the role (decision 0043).
+    await db.subAdminGrant.create({
+      data: { userId: user.id, capability: 'flags.toggle', grantedById: user.id },
+    })
     await askAndAge(user.id)
 
     await purgeDeletedAccounts(db)
@@ -274,6 +290,51 @@ describe.skipIf(!databaseUrl)('purging a deleted account (decision 0024)', () =>
     expect(after.passwordHash).toBeNull()
     expect(after.displayName).toBeNull()
     expect(after.isAdmin).toBe(false)
+    expect(after.role).toBe('USER')
+    expect(await db.subAdminGrant.count({ where: { userId: user.id } })).toBe(0)
+  })
+
+  it('tells the address it had that the account is gone, and then forgets it', async () => {
+    const { user } = await aPersonWhoHasWritten('told')
+    const before = await db.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { email: true },
+    })
+    await askAndAge(user.id)
+
+    // Phase 14, item 1.5. The last message goes to the real address, and the
+    // row is tombstoned afterwards, so what the message says is true.
+    const sent: Mail[] = []
+    await purgeDeletedAccounts(db, new Date(), {
+      send: async (mail) => {
+        sent.push(mail)
+      },
+    })
+
+    expect(sent.filter((mail) => mail.to === before.email)).toHaveLength(1)
+    expect(sent.find((mail) => mail.to === before.email)?.subject).toMatch(/deleted/i)
+    const after = await db.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { email: true, status: true },
+    })
+    expect(after.status).toBe('DELETED')
+    expect(after.email).toContain('@deleted.invalid')
+  })
+
+  it('retires the username for good (decision 0042)', async () => {
+    const { user } = await aPersonWhoHasWritten('retired')
+    await askAndAge(user.id)
+    await purgeDeletedAccounts(db, new Date(), { send: async () => undefined })
+
+    // Phase 14, item 1.6. The SHA-256 of the lower-cased name, so `/@name`,
+    // printed in credit lines and exports for ever, cannot be taken by a
+    // stranger. Accounts erased before this change left no record.
+    const { createHash } = await import('node:crypto')
+    const hash = createHash('sha256')
+      .update((user.username ?? '').toLowerCase())
+      .digest('hex')
+    expect(await db.retiredUsername.findUnique({ where: { hash } })).not.toBeNull()
+    await db.retiredUsername.delete({ where: { hash } })
   })
 
   it('ignores an account that never asked', async () => {

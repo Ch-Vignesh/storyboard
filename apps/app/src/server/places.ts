@@ -4,11 +4,20 @@ import type { PrismaClient } from '@storyboard/db'
 
 /**
  * Where a section's lineage reads in a story's main draft, as an address.
- * Shared by credit lines (FR-9.6) and the proof of authorship (FR-13.6), which
- * both print one.
+ * Shared by credit lines (FR-9.6), the proof of authorship (FR-13.6) and, since
+ * phase 14's item 6.10, every credit on a contributors page or a profile, which
+ * all print or link one.
  */
 
-export type Place = { chapter: string; path: string }
+export type Place = {
+  /** The chapter's title, for a credit line. */
+  chapter: string
+  /** Its position in reading order, counted from 1, as the reader's address counts. */
+  chapterNumber: number
+  /** The section's position in that chapter, counted from 1. */
+  sectionNumber: number
+  path: string
+}
 
 /**
  * Where each lineage reads in the main draft, at the address the reader
@@ -24,16 +33,40 @@ export type Place = { chapter: string; path: string }
 export async function mainDraftPlaces(
   db: PrismaClient,
   storyboardId: string,
-  lineages: string[],
+  lineages: readonly string[],
 ): Promise<Map<string, Place>> {
-  const inMainDraft = { version: { storyboardId, isMain: true }, deletedAt: null }
-  const [storyboard, chapters, joined] = await Promise.all([
-    db.storyboard.findUniqueOrThrow({ where: { id: storyboardId }, select: { slug: true } }),
+  return placesInMainDrafts(db, [storyboardId], lineages)
+}
+
+/**
+ * The same across several stories at once, in three queries however many
+ * there are: a profile's page of credits spans many stories (item 6.10), and
+ * asking each in turn would be three queries a story. Lineages are unique
+ * across stories, so one map answers for all of them.
+ */
+export async function placesInMainDrafts(
+  db: PrismaClient,
+  storyboardIds: readonly string[],
+  lineages: readonly string[],
+): Promise<Map<string, Place>> {
+  const places = new Map<string, Place>()
+  if (storyboardIds.length === 0 || lineages.length === 0) return places
+
+  const inMainDraft = {
+    version: { storyboardId: { in: [...storyboardIds] }, isMain: true },
+    deletedAt: null,
+  }
+  const [storyboards, chapters, joined] = await Promise.all([
+    db.storyboard.findMany({
+      where: { id: { in: [...storyboardIds] } },
+      select: { id: true, slug: true },
+    }),
     db.chapter.findMany({
       where: inMainDraft,
       orderBy: { order: 'asc' },
       select: {
         title: true,
+        version: { select: { storyboardId: true } },
         sections: {
           where: { deletedAt: null, mergedIntoId: null },
           orderBy: { order: 'asc' },
@@ -47,13 +80,23 @@ export async function mainDraftPlaces(
     }),
   ])
 
+  const slugOf = new Map(storyboards.map((storyboard) => [storyboard.id, storyboard.slug]))
+  // Chapters are counted within their own story, in reading order; the one
+  // sort above keeps each story's chapters in order among the others'.
+  const counted = new Map<string, number>()
   const byId = new Map<string, Place>()
-  const places = new Map<string, Place>()
-  for (const [chapterIndex, chapter] of chapters.entries()) {
+  for (const chapter of chapters) {
+    const storyboardId = chapter.version.storyboardId
+    const slug = slugOf.get(storyboardId)
+    if (!slug) continue
+    const chapterNumber = (counted.get(storyboardId) ?? 0) + 1
+    counted.set(storyboardId, chapterNumber)
     for (const [sectionIndex, section] of chapter.sections.entries()) {
-      const place = {
+      const place: Place = {
         chapter: chapter.title,
-        path: `/s/${storyboard.slug}/c/${String(chapterIndex + 1)}/${String(sectionIndex + 1)}`,
+        chapterNumber,
+        sectionNumber: sectionIndex + 1,
+        path: `/s/${slug}/c/${String(chapterNumber)}/${String(sectionIndex + 1)}`,
       }
       byId.set(section.id, place)
       places.set(section.lineageId, place)

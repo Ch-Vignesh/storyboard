@@ -40,6 +40,12 @@ export type Actor = {
    * write nothing in the meantime, exactly like a suspended account.
    */
   deletionRequestedAt?: Date | null
+  /**
+   * Decision 0045 (item 2.7) — may see what moderation has hidden: the
+   * administrator, or a sub-admin who holds `reports.decide`. Set by
+   * `actorFrom` from the account's role and grants; never from a component.
+   */
+  moderator?: boolean
 } | null
 
 /**
@@ -50,6 +56,8 @@ export type StoryboardResource = {
   ownerId: string
   visibility: 'PUBLIC' | 'PRIVATE'
   deletedAt: Date | null
+  /** Decision 0045 (item 2.7) — hidden after an upheld report. */
+  hiddenAt: Date | null
   /** Accepted co-authors only. An unaccepted invitation grants nothing. */
   coauthorIds: readonly string[]
   /**
@@ -96,6 +104,23 @@ export function isAuthor(actor: Actor, resource: StoryboardResource): boolean {
   return role === 'owner' || role === 'coauthor'
 }
 
+/**
+ * Decision 0046 (item 2.9) — whether any of the people who blocked this
+ * actor is one of the story's authors. An author is never blocked from their
+ * own story, whatever the list says. The database half, which finds the
+ * list, is `authorsWhoBlocked` in `guard.ts`.
+ */
+export function blockedByAuthors(
+  actor: Actor,
+  resource: StoryboardResource,
+  blockedBy: readonly string[],
+): boolean {
+  if (!actor || isAuthor(actor, resource)) return false
+  return blockedBy.some(
+    (blockerId) => blockerId === resource.ownerId || resource.coauthorIds.includes(blockerId),
+  )
+}
+
 /** The matrix row a bare `storyboard:read` means for this resource. */
 function resolve(action: Action, resource: StoryboardResource): MatrixAction {
   if (action !== 'storyboard:read') return action
@@ -138,6 +163,14 @@ export function can(actor: Actor, action: Action, resource: StoryboardResource):
     if (role !== 'owner' && role !== 'coauthor') return false
     if (WRITE_ACTIONS.has(matrixAction)) return false
     return true
+  }
+
+  // 2b. Hidden after an upheld report (item 2.7, decision 0045): its authors
+  //     keep it as it was, a moderator may read it to judge it, and to anyone
+  //     else it is not there. Nothing is deleted; "Show it again" undoes it.
+  if (resource.hiddenAt !== null && role !== 'owner' && role !== 'coauthor') {
+    if (!actor?.moderator) return false
+    return !WRITE_ACTIONS.has(matrixAction)
   }
 
   // 3. No action on an unreadable storyboard.

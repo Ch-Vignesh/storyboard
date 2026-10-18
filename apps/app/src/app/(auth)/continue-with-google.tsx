@@ -1,6 +1,8 @@
+import Link from '@/components/link'
+
 import { signIn } from '@/auth'
 import { googleConfigured } from '@/auth/google'
-import { safeNext } from '@/lib/safe-next'
+import { afterSignIn } from '@/lib/safe-next'
 
 /**
  * FR-1.6 — "Continue with Google", on sign-in and sign-up.
@@ -18,7 +20,9 @@ import { safeNext } from '@/lib/safe-next'
 export function ContinueWithGoogle({ next }: { next?: string | string[] | undefined }) {
   if (!googleConfigured()) return null
 
-  const destination = safeNext(next)
+  // Item 3.5 — through the onboarding gate: an onboarded person goes straight
+  // on to where they were going, a new one takes a name first.
+  const destination = afterSignIn(next)
 
   async function continueWithGoogle() {
     'use server'
@@ -61,6 +65,18 @@ export function ContinueWithGoogle({ next }: { next?: string | string[] | undefi
           Continue with Google
         </button>
       </form>
+      {/* Item 2.3 — Google creates an account too, so the same sentence sits under it. */}
+      <p className="mt-3 text-[12.5px] leading-relaxed text-ink-faint">
+        By continuing you agree to the{' '}
+        <Link href="/terms" className="text-pencil hover:underline">
+          terms
+        </Link>{' '}
+        and the{' '}
+        <Link href="/privacy" className="text-pencil hover:underline">
+          privacy policy
+        </Link>
+        .
+      </p>
     </>
   )
 }

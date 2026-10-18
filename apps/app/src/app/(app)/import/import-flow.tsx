@@ -35,10 +35,13 @@ const ACCEPT = '.docx,.md,.txt,.rtf,.fountain,.fdx'
 export function ImportFlow({
   genres,
   resume,
+  defaultVisibility,
 }: {
   genres: Genre[]
   /** A file read before a reload, picked up at its review (FR-3.2). */
   resume?: { jobId: string; fileName: string; proposal: Proposal }
+  /** Item 3.15 — what settings say a new story starts as. */
+  defaultVisibility: 'PUBLIC' | 'PRIVATE'
 }) {
   const trpc = useTRPC()
   const router = useRouter()
@@ -53,7 +56,7 @@ export function ImportFlow({
   const [title, setTitle] = useState(resume ? titleFrom(resume.fileName) : '')
   const [type, setType] = useState<StoryTypeValue>('NOVEL')
   const [genreIds, setGenreIds] = useState<string[]>([])
-  const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PRIVATE')
+  const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>(defaultVisibility)
 
   const createUpload = useMutation(trpc.import.createUpload.mutationOptions())
   const analyse = useMutation(trpc.import.analyse.mutationOptions())

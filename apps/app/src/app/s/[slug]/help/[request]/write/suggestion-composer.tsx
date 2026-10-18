@@ -4,6 +4,7 @@ import { Button } from '@storyboard/ui/components/button'
 import { Textarea } from '@storyboard/ui/components/textarea'
 import { useMutation } from '@tanstack/react-query'
 import { EditorContent, useEditor } from '@tiptap/react'
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { DocFlavour } from '@/lib/doc/schema'
@@ -15,6 +16,10 @@ import {
   SUGGESTION_NOTE_MAX_WORDS,
 } from '@/lib/schemas/constants'
 import { countWords } from '@/lib/schemas/help'
+import { allowanceLine, quotaFull, quotaFullLine, type Allowance } from '@/lib/allowance-words'
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import { RevisionComparison } from '@/components/revision-comparison'
+import { REQUEST_ASK_PREVIEW_CHARS } from '@/lib/schemas/constants'
 import { useTRPC } from '@/trpc/client'
 
 const AUTOSAVE_IDLE_MS = DRAFT_IDLE_SECONDS * 1000
@@ -32,16 +37,38 @@ export function SuggestionComposer({
   initialContent,
   constraints,
   toneNotes,
+  characterNotes,
+  ask,
+  allowance,
+  baseRevisionId,
+  headRevisionId,
+  rewrite,
+  change = false,
   minWords,
   maxWords,
   requestTitle,
   backHref,
+  initialNote,
 }: {
   suggestionId: string
   flavour: DocFlavour
   initialContent: unknown
+  /** FR-6.2 — the note saved with the draft (item 1.11). */
+  initialNote: string
   constraints: string[]
   toneNotes: string | null
+  characterNotes: string | null
+  /** Item 6.3 — the ask, in view while writing. */
+  ask: string
+  /** Items 6.3 and 6.4 — what may still be sent; null when it could not be read. */
+  allowance: Allowance | null
+  /** Item 6.6 — the text this draft was started against, and the text as it is now. */
+  baseRevisionId: string | null
+  headRevisionId: string | null
+  /** A rewrite's words stay the writer's when the base moves; say so. */
+  rewrite: boolean
+  /** Item 6.7 — a sent suggestion being changed: nothing autosaves, Send saves the change. */
+  change?: boolean
   minWords: number
   maxWords: number
   requestTitle: string
@@ -49,7 +76,9 @@ export function SuggestionComposer({
 }) {
   const trpc = useTRPC()
   const [words, setWords] = useState(0)
-  const [note, setNote] = useState('')
+  const [note, setNote] = useState(initialNote)
+  // What `persist` sends, read at save time so the callback stays stable.
+  const noteRef = useRef(initialNote)
   const [saved, setSaved] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
@@ -64,7 +93,13 @@ export function SuggestionComposer({
   const inFlight = useRef<Promise<boolean> | null>(null)
 
   const saveDraft = useMutation(trpc.suggestion.saveDraft.mutationOptions())
+  // The stable function on it, not the object, which is new every render: the
+  // autosave effect below depends on `persist`, and a `persist` remade on each
+  // re-render let the effect's clean-up clear the pending save (phase 14,
+  // item 1.4; the section editor had the same fault).
+  const { mutateAsync: saveNow } = saveDraft
   const submit = useMutation(trpc.suggestion.submit.mutationOptions())
+  const edit = useMutation(trpc.suggestion.edit.mutationOptions())
 
   const editor = useEditor({
     extensions: extensionsFor(flavour, 'Write the passage.'),
@@ -85,6 +120,9 @@ export function SuggestionComposer({
   /** Saves whatever is unsaved. True when, afterwards, nothing is. */
   const persist = useCallback(async (): Promise<boolean> => {
     if (!editor) return false
+    // Item 6.7 — a sent suggestion has no draft to save into; the change
+    // goes as one piece when Save is pressed.
+    if (change) return true
     while (inFlight.current) {
       if (!(await inFlight.current)) return false
     }
@@ -94,7 +132,7 @@ export function SuggestionComposer({
     const run = (async () => {
       setSaved('saving')
       try {
-        await saveDraft.mutateAsync({ suggestionId, contentJson: editor.getJSON() })
+        await saveNow({ suggestionId, contentJson: editor.getJSON(), note: noteRef.current })
         persisted.current = at
         setSaved('saved')
         setError(null)
@@ -111,7 +149,7 @@ export function SuggestionComposer({
     } finally {
       inFlight.current = null
     }
-  }, [editor, saveDraft, suggestionId])
+  }, [change, editor, saveNow, suggestionId])
 
   useEffect(() => {
     if (!editor) return
@@ -131,7 +169,27 @@ export function SuggestionComposer({
 
   const noteWords = countWords(note)
   const inBounds = words >= minWords && words <= maxWords
-  const canSend = inBounds && noteWords <= SUGGESTION_NOTE_MAX_WORDS && !submit.isPending && !sent
+  // Item 6.4 — a full quota writes but does not send; the reason is under the button.
+  const full = quotaFull(allowance)
+  const canSend =
+    inBounds &&
+    noteWords <= SUGGESTION_NOTE_MAX_WORDS &&
+    !submit.isPending &&
+    !edit.isPending &&
+    !sent &&
+    (!full || change)
+  const [askOpen, setAskOpen] = useState(false)
+  // Item 6.6 (FR-6.3, FR-6.7) — a draft started against text that has moved
+  // on says so, shows what moved, and can move its base; sending it as it is
+  // asks first.
+  const behind =
+    baseRevisionId !== null && headRevisionId !== null && baseRevisionId !== headRevisionId
+  const [showChange, setShowChange] = useState(false)
+  const [confirmBehind, setConfirmBehind] = useState(false)
+  const router = useRouter()
+  const rebase = useMutation(
+    trpc.suggestion.rebase.mutationOptions({ onSuccess: () => router.refresh() }),
+  )
 
   async function send() {
     // What is sent is what is saved, so the latest words are saved first, and
@@ -142,7 +200,18 @@ export function SuggestionComposer({
     if (timer.current) clearTimeout(timer.current)
     if (!(await persist())) return
     try {
-      await submit.mutateAsync({ suggestionId, note: note.trim() || undefined })
+      if (change) {
+        // Item 6.7 — the whole of it at once; the server refuses if an author
+        // opened it meanwhile.
+        if (!editor) return
+        await edit.mutateAsync({
+          suggestionId,
+          contentJson: editor.getJSON(),
+          note: note.trim() || undefined,
+        })
+      } else {
+        await submit.mutateAsync({ suggestionId, note: note.trim() || undefined })
+      }
       setSent(true)
       window.location.href = backHref
     } catch (caught) {
@@ -152,12 +221,134 @@ export function SuggestionComposer({
 
   if (!editor) return <p className="text-[13.5px] text-ink-faint">Loading the editor…</p>
 
+  // FR-5.6 — what must hold, and the tone. Pinned beside the prose from `lg`
+  // up; above the editor below it (item 4.5), never under the Send button.
+  const asked = (
+    <>
+      {constraints.length > 0 ? (
+        <div className="border border-ochre/35 bg-ochre-wash px-4 py-3.5">
+          <h2 className="text-[12px] font-medium tracking-wide text-ochre uppercase">Must hold</h2>
+          <ul className="mt-2.5 space-y-2">
+            {constraints.map((constraint, index) => (
+              <li key={index}>
+                <label className="flex items-start gap-2.5 text-[13.5px] leading-snug text-ink">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4 shrink-0 accent-ochre"
+                    checked={checked.has(index)}
+                    onChange={(event) =>
+                      setChecked((current) => {
+                        const next = new Set(current)
+                        if (event.target.checked) next.add(index)
+                        else next.delete(index)
+                        return next
+                      })
+                    }
+                  />
+                  <span>{constraint}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[11.5px] leading-relaxed text-ochre/80">
+            Ticking these is for you. Nobody else sees it.
+          </p>
+        </div>
+      ) : null}
+
+      {toneNotes ? (
+        <div className="mt-4 border border-rule bg-paper-sunk px-4 py-3.5">
+          <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">Tone</h2>
+          <p className="mt-2 text-[13px] leading-relaxed whitespace-pre-line text-ink-soft">
+            {toneNotes}
+          </p>
+        </div>
+      ) : null}
+
+      {/* Item 6.2 — the people, under their own heading. */}
+      {characterNotes ? (
+        <div className="mt-4 border border-rule bg-paper-sunk px-4 py-3.5">
+          <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
+            Characters
+          </h2>
+          <p className="mt-2 text-[13px] leading-relaxed whitespace-pre-line text-ink-soft">
+            {characterNotes}
+          </p>
+        </div>
+      ) : null}
+    </>
+  )
+
   return (
     <div className="grid gap-10 lg:grid-cols-[1fr_17rem]">
       <div>
         <h1 className="font-manuscript text-[24px] leading-tight font-medium text-ink">
           {requestTitle}
         </h1>
+        {/* Item 6.3 (FR-5.6) — the ask, its first lines, then all of it. */}
+        <p
+          className={
+            askOpen
+              ? 'mt-2 max-w-measure text-[13.5px] leading-relaxed whitespace-pre-line text-ink-soft'
+              : 'mt-2 line-clamp-3 max-w-measure text-[13.5px] leading-relaxed text-ink-soft'
+          }
+        >
+          {ask}
+        </p>
+        {ask.length > REQUEST_ASK_PREVIEW_CHARS ? (
+          <button
+            type="button"
+            className="text-[12.5px] text-pencil hover:underline"
+            aria-expanded={askOpen}
+            onClick={() => setAskOpen((was) => !was)}
+          >
+            {askOpen ? 'Show less' : 'Read all'}
+          </button>
+        ) : null}
+
+        {behind && baseRevisionId && headRevisionId ? (
+          <div className="mt-3 border-l-2 border-ochre bg-ochre-wash px-4 py-3 text-[13.5px] leading-relaxed text-ink">
+            <p>
+              The section has changed since you started.
+              {rewrite
+                ? ' Your words stay as they are; only what they are read against moves.'
+                : ''}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-4">
+              <button
+                type="button"
+                className="text-pencil hover:underline"
+                aria-expanded={showChange}
+                onClick={() => setShowChange((was) => !was)}
+              >
+                {showChange ? 'Hide what changed' : 'What changed'}
+              </button>
+              <button
+                type="button"
+                className="text-pencil hover:underline disabled:text-ink-faint"
+                disabled={rebase.isPending}
+                onClick={() => rebase.mutate({ suggestionId })}
+              >
+                Update my draft to the new text
+              </button>
+            </div>
+            {rebase.isError ? (
+              <p role="alert" className="mt-2 text-[13px] text-crimson">
+                {rebase.error.message}
+              </p>
+            ) : null}
+            {showChange ? (
+              <div className="mt-3">
+                <RevisionComparison
+                  baseId={baseRevisionId}
+                  targetId={headRevisionId}
+                  leftLabel="When you started"
+                  rightLabel="Now"
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="mt-2 flex items-center gap-3 text-[12.5px]">
           <span
@@ -201,7 +392,15 @@ export function SuggestionComposer({
             rows={3}
             maxLength={SUGGESTION_NOTE_MAX_CHARS}
             value={note}
-            onChange={(event) => setNote(event.target.value)}
+            onChange={(event) => {
+              setNote(event.target.value)
+              // Saved with the draft, like the prose, so leaving keeps it
+              // (item 1.11).
+              noteRef.current = event.target.value
+              edits.current += 1
+              if (timer.current) clearTimeout(timer.current)
+              timer.current = setTimeout(() => void persist(), AUTOSAVE_IDLE_MS)
+            }}
           />
           <p
             className={
@@ -221,13 +420,50 @@ export function SuggestionComposer({
         ) : null}
 
         <div className="mt-6 flex items-center gap-3">
-          <Button variant="primary" size="lg" disabled={!canSend} onClick={() => void send()}>
-            {submit.isPending ? 'Sending' : 'Send this to the author'}
+          <Button
+            variant="primary"
+            size="lg"
+            disabled={!canSend}
+            onClick={() => {
+              if (behind) setConfirmBehind(true)
+              else void send()
+            }}
+          >
+            {change
+              ? edit.isPending
+                ? 'Saving'
+                : 'Save the change'
+              : submit.isPending
+                ? 'Sending'
+                : 'Send this to the author'}
           </Button>
           <a href={backHref} className="text-[13.5px] text-pencil hover:underline">
-            Leave it as a draft
+            {change ? 'Back without changing it' : 'Leave it as a draft'}
           </a>
         </div>
+        <ConfirmDialog
+          open={confirmBehind}
+          title="Send it against the new text?"
+          confirmLabel="Send it anyway"
+          busy={submit.isPending}
+          onCancel={() => setConfirmBehind(false)}
+          onConfirm={() => {
+            setConfirmBehind(false)
+            void send()
+          }}
+        >
+          <p>
+            The section changed since you started this. The author will read your words against what
+            it says now, and may find them out of step with it.
+          </p>
+          <p>Update my draft to the new text, above, moves it first; your words stay yours.</p>
+        </ConfirmDialog>
+        {allowance ? (
+          <p className="mt-2 text-[12.5px] text-ink-faint">
+            {allowanceLine(allowance)}
+            {full ? ` ${quotaFullLine(allowance)}` : ''}
+          </p>
+        ) : null}
         {!inBounds ? (
           <p className="mt-2 text-[12.5px] text-ochre">
             {words < minWords
@@ -237,50 +473,20 @@ export function SuggestionComposer({
         ) : null}
       </div>
 
-      {/* FR-5.6 — pinned, so they stay visible while the prose is written. */}
-      <aside className="lg:sticky lg:top-8 lg:self-start">
-        {constraints.length > 0 ? (
-          <div className="border border-ochre/35 bg-ochre-wash px-4 py-3.5">
-            <h2 className="text-[12px] font-medium tracking-wide text-ochre uppercase">
-              Must hold
-            </h2>
-            <ul className="mt-2.5 space-y-2">
-              {constraints.map((constraint, index) => (
-                <li key={index}>
-                  <label className="flex items-start gap-2.5 text-[13.5px] leading-snug text-ink">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 size-4 shrink-0 accent-ochre"
-                      checked={checked.has(index)}
-                      onChange={(event) =>
-                        setChecked((current) => {
-                          const next = new Set(current)
-                          if (event.target.checked) next.add(index)
-                          else next.delete(index)
-                          return next
-                        })
-                      }
-                    />
-                    <span>{constraint}</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-3 text-[11.5px] leading-relaxed text-ochre/80">
-              Ticking these is for you. Nobody else sees it.
-            </p>
-          </div>
-        ) : null}
-
-        {toneNotes ? (
-          <div className="mt-4 border border-rule bg-paper-sunk px-4 py-3.5">
-            <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">Tone</h2>
-            <p className="mt-2 text-[13px] leading-relaxed whitespace-pre-line text-ink-soft">
-              {toneNotes}
-            </p>
-          </div>
-        ) : null}
-      </aside>
+      {/* FR-5.6 — pinned, so they stay visible while the prose is written.
+          Below `lg` (item 4.5) the same panel sits first, above the editor,
+          as a disclosure that starts open: the same checkboxes, one state. */}
+      {constraints.length > 0 || toneNotes || characterNotes ? (
+        <aside className="order-first lg:sticky lg:top-8 lg:order-none lg:self-start">
+          <details open className="lg:hidden">
+            <summary className="cursor-pointer text-[12px] font-medium tracking-wide text-ink-faint uppercase">
+              What the author asked for
+            </summary>
+            <div className="mt-3">{asked}</div>
+          </details>
+          <div className="hidden lg:block">{asked}</div>
+        </aside>
+      ) : null}
     </div>
   )
 }

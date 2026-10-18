@@ -21,6 +21,7 @@ function storyboard(overrides: Partial<StoryboardResource> = {}): StoryboardReso
     ownerId: OWNER,
     visibility: 'PUBLIC',
     deletedAt: null,
+    hiddenAt: null,
     coauthorIds: [COAUTHOR],
     ...overrides,
   }

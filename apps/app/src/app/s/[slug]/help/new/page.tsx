@@ -41,7 +41,7 @@ export default async function NewRequestPage({ params, searchParams }: Params) {
   )
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-12">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-2xl px-6 py-12">
       <nav className="mb-6 text-[12.5px] text-ink-faint">
         <Link href={`/s/${slug}`} className="hover:text-ink hover:underline">
           {data.storyboard.title}

@@ -48,27 +48,30 @@ export type MatrixAction = (typeof MATRIX_ACTIONS)[number]
 
 /** What each capability is called in the SRS, for test names and error copy. */
 export const ACTION_LABELS: Record<MatrixAction, string> = {
-  'storyboard:readPublic': 'Read public storyboard',
-  'storyboard:readPrivate': 'Read private storyboard',
-  'storyboard:edit': 'Edit main draft directly',
-  'storyboard:structure': 'Create / reorder chapters and sections',
-  'request:open': 'Open a contribution request',
+  // In the interface's words (SRS section 2), not the SRS table's: a refusal
+  // shows the label to the person, so "Delete storyboard" put a banned word on
+  // screen until phase 14 (item 1.13). The keys name the SRS rows.
+  'storyboard:readPublic': 'Read a public story',
+  'storyboard:readPrivate': 'Read a private story',
+  'storyboard:edit': 'Edit the main draft',
+  'storyboard:structure': 'Add, rename or reorder chapters and sections',
+  'request:open': 'Ask for help on a section',
   'suggestion:decide': 'Accept or pass on a suggestion',
-  'revision:restore': 'Restore an earlier revision',
-  'version:create': 'Create an alternate version',
+  'revision:restore': 'Restore an earlier version',
+  'version:create': 'Start an alternate version',
   'coauthor:invite': 'Invite a co-author',
-  'storyboard:setVisibility': 'Change visibility',
-  'storyboard:delete': 'Delete storyboard',
-  'suggestion:submit': 'Submit a suggestion',
+  'storyboard:setVisibility': 'Change who can read a story',
+  'storyboard:delete': 'Delete a story',
+  'suggestion:submit': 'Send a suggestion',
   'idea:post': 'Post an idea',
-  'storyboard:spinOff': 'Spin off (own copy)',
-  'storyboard:export': 'Export the manuscript to a file',
-  'report:create': 'Report a user or storyboard',
+  'storyboard:spinOff': 'Write your own version of a story',
+  'storyboard:export': 'Take the manuscript out as a file',
+  'report:create': 'Report a person or a story',
 }
 
 /**
- * The table itself. Read it against the SRS row by row; it is in the same order
- * and uses the same wording via ACTION_LABELS.
+ * The table itself. Read it against the SRS row by row; it is in the same order,
+ * and each key names its SRS row.
  *
  * The starred cells in the SRS (owner and co-author submitting a suggestion)
  * are `true` here: the star is about bypassing the three-suggestion quota

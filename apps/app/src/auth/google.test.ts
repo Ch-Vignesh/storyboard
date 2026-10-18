@@ -79,7 +79,13 @@ describe.skipIf(!databaseUrl)('resolving a Google sign-in', () => {
 
     const row = await db.user.findUniqueOrThrow({
       where: { id: outcome.userId },
-      select: { emailVerifiedAt: true, displayName: true, passwordHash: true, rulesSeenAt: true },
+      select: {
+        emailVerifiedAt: true,
+        displayName: true,
+        passwordHash: true,
+        rulesSeenAt: true,
+        termsAcceptedAt: true,
+      },
     })
     // Google has already done what the verification email exists to do.
     expect(row.emailVerifiedAt).not.toBeNull()
@@ -87,7 +93,10 @@ describe.skipIf(!databaseUrl)('resolving a Google sign-in', () => {
     // No password, so the credentials provider refuses this account by the
     // check it already makes.
     expect(row.passwordHash).toBeNull()
-    expect(row.rulesSeenAt).not.toBeNull()
+    // Item 2.3 — the button said "By continuing you agree to the terms"; the
+    // rules themselves are read on the last onboarding step, not here.
+    expect(row.termsAcceptedAt).not.toBeNull()
+    expect(row.rulesSeenAt).toBeNull()
   })
 
   it('links to the existing account rather than making a second one', async () => {
@@ -146,5 +155,56 @@ describe.skipIf(!databaseUrl)('resolving a Google sign-in', () => {
 
     const outcome = await resolveGoogleUser({ email, email_verified: true })
     expect(outcome.ok).toBe(true)
+  })
+
+  // Phase 14, item 3.16 — settings can say whether Google is a way in.
+  it('remembers that Google signed the account in, new or existing', async () => {
+    const fresh = address('remembered-new')
+    await resolveGoogleUser({ email: fresh, email_verified: true, name: 'Ada' })
+    const created = await track(fresh)
+    if (!created) throw new Error('No account was created.')
+    const newRow = await db.user.findUniqueOrThrow({
+      where: { id: created.id },
+      select: { googleLinkedAt: true },
+    })
+    expect(newRow.googleLinkedAt).toBeInstanceOf(Date)
+
+    const email = address('remembered-existing')
+    const existing = await db.user.create({
+      data: { email, emailVerifiedAt: new Date(), passwordHash: 'argon2-placeholder' },
+      select: { id: true },
+    })
+    made.push(existing.id)
+    await resolveGoogleUser({ email, email_verified: true })
+    const linked = await db.user.findUniqueOrThrow({
+      where: { id: existing.id },
+      select: { googleLinkedAt: true },
+    })
+    expect(linked.googleLinkedAt).toBeInstanceOf(Date)
+  })
+
+  it('refuses an account that turned Google off, and does not link it again', async () => {
+    const email = address('off')
+    const row = await db.user.create({
+      data: {
+        email,
+        emailVerifiedAt: new Date(),
+        passwordHash: 'argon2-placeholder',
+        googleDisconnectedAt: new Date(),
+      },
+      select: { id: true },
+    })
+    made.push(row.id)
+
+    expect(await resolveGoogleUser({ email, email_verified: true })).toEqual({
+      ok: false,
+      reason: 'disconnected',
+    })
+    const after = await db.user.findUniqueOrThrow({
+      where: { id: row.id },
+      select: { googleLinkedAt: true, googleDisconnectedAt: true },
+    })
+    expect(after.googleLinkedAt).toBeNull()
+    expect(after.googleDisconnectedAt).toBeInstanceOf(Date)
   })
 })

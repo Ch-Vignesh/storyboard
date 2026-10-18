@@ -21,7 +21,7 @@ These are constraints, not aspirations. Violating one is a bug.
 1. **No AI anywhere in the writing path.** No generated prose, no summaries, no chapter detection, no moderation scoring. The value of the product is that a human helped. An AI feature would dissolve it. (Revisit only after v1 is live and only for non-prose surfaces.)
 2. **The interface never speaks git.** Writers see drafts, versions, suggestions, and spin-offs. See §2.
 3. **Credit is permanent and visible.** Every accepted contribution creates a durable, addressable record. Removing contributed text does not remove the record of the contribution.
-4. **The author is never cornered.** Rejecting everything, accepting nothing, or walking away for a month are all supported states with no penalty.
+4. **The author is never cornered.** Rejecting everything, accepting nothing, or walking away for a month are all supported states with no penalty. _(Amended 2026-10-18 by decision 0050, D-8: a request closes by itself thirty days after it is opened, and says so from the day it opens; opening it again starts the thirty days over.)_
 5. **Scarcity over volume.** A contributor gets three open suggestions per storyboard. The product optimises for considered help, not throughput.
 6. **Honest about risk.** Posting an unfinished manuscript in public carries copying risk. The product says so plainly rather than implying protection it cannot deliver. See FR-13.6.
 

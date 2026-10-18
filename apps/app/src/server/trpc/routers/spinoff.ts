@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { canReadStoryboard, loadStoryboard } from '@/lib/authz/guard'
+import { hasBlocked } from '@/server/blocks'
 import { publicId, slugify } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import { BULK_WRITE_TRANSACTION, DAILY_LIMITS } from '@/lib/schemas/constants'
@@ -78,9 +79,10 @@ export const spinOffRouter = createTRPCRouter({
         })
       }
 
+      // A removed alternate (FR-10.1, phase 14 item 1.1) cannot be spun off.
       const source = await ctx.db.version.findFirst({
         where: input.versionId
-          ? { id: input.versionId, storyboardId }
+          ? { id: input.versionId, storyboardId, deletedAt: null }
           : { storyboardId, isMain: true },
         select: { id: true },
       })
@@ -195,9 +197,11 @@ export const spinOffRouter = createTRPCRouter({
         windowMs: DAY_MS,
       })
 
-      // FR-10.3 — the original author is told. After the transaction.
-      await afterCommit('spinoff.create.notify', () =>
-        ctx.db.notification.create({
+      // FR-10.3 — the original author is told. After the transaction. Unless
+      // they have blocked this person (decision 0046): then nothing.
+      await afterCommit('spinoff.create.notify', async () => {
+        if (await hasBlocked(ctx.db, original.ownerId, userId)) return
+        await ctx.db.notification.create({
           data: {
             userId: original.ownerId,
             type: 'SPIN_OFF_CREATED',
@@ -207,8 +211,8 @@ export const spinOffRouter = createTRPCRouter({
               title: original.title,
             },
           },
-        }),
-      )
+        })
+      })
 
       log.info(
         { event: 'spinoff.created', spinOffId: created.id, originalId: original.id, userId },
@@ -364,6 +368,7 @@ export const spinOffRouter = createTRPCRouter({
         where: {
           forkedFromId: storyboardId,
           deletedAt: null,
+          hiddenAt: null,
           // A private spin-off is somebody's private draft. The count below is
           // honest about how many exist; the list only names the public ones.
           visibility: 'PUBLIC',
@@ -379,7 +384,7 @@ export const spinOffRouter = createTRPCRouter({
       })
 
       const total = await ctx.db.storyboard.count({
-        where: { forkedFromId: storyboardId, deletedAt: null },
+        where: { forkedFromId: storyboardId, deletedAt: null, hiddenAt: null },
       })
 
       return { spinOffs, total, privateCount: total - spinOffs.length }

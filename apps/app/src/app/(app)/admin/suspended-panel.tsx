@@ -20,13 +20,14 @@ export function SuspendedPanel() {
   const queryClient = useQueryClient()
   const { data: suspended, isPending } = useQuery(trpc.admin.suspended.queryOptions())
 
-  const lift = useMutation(
-    trpc.admin.setUserStatus.mutationOptions({
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: trpc.admin.suspended.queryKey() })
-      },
-    }),
-  )
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: trpc.admin.suspended.queryKey() })
+    await queryClient.invalidateQueries(trpc.admin.findAccount.pathFilter())
+  }
+  const lift = useMutation(trpc.admin.setUserStatus.mutationOptions({ onSuccess: refresh }))
+  // Decision 0043 (item 2b.5) — a ban is what "Lift the suspension" cannot undo.
+  const unban = useMutation(trpc.admin.unban.mutationOptions({ onSuccess: refresh }))
+  const error = lift.error ?? unban.error
 
   return (
     <section className="mt-12 border-t border-rule pt-8">
@@ -61,7 +62,7 @@ export function SuspendedPanel() {
                     ) : null}
                   </p>
                   <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-faint">
-                    Suspended{' '}
+                    {user.bannedAt ? 'Banned' : 'Suspended'}{' '}
                     {user.suspendedAt
                       ? user.suspendedAt.toLocaleDateString('en-GB', {
                           day: 'numeric',
@@ -70,23 +71,38 @@ export function SuspendedPanel() {
                       : ''}{' '}
                     {by} · {user.upheld} upheld {user.upheld === 1 ? 'report' : 'reports'}
                   </p>
+                  {user.standingNote ? (
+                    <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
+                      Note: {user.standingNote}
+                    </p>
+                  ) : null}
                 </div>
-                <Button
-                  size="sm"
-                  disabled={lift.isPending}
-                  onClick={() => lift.mutate({ userId: user.id, status: 'ACTIVE' })}
-                >
-                  Lift the suspension
-                </Button>
+                {user.bannedAt ? (
+                  <Button
+                    size="sm"
+                    disabled={unban.isPending}
+                    onClick={() => unban.mutate({ userId: user.id })}
+                  >
+                    Lift the ban
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    disabled={lift.isPending}
+                    onClick={() => lift.mutate({ userId: user.id, status: 'ACTIVE' })}
+                  >
+                    Lift the suspension
+                  </Button>
+                )}
               </li>
             )
           })}
         </ul>
       )}
 
-      {lift.error ? (
+      {error ? (
         <p role="alert" className="mt-2 text-[13px] text-crimson">
-          {lift.error.message}
+          {error.message}
         </p>
       ) : null}
     </section>

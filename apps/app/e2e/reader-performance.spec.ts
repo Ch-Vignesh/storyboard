@@ -191,11 +191,13 @@ test.describe('the reader at 120,000 words (NFR-1)', () => {
     // near the budget here would mean the throttled case is already lost.
     expect(fcp).toBeLessThan(1_200)
 
-    // Move through several chapters; each is its own payload. The rail button
-    // carries its word count too, so match on the start of its name.
+    // Move through several chapters; each is its own payload. The rail entry
+    // carries its word count too, so match on the start of its name. It is a
+    // link to the chapter's address (phase 14, item 1.14), followed on the
+    // client, so the same document and the same observer stay.
     for (const number of [2, 3, 12]) {
       await page
-        .getByRole('button', {
+        .getByRole('link', {
           name: new RegExp(`^${String(number)}\\. Chapter ${String(number)}\\b`),
         })
         .click()

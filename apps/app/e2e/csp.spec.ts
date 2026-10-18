@@ -47,7 +47,16 @@ function violations(page: Page): string[] {
 }
 
 /** Signed out, and every one of these was prerendered before decision 0025. */
-const PUBLIC_PAGES = ['/signup', '/signin', '/rules', '/browse', '/a-page-that-does-not-exist']
+const PUBLIC_PAGES = [
+  '/signup',
+  '/signin',
+  '/rules',
+  '/contact',
+  '/privacy',
+  '/terms',
+  '/browse',
+  '/a-page-that-does-not-exist',
+]
 
 test(
   'every page is sent with a policy that carries a nonce',

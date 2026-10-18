@@ -16,11 +16,13 @@ export function CreateStoryboardForm() {
   const trpc = useTRPC()
   const router = useRouter()
   const { data: genres } = useSuspenseQuery(trpc.user.genres.queryOptions())
+  const { data: me } = useSuspenseQuery(trpc.user.me.queryOptions())
 
   const [title, setTitle] = useState('')
   const [type, setType] = useState<StoryTypeValue>('NOVEL')
   const [genreIds, setGenreIds] = useState<string[]>([])
-  const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC')
+  // Item 3.15 — starts where settings say; FR-13.6's words still sit beside it.
+  const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>(me.defaultVisibility)
 
   const create = useMutation(
     trpc.storyboard.create.mutationOptions({

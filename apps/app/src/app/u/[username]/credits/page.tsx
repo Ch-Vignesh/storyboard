@@ -31,7 +31,7 @@ export default async function CreditLinesPage({ params }: Params) {
   }
 
   return (
-    <main id="main" className="mx-auto max-w-2xl px-6 py-12">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-2xl px-6 py-12">
       <nav className="mb-6 text-[12.5px] text-ink-faint">
         <Link href={`/@${username}`} className="hover:text-ink hover:underline">
           {data.name}

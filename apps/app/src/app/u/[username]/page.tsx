@@ -4,23 +4,21 @@ import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
 import { ContributionCalendar } from '@/components/contribution-calendar'
+import { CopyLink } from '@/components/copy-link'
+import { UserAvatar } from '@/components/user-avatar'
 import { STORY_TYPE_LABELS } from '@/lib/schemas/storyboard'
+import { readTimeZone } from '@/lib/dates'
 import { caller } from '@/trpc/server'
 
+import { BlockButton } from '@/components/block-button'
 import { ReportButton } from '@/components/report-button'
 
-import { EraseCredit } from './erase-credit'
+import { ContributionFeed } from './contribution-feed'
 import { PassedWork } from './passed-work'
 
 type Params = { params: Promise<{ username: string }> }
 
 export const dynamic = 'force-dynamic'
-
-const TYPE_LABELS = {
-  PROSE: 'wrote a passage',
-  IDEA: 'an idea that helped',
-  COAUTHOR: 'co-author',
-} as const
 
 async function load(username: string) {
   try {
@@ -47,28 +45,52 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * changes; the display name is what is shown.
  */
 export default async function ProfilePage({ params }: Params) {
+  const timeZone = await readTimeZone()
   const { username } = await params
   const data = await load(username)
   const { user, counts, authored, credits, passed, calendar } = data
-
-  const excerptOf = (text: string | null | undefined) =>
-    text && text.length > 160 ? `${text.slice(0, 160).trimEnd()}…` : text
+  const handle = user.username ?? username
 
   return (
-    <main id="main" className="mx-auto max-w-3xl px-6 py-12">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-3xl px-6 py-12">
       <header>
-        <h1 className="font-manuscript text-[32px] leading-tight font-medium text-ink">
-          {user.displayName ?? user.username}
-        </h1>
-        <p className="mt-1 text-[13.5px] text-ink-faint">@{user.username}</p>
+        <div className="flex items-center gap-5">
+          {/* Item 3.13 — the picture, or initials; the name is beside it. */}
+          <UserAvatar person={user} size="xl" />
+          <div className="min-w-0">
+            <h1 className="font-manuscript text-[32px] leading-tight font-medium text-ink">
+              {user.displayName ?? user.username}
+            </h1>
+            <p className="mt-1 text-[13.5px] text-ink-faint">
+              @{user.username}
+              {' · '}
+              {/* Item 6.11 — the profile's address, to hand to someone. */}
+              <CopyLink path={`/@${handle}`} />
+            </p>
+          </div>
+        </div>
         {user.bio ? (
           <p className="mt-4 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
             {user.bio}
           </p>
         ) : null}
+        {/* Item 6.10 — your own profile says where it is changed. */}
+        {data.isSelf ? (
+          <p className="mt-4 text-[13px] text-ink-faint">
+            This is your profile as others see it.{' '}
+            <Link href="/settings" className="text-pencil hover:underline">
+              Edit your profile in Settings
+            </Link>
+          </p>
+        ) : null}
         {user.suspended ? (
           <p className="mt-4 border-l-2 border-crimson bg-paper-sunk px-4 py-2.5 text-[13.5px] text-ink">
-            Your account is suspended while a report is reviewed. Only you can see this.
+            Your account is suspended while a report is reviewed. Only you can see this. If you
+            think that&rsquo;s wrong,{' '}
+            <Link href="/contact" className="underline">
+              write to a person
+            </Link>
+            .
           </p>
         ) : null}
       </header>
@@ -93,7 +115,11 @@ export default async function ProfilePage({ params }: Params) {
       </dl>
 
       <section className="mt-10">
-        <ContributionCalendar days={calendar} />
+        <ContributionCalendar
+          days={calendar}
+          name={user.displayName ?? user.username ?? username}
+          isSelf={data.isSelf}
+        />
       </section>
 
       {authored.length > 0 ? (
@@ -124,6 +150,10 @@ export default async function ProfilePage({ params }: Params) {
                     ) : null}
                     <span className="mt-0.5 block text-[12.5px] text-ink-faint">
                       {STORY_TYPE_LABELS[storyboard.type]}
+                      {/* Item 6.17 — the same figure the story's pages give. */}
+                      {storyboard.ownShare !== null
+                        ? ` · ${String(storyboard.ownShare)}% the author’s own words`
+                        : ''}
                     </span>
                   </span>
                   {storyboard.requests.length > 0 ? (
@@ -139,62 +169,24 @@ export default async function ProfilePage({ params }: Params) {
         </section>
       ) : null}
 
-      {/* FR-9.3 — the feed of accepted work, with an excerpt and a link. */}
+      {/* FR-9.3 — the feed of accepted work, with an excerpt and a link to where it reads. */}
       <section className="mt-12">
         <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
           Contributions
         </h2>
-        {credits.length === 0 ? (
-          <p className="mt-4 text-[14px] leading-relaxed text-ink-soft">
-            Nothing yet. Contributions appear here when an author accepts a suggestion, or marks an
-            idea as having helped.
-          </p>
-        ) : (
-          <ul className="mt-4 space-y-5">
-            {credits.map((credit) => (
-              <li key={credit.id} className="border-l-2 border-rule py-1 pl-4">
-                <p className="text-[13px] text-ink-faint">
-                  <Link
-                    href={`/s/${credit.storyboard.slug}`}
-                    className="text-pencil hover:underline"
-                  >
-                    {credit.storyboard.title}
-                  </Link>
-                  {' · '}
-                  {TYPE_LABELS[credit.type]}
-                  {' · '}
-                  <time dateTime={credit.createdAt.toISOString()}>
-                    {credit.createdAt.toLocaleDateString('en-GB', {
-                      day: 'numeric',
-                      month: 'long',
-                      year: 'numeric',
-                    })}
-                  </time>
-                </p>
-                {credit.suggestion?.contentText || credit.idea?.body ? (
-                  <p className="mt-1.5 max-w-measure font-manuscript text-[15px] leading-relaxed text-ink">
-                    {excerptOf(credit.suggestion?.contentText ?? credit.idea?.body)}
-                  </p>
-                ) : null}
-                {/* Principle 1.3.3 — the record outlives the text. */}
-                {!credit.isLive ? (
-                  <p className="mt-1.5 text-[12.5px] text-ink-faint">
-                    This writing is no longer in the main draft. The contribution stands.
-                  </p>
-                ) : null}
-                {/* Decision 0013 — offered only to the person it belongs to. */}
-                {data.isSelf ? (
-                  <EraseCredit creditId={credit.id} storyboardTitle={credit.storyboard.title} />
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
+        <ContributionFeed
+          username={handle}
+          initial={{ items: credits, nextCursor: data.creditsCursor }}
+          isSelf={data.isSelf}
+          timeZone={timeZone}
+        />
       </section>
 
       {/* FR-9.4 — collapsed, and private unless its author says otherwise. */}
       <PassedWork
-        passed={passed}
+        username={handle}
+        initial={{ items: passed, nextCursor: data.passedCursor }}
+        count={data.passedCount}
         isSelf={data.isSelf}
         isPublic={data.passedIsPublic}
         canToggle={data.canTogglePassed}
@@ -202,15 +194,24 @@ export default async function ProfilePage({ params }: Params) {
 
       <section className="mt-12 flex flex-wrap items-baseline justify-between gap-4 border-t border-rule pt-6">
         <p className="text-[13px] text-ink-faint">
-          <Link
-            href={`/u/${user.username ?? username}/credits`}
-            className="text-pencil hover:underline"
-          >
+          <Link href={`/u/${handle}/credits`} className="text-pencil hover:underline">
             Credit lines for a manuscript&rsquo;s front matter
           </Link>
         </p>
         {/* FR-13.5 — quiet, and only on somebody else's profile. */}
-        {!data.isSelf ? <ReportButton targetType="USER" targetId={user.id} /> : null}
+        {!data.isSelf ? (
+          <div className="flex flex-wrap items-center gap-4">
+            <ReportButton targetType="USER" targetId={user.id} />
+            {/* Decision 0046 (item 2.9) — and the one tool before a report. */}
+            {data.canBlock ? (
+              <BlockButton
+                userId={user.id}
+                name={user.displayName ?? user.username ?? 'this person'}
+                blocked={data.blockedByMe}
+              />
+            ) : null}
+          </div>
+        ) : null}
       </section>
     </main>
   )

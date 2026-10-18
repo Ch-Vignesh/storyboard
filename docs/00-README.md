@@ -8,16 +8,19 @@ An open-source platform where a writer posts a draft they are stuck on, other wr
 
 ## The documents
 
-| File                 | What it holds                                                                                                                                  | Who reads it                                |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| `01-srs.md`          | Product spec. Vocabulary, roles, numbered functional requirements FR-1 … FR-15, screen inventory, non-functional requirements, open decisions. | You, before every feature.                  |
-| `02-architecture.md` | Data model, revision/branch strategy, diff engine, import engine, tRPC API surface, stack, environment.                                        | You, constantly.                            |
-| `03-build-plan.md`   | Phases 0–7 with exit criteria. Each phase cites the FR numbers it satisfies.                                                                   | You, one phase at a time.                   |
-| `prototype.html`     | Clickable visual prototype of six screens. Static, no backend.                                                                                 | You, to react to, and as the visual target. |
+| File                    | What it holds                                                                                                                                  | Who reads it                                |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `01-srs.md`             | Product spec. Vocabulary, roles, numbered functional requirements FR-1 … FR-15, screen inventory, non-functional requirements, open decisions. | You, before every feature.                  |
+| `02-architecture.md`    | Data model, revision/branch strategy, diff engine, import engine, tRPC API surface, stack, environment.                                        | You, constantly.                            |
+| `03-build-plan.md`      | Phases 0–7 with exit criteria. Each phase cites the FR numbers it satisfies.                                                                   | You, one phase at a time.                   |
+| `prototype.html`        | Clickable visual prototype of six screens. Static, no backend.                                                                                 | You, to react to, and as the visual target. |
+| `04-phase-plan.md`      | The live tracker: where the build stands, every phase's tasks and exit criteria, open decisions.                                               | You, first, every session.                  |
+| `05-deployment.md`      | How it gets from a laptop to the public internet: the accounts, services and environment variables, in order.                                  | Whoever deploys.                            |
+| `06-completion-plan.md` | Phase 14's checklist: every gap the 2026-10-17 review found, how to work it, and the final pass that re-scores the product.                    | You, item by item, during phase 14.         |
 
 ## How to use these documents
 
-These four files live in `/docs` at the repository root. The working rules they imply:
+These files live in `/docs` at the repository root. The working rules they imply:
 
 Read `01-srs.md` and `02-architecture.md` before writing code. Work one phase at a time from `03-build-plan.md`; `04-phase-plan.md` tracks where that work actually stands. Do not start a phase until the previous phase's exit criteria pass.
 

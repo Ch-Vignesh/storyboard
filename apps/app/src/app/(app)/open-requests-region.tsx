@@ -3,7 +3,8 @@
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import Link from '@/components/link'
 
-import { REQUEST_KINDS } from '@/lib/schemas/help'
+import { REQUEST_KINDS, closesOn } from '@/lib/schemas/help'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
 /**
@@ -13,7 +14,7 @@ import { useTRPC } from '@/trpc/client'
  * (FR-11.2). Region two, "requests you have helped with that have news", needs
  * the notification work in phase 3 and is not faked here.
  */
-export function OpenRequestsRegion() {
+export function OpenRequestsRegion({ timeZone }: { timeZone: string }) {
   const trpc = useTRPC()
   const { data: pinned } = useSuspenseQuery(trpc.user.pinnedGenres.queryOptions())
   const genreIds = pinned.map((entry) => entry.genre.id)
@@ -72,6 +73,8 @@ export function OpenRequestsRegion() {
                     {request.kind === 'UNBLOCK'
                       ? `${String(request._count.ideas)} ${request._count.ideas === 1 ? 'idea' : 'ideas'} so far`
                       : `${String(request._count.suggestions)} ${request._count.suggestions === 1 ? 'suggestion' : 'suggestions'} · ${String(request.minWords)}–${String(request.maxWords)} words`}
+                    {/* Item 6.15 (D-8) — from the day it opens, in the reader's zone. */}
+                    {` · Closes on ${formatInZone(closesOn(request.openedAt), 'dayMonth', timeZone)}`}
                   </span>
                 </Link>
               </li>

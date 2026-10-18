@@ -3,7 +3,11 @@ import Link from '@/components/link'
 
 import { requireSession } from '@/auth/require-session'
 import { PASS_CHIPS, suggestionStateLabel } from '@/lib/schemas/help'
+import { readTimeZone } from '@/lib/dates'
+import { formatInZone } from '@/lib/time-zone'
 import { caller } from '@/trpc/server'
+
+import { DraftsAndStale } from './drafts'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = { title: 'Your suggestions' }
@@ -17,11 +21,18 @@ export const metadata: Metadata = { title: 'Your suggestions' }
  * no caller until the 2026-10-16 spec review.
  */
 export default async function YourSuggestionsPage() {
+  const timeZone = await readTimeZone()
   await requireSession()
-  const suggestions = await caller.suggestion.listMine()
+  const all = await caller.suggestion.listMine()
+  // Item 6.5 — drafts and stale ones are yours to act on; the rest is sent.
+  const drafts = all.filter((suggestion) => suggestion.state === 'DRAFT')
+  const stale = all.filter((suggestion) => suggestion.state === 'STALE')
+  const suggestions = all.filter(
+    (suggestion) => suggestion.state !== 'DRAFT' && suggestion.state !== 'STALE',
+  )
 
   return (
-    <main id="main" className="mx-auto max-w-2xl px-6 py-12">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-2xl px-6 py-12">
       <nav className="mb-6 text-[12.5px] text-ink-faint">
         <Link href="/" className="hover:text-ink hover:underline">
           Your dashboard
@@ -32,10 +43,12 @@ export default async function YourSuggestionsPage() {
         Your suggestions
       </h1>
       <p className="mt-3 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
-        Everything you have sent, newest first, and where each one stands.
+        Everything you have written for someone, newest first, and where each one stands.
       </p>
 
-      {suggestions.length === 0 ? (
+      <DraftsAndStale drafts={drafts} stale={stale} timeZone={timeZone} />
+
+      {suggestions.length === 0 && drafts.length === 0 && stale.length === 0 ? (
         <p className="mt-8 border border-rule bg-paper-sunk px-6 py-10 text-center text-[14px] text-ink-soft">
           Nothing sent yet. When you write for someone&rsquo;s passage, it is kept here.{' '}
           <Link href="/browse" className="text-pencil hover:underline">
@@ -43,6 +56,8 @@ export default async function YourSuggestionsPage() {
           </Link>
           .
         </p>
+      ) : suggestions.length === 0 ? (
+        <p className="mt-8 text-[14px] text-ink-soft">Nothing sent yet.</p>
       ) : (
         <ul className="mt-8 divide-y divide-rule border-y border-rule">
           {suggestions.map((suggestion) => {
@@ -60,10 +75,10 @@ export default async function YourSuggestionsPage() {
                     {suggestionStateLabel(suggestion.state, suggestion.request.state)}
                     {suggestion.state === 'PASSED' && chip ? ` (${chip.label.toLowerCase()})` : ''}
                     {suggestion.submittedAt
-                      ? ` · sent ${suggestion.submittedAt.toLocaleDateString('en-GB', {
-                          day: 'numeric',
-                          month: 'long',
-                        })}`
+                      ? ` · sent ${formatInZone(suggestion.submittedAt, 'dayMonth', timeZone)}`
+                      : ''}
+                    {suggestion.editedAt
+                      ? ` · edited ${formatInZone(suggestion.editedAt, 'dayMonth', timeZone)}`
                       : ''}
                   </p>
                 </Link>

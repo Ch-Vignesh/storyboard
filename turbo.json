@@ -10,6 +10,7 @@
     "AUTH_URL",
     "AUTH_TRUST_HOST",
     "EMAIL_FROM",
+    "SUPPORT_EMAIL",
     "RESEND_API_KEY",
     "SMTP_HOST",
     "SMTP_PORT",

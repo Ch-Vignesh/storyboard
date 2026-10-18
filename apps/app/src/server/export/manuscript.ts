@@ -60,8 +60,11 @@ export async function assembleManuscript(
       : { title: 'a story that is no longer public', author: null, url: null }
     : null
 
+  // A removed alternate (FR-10.1, phase 14 item 1.1) cannot be exported.
   const version = await db.version.findFirst({
-    where: versionId ? { id: versionId, storyboardId } : { storyboardId, isMain: true },
+    where: versionId
+      ? { id: versionId, storyboardId, deletedAt: null }
+      : { storyboardId, isMain: true },
     select: { id: true },
   })
   if (!version) {

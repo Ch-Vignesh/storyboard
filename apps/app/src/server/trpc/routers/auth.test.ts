@@ -15,6 +15,7 @@ import { randomInt, randomUUID } from 'node:crypto'
 import { createPrismaClient, type PrismaClient } from '@storyboard/db'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { hashToken } from '@/auth/tokens'
 import type { Mail } from '@/server/mail/mailer'
 
 const sent: Mail[] = []
@@ -183,9 +184,44 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
     expect(sent.map((mail) => mail.subject)).toEqual(['You already have a Draftboard account'])
   })
 
+  // Phase 14, item 3.4 — an account with no password signs in with Google,
+  // and used to be told to sign in with a password it never had.
+  it('tells a Google-only account to continue with Google, and a password one to sign in', async () => {
+    const google = anAddress('existing-google')
+    await db.user.create({ data: { email: google, emailVerifiedAt: new Date() } })
+    expect(await call.signUp({ email: google })).toEqual({ status: 'sent' })
+    expect(sent[0]?.text).toContain('Continue with Google')
+    expect(sent[0]?.text).toMatch(/\/forgot-password$/mu)
+
+    sent.length = 0
+    const { email: withPassword } = await aWriterWithAPassword('existing-password')
+    expect(await call.signUp({ email: withPassword })).toEqual({ status: 'sent' })
+    expect(sent[0]?.text).not.toContain('Continue with Google')
+    expect(sent[0]?.text).toMatch(/^Sign in here:$/mu)
+  })
+
+  // Phase 14, item 3.5 — where they were going rides on the confirmation link.
+  it('puts a safe destination on the confirmation link, and drops an unsafe one', async () => {
+    await call.signUp({ email: anAddress('next-safe'), next: '/s/the-weir/help/abc' })
+    expect(sent[0]?.text).toMatch(/\/verify\?token=[\w-]+&next=%2Fs%2Fthe-weir%2Fhelp%2Fabc$/mu)
+
+    sent.length = 0
+    await call.signUp({ email: anAddress('next-unsafe'), next: 'https://evil.example/' })
+    expect(sent[0]?.text).toMatch(/\/verify\?token=[\w-]+$/mu)
+
+    sent.length = 0
+    const back = anAddress('next-resend')
+    await db.user.create({ data: { email: back } })
+    // The resend keeps it too, so the second link is as good as the first.
+    expect(await call.resendVerification({ email: back, next: '/browse' })).toEqual({
+      status: 'sent',
+    })
+    expect(sent[0]?.text).toMatch(/&next=%2Fbrowse$/mu)
+  })
+
   // ── FR-1.7: a forgotten password ───────────────────────────────────────────
 
-  async function aWriterWithAPassword(label: string, password = 'the original password') {
+  async function aWriterWithAPassword(label: string, password = 'The original password 8?') {
     const { hashPassword } = await import('@/auth/password')
     const email = anAddress(label)
     const user = await db.user.create({
@@ -246,13 +282,13 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
     expect(await call.checkPasswordReset({ token: second })).toEqual({ email })
     await call.resetPassword({
       token: second,
-      password: 'a brand new passphrase',
-      confirm: 'a brand new passphrase',
+      password: 'A brand new passphrase 2?',
+      confirm: 'A brand new passphrase 2?',
     })
 
     const user = await db.user.findUniqueOrThrow({ where: { id } })
-    expect(await verifyPassword(String(user.passwordHash), 'a brand new passphrase')).toBe(true)
-    expect(await verifyPassword(String(user.passwordHash), 'the original password')).toBe(false)
+    expect(await verifyPassword(String(user.passwordHash), 'A brand new passphrase 2?')).toBe(true)
+    expect(await verifyPassword(String(user.passwordHash), 'The original password 8?')).toBe(false)
     expect(user.passwordChangedAt?.getTime()).toBeGreaterThanOrEqual(before)
     expect(await db.passwordResetToken.count({ where: { userId: id, consumedAt: null } })).toBe(0)
     expect(sent.at(-1)?.subject).toBe('Your Draftboard password was changed')
@@ -262,8 +298,8 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
     await expect(
       call.resetPassword({
         token: first,
-        password: 'one more attempt',
-        confirm: 'one more attempt',
+        password: 'One more attempt 3?',
+        confirm: 'One more attempt 3?',
       }),
     ).rejects.toThrow(/expired/u)
   })
@@ -275,6 +311,35 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
     if (!token) throw new Error('No confirmation link was sent.')
     return token
   }
+
+  /**
+   * FR-1.4 (phase 14, item 1.16) — a used link, opened again once the account
+   * is finished, says the account is ready; one that expired before the
+   * account was finished offers a new link. Both read "expired… request a new
+   * one" and led to sign-up until then.
+   */
+  it('says the account is ready when a used link is opened again', async () => {
+    const email = anAddress('again')
+    await call.signUp({ email })
+    const token = tokenFromVerifyMail()
+    await call.setPassword({ token, password: 'A-long-enough-passphrase-1!' })
+    expect(await call.verifyEmail({ token })).toEqual({ status: 'finished', email })
+  })
+
+  it('names the address of a link that expired before the account was finished', async () => {
+    const email = anAddress('late')
+    await call.signUp({ email })
+    const token = tokenFromVerifyMail()
+    await db.emailVerificationToken.updateMany({
+      where: { tokenHash: hashToken(token) },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    })
+    expect(await call.verifyEmail({ token })).toEqual({ status: 'expired', email })
+    // A link nobody issued stays "expired or used", with no address to offer.
+    await expect(call.verifyEmail({ token: 'x'.repeat(40) })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    })
+  })
 
   /**
    * Phase 12 audit. A confirmation link chooses the first password and never
@@ -292,13 +357,14 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
     const newer = tokenFromVerifyMail()
     expect(newer).not.toBe(older)
 
-    await call.setPassword({ token: newer, password: 'the first passphrase' })
+    await call.setPassword({ token: newer, password: 'The first passphrase 4?' })
 
-    // The older link closed with it.
-    await expect(call.verifyEmail({ token: older })).rejects.toThrow(/expired/u)
-    await expect(call.setPassword({ token: older, password: 'somebody else now' })).rejects.toThrow(
-      /expired/u,
-    )
+    // The older link closed with it: opened, it says the account is ready
+    // (item 1.16), and it cannot set a password.
+    expect(await call.verifyEmail({ token: older })).toEqual({ status: 'finished', email })
+    await expect(
+      call.setPassword({ token: older, password: 'Somebody else now 5?' }),
+    ).rejects.toThrow(/expired/u)
 
     // And a link that somehow outlived it still cannot change the password.
     const user = await db.user.findUniqueOrThrow({ where: { email } })
@@ -306,13 +372,13 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
     await db.emailVerificationToken.create({
       data: { userId: user.id, tokenHash: stray.tokenHash, expiresAt: stray.expiresAt },
     })
-    expect(await call.verifyEmail({ token: stray.token })).toEqual({ email, hasPassword: true })
+    expect(await call.verifyEmail({ token: stray.token })).toEqual({ status: 'finished', email })
     await expect(
-      call.setPassword({ token: stray.token, password: 'somebody else now' }),
+      call.setPassword({ token: stray.token, password: 'Somebody else now 5?' }),
     ).rejects.toThrow(/already has a password/u)
 
     const after = await db.user.findUniqueOrThrow({ where: { email } })
-    expect(await verifyPassword(String(after.passwordHash), 'the first passphrase')).toBe(true)
+    expect(await verifyPassword(String(after.passwordHash), 'The first passphrase 4?')).toBe(true)
   })
 
   it('lets only one of two submissions of the same confirmation link win', async () => {
@@ -321,8 +387,8 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
     const token = tokenFromVerifyMail()
 
     const results = await Promise.allSettled([
-      call.setPassword({ token, password: 'the first of the two' }),
-      call.setPassword({ token, password: 'the second of the two' }),
+      call.setPassword({ token, password: 'The first of the two 6?' }),
+      call.setPassword({ token, password: 'The second of the two 7?' }),
     ])
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
@@ -336,7 +402,7 @@ describe.skipIf(!databaseUrl)('signing up, whoever owns the address (FR-1.3)', (
     await expect(
       call.resetPassword({
         token,
-        password: 'a brand new passphrase',
+        password: 'A brand new passphrase 2?',
         confirm: 'a different one!!',
       }),
     ).rejects.toThrow(/do not match/u)

@@ -1,5 +1,7 @@
 import { Prisma } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
+
+import { USERNAME_TAKEN_MESSAGE, isRetiredUsername } from '@/server/retired-usernames'
 import { z } from 'zod'
 
 import { usernameSchema } from '@/lib/schemas/auth'
@@ -39,11 +41,21 @@ export const userRouter = createTRPCRouter({
         avatarUrl: true,
         onboardedAt: true,
         createdAt: true,
+        // Item 3.15 — what the create form and the import start from.
+        defaultVisibility: true,
       },
     }),
   ),
 
   /** Where to send a half-onboarded user. Null once they are done. */
+  /** Item 3.13 — the viewer's own picture, `{ updatedAt }` or nothing, for the header. */
+  avatar: protectedProcedure.query(({ ctx }) =>
+    ctx.db.userAvatar.findUnique({
+      where: { userId: ctx.session.user.id },
+      select: { updatedAt: true },
+    }),
+  ),
+
   onboardingStep: protectedProcedure.query(async ({ ctx }) => {
     const user = await ctx.db.user.findUniqueOrThrow({
       where: { id: ctx.session.user.id },
@@ -62,7 +74,7 @@ export const userRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const current = await ctx.db.user.findUniqueOrThrow({
         where: { id: ctx.session.user.id },
-        select: { username: true },
+        select: { username: true, displayName: true },
       })
       if (current.username) {
         throw new TRPCError({
@@ -70,14 +82,23 @@ export const userRouter = createTRPCRouter({
           message: 'Your username is already set and cannot be changed.',
         })
       }
+      // Decision 0042 (item 1.6) — a deleted account's name is never taken
+      // again, and the refusal reads as for any taken name.
+      if (await isRetiredUsername(ctx.db, input.username)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: USERNAME_TAKEN_MESSAGE })
+      }
 
       try {
         const user = await ctx.db.user.update({
           where: { id: ctx.session.user.id },
           data: {
             username: input.username,
-            // A display name the user can edit later; the username cannot change.
-            displayName: input.username,
+            // A display name the user can edit later; the username cannot
+            // change. Only when there is none yet: an account made with Google
+            // arrives with the name Google holds (decision 0027), and this
+            // overwrote it, so "Ada Lovelace" was credited as "ada-l" (phase
+            // 14, item 1.3).
+            displayName: current.displayName?.trim() ? current.displayName : input.username,
           },
           select: { username: true, onboardedAt: true },
         })
@@ -88,7 +109,7 @@ export const userRouter = createTRPCRouter({
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
           throw new TRPCError({
             code: 'CONFLICT',
-            message: 'That username is taken. Try another.',
+            message: USERNAME_TAKEN_MESSAGE,
           })
         }
         throw error
@@ -103,7 +124,12 @@ export const userRouter = createTRPCRouter({
         where: { username: input.username },
         select: { id: true },
       })
-      return { available: existing === null }
+      // A retired name (decision 0042, item 1.6) answers exactly as a live one:
+      // the owner asked that nothing say an account was deleted.
+      if (existing || (await isRetiredUsername(ctx.db, input.username))) {
+        return { available: false, reason: USERNAME_TAKEN_MESSAGE }
+      }
+      return { available: true, reason: null }
     }),
 
   /**
@@ -129,13 +155,25 @@ export const userRouter = createTRPCRouter({
 
       const user = await tx.user.findUniqueOrThrow({
         where: { id: userId },
-        select: { username: true, onboardedAt: true },
+        select: { username: true, onboardedAt: true, rulesSeenAt: true },
       })
       if (!user.username) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'Choose a username first.',
         })
+      }
+      // FR-13.4 (item 2.3) — the rules are read here, once, and recorded as
+      // read. An account from before this landed was stamped at creation and
+      // is not asked again.
+      if (!user.rulesSeenAt) {
+        if (input.rulesRead !== true) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Tick "I have read the community rules" to finish.',
+          })
+        }
+        await tx.user.update({ where: { id: userId }, data: { rulesSeenAt: new Date() } })
       }
       if (user.onboardedAt) return user.onboardedAt
 

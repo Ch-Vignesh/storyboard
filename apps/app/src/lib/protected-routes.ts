@@ -23,7 +23,9 @@ export const NEEDS_AN_ACCOUNT: readonly RegExp[] = [
   /^\/notifications$/u,
   /^\/suggestions$/u,
   /^\/invitations$/u,
-  /^\/settings(?:\/|$)/u,
+  // Settings, except the page that confirms a new email address from its
+  // link, which works signed out (item 3.2): the link is its own authority.
+  /^\/settings(?!\/email(?:\/|$))(?:\/|$)/u,
   /^\/import(?:\/|$)/u,
   /^\/admin(?:\/|$)/u,
   // Writing surfaces inside a storyboard.

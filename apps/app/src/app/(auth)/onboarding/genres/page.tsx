@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 
+import { safeNext } from '@/lib/safe-next'
 import { PINNED_GENRES_MIN } from '@/lib/schemas/constants'
 import { HydrateClient, prefetch, trpc } from '@/trpc/server'
 
@@ -14,8 +15,12 @@ export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = { title: 'Pick your genres' }
 
+type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> }
+
 /** FR-1.3 step 4. Pinned genres drive the dashboard's third region and nothing else (FR-11.2). */
-export default function PinGenresPage() {
+export default async function PinGenresPage({ searchParams }: Props) {
+  // Item 3.5 — where they were going before all this; the last step lands there.
+  const next = safeNext((await searchParams).next)
   prefetch(trpc.user.genres.queryOptions())
 
   return (
@@ -27,7 +32,7 @@ export default function PinGenresPage() {
         Pick at least {PINNED_GENRES_MIN}. They decide which stuck passages you are shown on your
         dashboard. You can change them whenever you like.
       </p>
-      <PinGenresForm />
+      <PinGenresForm next={next} />
     </HydrateClient>
   )
 }

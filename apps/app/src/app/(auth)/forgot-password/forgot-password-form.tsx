@@ -16,14 +16,27 @@ export function ForgotPasswordForm() {
 
   if (request.isSuccess) {
     return (
-      <div
-        role="status"
-        className="mt-8 rounded-control border border-moss-wash bg-moss-wash p-4 text-[14px] text-moss"
-      >
-        {request.data.status === 'cooldown'
-          ? 'We sent a link a moment ago. Check your inbox and your spam folder, and wait a minute before asking for another.'
-          : // The same words whether or not the address has an account (FR-1.7).
-            `If ${email} has a Draftboard account, a link to choose a new password is on its way. It works for ${RESET_LINK_LIFETIME}. Give it a couple of minutes, and look in spam too.`}
+      <div className="mt-8 space-y-4">
+        <div
+          role="status"
+          className="rounded-control border border-moss-wash bg-moss-wash p-4 text-[14px] text-moss"
+        >
+          {request.data.status === 'cooldown'
+            ? 'We sent a link a moment ago. Check your inbox and your spam folder, and wait a minute before asking for another.'
+            : // The same words whether or not the address has an account (FR-1.7).
+              `If ${email} has a Draftboard account, a link to choose a new password is on its way. It works for ${RESET_LINK_LIFETIME}. Give it a couple of minutes, and look in spam too.`}
+        </div>
+        {/* Item 3.10 — back to the form, the address still there to correct. */}
+        <p className="text-[13px] text-ink-soft">
+          Wrong address?{' '}
+          <button
+            type="button"
+            className="text-pencil underline-offset-2 hover:underline"
+            onClick={() => request.reset()}
+          >
+            Use a different address
+          </button>
+        </p>
       </div>
     )
   }

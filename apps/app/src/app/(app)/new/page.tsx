@@ -18,10 +18,12 @@ export const metadata: Metadata = { title: 'Start a story' }
 export default async function NewStoryboardPage() {
   await requireSession()
   prefetch(trpc.user.genres.queryOptions())
+  // Item 3.15 — the form starts on the visibility settings chose.
+  prefetch(trpc.user.me.queryOptions())
 
   return (
     <HydrateClient>
-      <div className="mx-auto max-w-xl px-6 py-14">
+      <main id="main" tabIndex={-1} className="mx-auto max-w-xl px-6 py-14">
         <h1 className="font-manuscript text-[28px] leading-tight font-medium text-ink">
           Start a story
         </h1>
@@ -29,7 +31,7 @@ export default async function NewStoryboardPage() {
           All of this can change later. Give it a working title and start writing.
         </p>
         <CreateStoryboardForm />
-      </div>
+      </main>
     </HydrateClient>
   )
 }

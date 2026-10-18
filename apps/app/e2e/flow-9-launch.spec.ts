@@ -92,7 +92,10 @@ test('the seeded library meets its launch targets (FR-15.4)', async ({ page }) =
 
   // Every seeded storyboard is labelled, on every surface it appears (FR-15.3).
   // The label is lower case in the markup and upper case on the screen, so the
-  // match has to be on what is written rather than on what is rendered.
+  // match has to be on what is written rather than on what is rendered. Asked
+  // for by name, because on a long-lived database the newest stories are the
+  // tests' own and the seeded ones sit past the first page.
+  await page.goto('/browse?q=Pride%20and%20Prejudice')
   expect(await page.getByText(/^example$/i).count()).toBeGreaterThan(0)
 })
 

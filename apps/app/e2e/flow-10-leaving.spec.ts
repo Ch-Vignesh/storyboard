@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { readFileSync } from 'node:fs'
+
 import { signUpAndOnboard } from './helpers'
 
 /**
@@ -14,7 +16,7 @@ import { signUpAndOnboard } from './helpers'
  */
 
 test('a writer deletes their account, and can stop it before it happens', async ({ page }) => {
-  const { username } = await signUpAndOnboard(page)
+  const { email, username } = await signUpAndOnboard(page)
 
   // Something to leave behind.
   await page.goto('/new')
@@ -43,6 +45,25 @@ test('a writer deletes their account, and can stop it before it happens', async 
   await expect(page.getByText(/this account is being deleted/i)).toBeVisible()
   await expect(page.getByText(/it will be erased on/i)).toBeVisible()
 
+  // Phase 14, item 1.5 — never silent. The address is told at once, and every
+  // signed-in page says so until the account is kept.
+  await expect
+    .poll(
+      () => {
+        try {
+          const log = readFileSync(process.env.MAIL_LOG_FILE ?? '', 'utf8')
+          return log.includes(`To: ${email}`) && /will be deleted on/i.test(log)
+        } catch {
+          return false
+        }
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true)
+  const banner = page.getByRole('region', { name: /account deletion/i })
+  await page.goto('/')
+  await expect(banner).toContainText(/being deleted/i)
+
   // The profile is hidden at once, though the seven days have not passed.
   const profile = await page.goto(`/@${username}`)
   expect(profile?.status()).toBe(404)
@@ -60,8 +81,12 @@ test('a writer deletes their account, and can stop it before it happens', async 
   await expect(page).not.toHaveURL(/\/s\/something-new/u)
 
   // ── Changing their mind ─────────────────────────────────────────────────
+  // From the banner, on a page that is not settings (phase 14, item 1.5).
+  await page.goto(storyboardPath)
+  await expect(banner).toBeVisible()
+  await banner.getByRole('button', { name: /keep my account/i }).click()
+  await expect(banner).toHaveCount(0)
   await page.goto('/settings')
-  await page.getByRole('button', { name: /stop the deletion/i }).click()
   await expect(page.getByRole('button', { name: /delete my account/i })).toBeVisible()
 
   // The profile is back.

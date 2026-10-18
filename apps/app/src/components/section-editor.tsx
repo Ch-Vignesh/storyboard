@@ -38,6 +38,11 @@ type Props = {
 
 type SaveState = 'idle' | 'draft-saving' | 'draft-saved' | 'saving' | 'saved' | 'error'
 
+/** True when `target` is a node inside `container`. */
+function within(container: Element | null, target: EventTarget | null): boolean {
+  return container !== null && target instanceof Node && container.contains(target)
+}
+
 /**
  * FR-4.4, FR-4.5, FR-4.6 and FR-2.5.
  *
@@ -97,6 +102,17 @@ export function SectionEditor({
   const saveDraft = useMutation(trpc.section.saveDraft.mutationOptions())
   const splitSection = useMutation(trpc.section.split.mutationOptions())
   const commitRevision = useMutation(trpc.section.commitRevision.mutationOptions())
+  // `useMutation` hands back a new object every render, and the two save
+  // callbacks below used to depend on those objects. So every re-render (a
+  // word count, a save status) remade them, the effects that own the timers
+  // re-ran, and their clean-up cleared a pending draft save or the five-minute
+  // revision: a save whose status arrived after the last keystroke cancelled
+  // the draft that keystroke had scheduled. The functions on them are stable,
+  // so the callbacks depend on those instead (phase 14, item 1.4).
+  const { mutateAsync: writeDraftNow } = saveDraft
+  const { mutateAsync: commitRevisionNow } = commitRevision
+  // The formatting toolbar. Focus moving into it is not leaving the editor.
+  const toolbar = useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
     extensions: extensionsFor(flavour),
@@ -126,7 +142,7 @@ export function SectionEditor({
       const at = edits.current
       setState('draft-saving')
       try {
-        await saveDraft.mutateAsync({
+        await writeDraftNow({
           sectionId,
           contentJson: editor.getJSON(),
           baseRevisionId: head.current,
@@ -145,7 +161,7 @@ export function SectionEditor({
     } finally {
       draftInFlight.current = null
     }
-  }, [editor, saveDraft, sectionId])
+  }, [editor, sectionId, writeDraftNow])
 
   /**
    * Cut a durable revision of whatever is unsaved. True when, afterwards,
@@ -171,7 +187,7 @@ export function SectionEditor({
     const run = (async () => {
       setState('saving')
       try {
-        const result = await commitRevision.mutateAsync({
+        const result = await commitRevisionNow({
           sectionId,
           contentJson: editor.getJSON(),
           baseRevisionId: head.current,
@@ -195,7 +211,7 @@ export function SectionEditor({
     } finally {
       inFlight.current = null
     }
-  }, [canCommit, commitRevision, editor, sectionId])
+  }, [canCommit, commitRevisionNow, editor, sectionId])
 
   /**
    * FR-2.4 — split at the cursor. The text has to be durable before it can be
@@ -265,7 +281,15 @@ export function SectionEditor({
   // FR-4.4 — a revision on blur, and every 5 minutes of continuous editing.
   useEffect(() => {
     if (!editor || !canCommit) return
-    const onBlur = () => void commit()
+    // Focus moving into the toolbar is not leaving the editor. Its buttons
+    // never take focus (see ToolbarButton), but a script's Element control is
+    // a <select>, which must, and choosing an element saved a version each
+    // time (phase 14, item 1.4). The toolbar's own blur saves instead, once
+    // focus has gone somewhere else altogether.
+    const onBlur = ({ event }: { event: FocusEvent }) => {
+      if (within(toolbar.current, event.relatedTarget)) return
+      void commit()
+    }
     editor.on('blur', onBlur)
     revisionTimer.current = setInterval(() => void commit(), REVISION_INTERVAL_MS)
     return () => {
@@ -317,9 +341,17 @@ export function SectionEditor({
           manuscript, not a document. A script also names its elements
           (FR-4.2, decision 0040). */}
       <div
+        ref={toolbar}
         role="toolbar"
         aria-label="Formatting"
-        className="sticky top-0 z-10 -mx-2 flex items-center gap-1 border-b border-rule bg-paper/95 px-2 py-2 backdrop-blur"
+        className="sticky top-0 z-10 -mx-2 flex flex-wrap items-center gap-1 border-b border-rule bg-paper/95 px-2 py-2 backdrop-blur"
+        onBlur={(event) => {
+          // Focus leaving the toolbar for anywhere but the editor is leaving
+          // the editor: the save its own blur stood down (above) runs now.
+          const next = event.relatedTarget
+          if (within(toolbar.current, next) || within(editor.view.dom, next)) return
+          if (canCommit) void commit()
+        }}
       >
         {flavour === 'screenplay' ? (
           <span className="mr-2">
@@ -458,6 +490,11 @@ function ToolbarButton({
       title={`${label} (${shortcut})`}
       aria-label={label}
       aria-pressed={active}
+      // Keeps the editor focused. A click that blurred it saved a version
+      // first, so typing and then pressing Italic put two near-identical
+      // versions in History (phase 14, item 1.4). The discard button in the
+      // footer does the same.
+      onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
       className={
         active

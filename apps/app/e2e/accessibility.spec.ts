@@ -45,7 +45,15 @@ test.describe('what a machine can check (NFR-4)', () => {
   // @deployed: these only visit pages, so they may run against production.
   test.describe('signed out', { tag: '@deployed' }, () => {
     test('the marketing entry points and the sign-up path', async ({ page }) => {
-      for (const path of ['/signup', '/signin', '/browse', '/rules']) {
+      for (const path of [
+        '/signup',
+        '/signin',
+        '/browse',
+        '/rules',
+        '/contact',
+        '/privacy',
+        '/terms',
+      ]) {
         await page.goto(path)
         await scan(page, `${path} has accessibility violations`)
       }
@@ -84,4 +92,29 @@ test.describe('what a machine can check (NFR-4)', () => {
       await scan(page, 'the import screen has accessibility violations')
     })
   })
+})
+
+/**
+ * NFR-4 (phase 14, item 4.8) — one `main` landmark with the id the skip link
+ * points at, on every kind of page, and a skip link that lands on it. The
+ * reader, request, editor and profile pages had no skip link, and the app
+ * layout's wrapper gave the id twice.
+ */
+test('one main landmark and a working skip link, on the pages strangers meet', async ({ page }) => {
+  const story = '/s/pride-and-prejudice-seedpride01'
+  await page.goto(story)
+  const request = page.locator('a[href*="/help/"]:not([href$="/help/new"])').first()
+  const requestPath = (await request.count()) ? await request.getAttribute('href') : null
+
+  for (const path of ['/browse', story, '/@example-helper-1', '/rules', requestPath].filter(
+    (value): value is string => Boolean(value),
+  )) {
+    await page.goto(path)
+    await expect(page.locator('#main'), path).toHaveCount(1)
+    await expect(page.locator('main'), path).toHaveCount(1)
+    const skip = page.getByRole('link', { name: 'Skip to the main content' })
+    await skip.focus()
+    await skip.press('Enter')
+    await expect(page.locator('#main'), path).toBeFocused()
+  }
 })

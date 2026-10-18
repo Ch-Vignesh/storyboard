@@ -20,6 +20,8 @@ export const env = createEnv({
     AUTH_URL: z.url().optional(),
     AUTH_TRUST_HOST: z.string().optional(),
     EMAIL_FROM: z.string().min(3),
+    /** Item 2.5 — where a person can write. Optional: the sender's address stands in. */
+    SUPPORT_EMAIL: z.email().optional(),
     RESEND_API_KEY: z.string().min(1).optional(),
     /**
      * FR-12 over SMTP instead of Resend (decision 0029) — Gmail with an app
@@ -73,6 +75,7 @@ export const env = createEnv({
     AUTH_URL: process.env.AUTH_URL,
     AUTH_TRUST_HOST: process.env.AUTH_TRUST_HOST,
     EMAIL_FROM: process.env.EMAIL_FROM,
+    SUPPORT_EMAIL: process.env.SUPPORT_EMAIL,
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     SMTP_HOST: process.env.SMTP_HOST,
     SMTP_PORT: process.env.SMTP_PORT,

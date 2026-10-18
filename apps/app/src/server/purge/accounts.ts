@@ -4,6 +4,9 @@ import type { PrismaClient } from '@storyboard/db'
 
 import { logger } from '@/lib/logger'
 import { ACCOUNT_DELETION_GRACE_DAYS } from '@/lib/schemas/constants'
+import { getMailer, type Mailer } from '@/server/mail/mailer'
+import { accountDeletedMail } from '@/server/mail/templates/account-deletion'
+import { retiredUsernameHash } from '@/server/retired-usernames'
 import { deleteObject } from '@/server/storage'
 
 /**
@@ -43,6 +46,7 @@ function tombstoneEmail(userId: string): string {
 export async function purgeDeletedAccounts(
   db: PrismaClient,
   now = new Date(),
+  mailer: Mailer = getMailer(),
 ): Promise<{ considered: number; purged: number }> {
   const cutoff = new Date(now.getTime() - ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000)
 
@@ -61,7 +65,7 @@ export async function purgeDeletedAccounts(
   let purged = 0
   for (const user of due) {
     try {
-      await purgeOne(db, user.id)
+      await purgeOne(db, user.id, mailer)
       purged += 1
       // No username or email in this line, deliberately. A log that records
       // what was erased has not erased it.
@@ -81,7 +85,15 @@ export async function purgeDeletedAccounts(
   return { considered: due.length, purged }
 }
 
-async function purgeOne(db: PrismaClient, userId: string): Promise<void> {
+async function purgeOne(db: PrismaClient, userId: string, mailer: Mailer): Promise<void> {
+  // The address, read before it is replaced below. The last message goes to
+  // it once the erasure has happened, so that what it says is true (phase 14,
+  // item 1.5).
+  const before = await db.user.findUnique({
+    where: { id: userId },
+    select: { email: true, username: true },
+  })
+
   // Their uploaded manuscripts, before the rows that say where they are.
   // Best-effort and outside the transaction: an object store being briefly
   // unreachable must not stop the personal data in the database being erased,
@@ -112,6 +124,8 @@ async function purgeOne(db: PrismaClient, userId: string): Promise<void> {
     await tx.userGenre.deleteMany({ where: { userId } }) // a preference
     await tx.activityDay.deleteMany({ where: { userId } }) // when they were here
     await tx.importJob.deleteMany({ where: { userId } }) // their filenames
+    await tx.subAdminGrant.deleteMany({ where: { userId } }) // a sub-admin's doors (0043)
+    await tx.userAvatar.deleteMany({ where: { userId } }) // their picture (item 3.13)
 
     // An access grant, not a credit. `can()` already refuses a DELETED actor,
     // but an account that has been erased should not still be on the member
@@ -134,7 +148,29 @@ async function purgeOne(db: PrismaClient, userId: string): Promise<void> {
         emailVerifiedAt: null,
         // A power, not an identity, but nobody is left to hold it.
         isAdmin: false,
+        role: 'USER',
+        // An administrator's note about the person goes with the person (item 2b.5).
+        standingNote: null,
       },
     })
+
+    // Decision 0042 (item 1.6) — the name stays retired. Its hash, in the
+    // same transaction, so an erasure and its retirement stand or fall
+    // together.
+    if (before?.username) {
+      const hash = retiredUsernameHash(before.username)
+      await tx.retiredUsername.upsert({ where: { hash }, create: { hash }, update: {} })
+    }
   })
+
+  if (!before) return
+  try {
+    await mailer.send(accountDeletedMail({ to: before.email }))
+  } catch (error) {
+    // The erasure stands; the message was a courtesy. No address in the log.
+    log.error(
+      { event: 'purge.account.mail_failed', userId, error: String(error) },
+      'could not send the last message to an erased account',
+    )
+  }
 }

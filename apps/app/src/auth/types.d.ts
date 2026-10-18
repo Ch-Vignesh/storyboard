@@ -15,5 +15,11 @@ declare module 'next-auth' {
       username: string | null
       onboarded: boolean
     } & DefaultSession['user']
+    /**
+     * When this session signed in, in milliseconds (decision 0036's claim),
+     * for the few things that want a recent one: a Google-only account
+     * changing its address (item 3.2). Absent on a token from before it.
+     */
+    authAt?: number
   }
 }

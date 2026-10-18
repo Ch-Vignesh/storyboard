@@ -13,6 +13,7 @@ export { toEpub } from './epub'
 export { toFountain } from './fountain'
 export { toMarkdown } from './markdown'
 export { toAuthorshipProof, toPdf } from './pdf'
+export { unzipFiles, zipFiles } from './zip'
 
 export type ExportedFile = {
   body: Buffer

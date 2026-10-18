@@ -7,11 +7,18 @@ import { Textarea } from '@storyboard/ui/components/textarea'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { PINNED_GENRES_MIN, READING_LINE_HEIGHT, READING_TYPE_SCALE } from '@/lib/schemas/constants'
+import {
+  PINNED_GENRES_MIN,
+  PROFILE_CHARS,
+  READING_LINE_HEIGHT,
+  READING_TYPE_SCALE,
+} from '@/lib/schemas/constants'
 import { NOTIFICATIONS, NOTIFICATION_TYPES } from '@/lib/schemas/notifications'
 import { useTRPC } from '@/trpc/client'
 
+import { DefaultVisibility } from './default-visibility'
 import { DeleteAccount } from './delete-account'
+import { ProfilePicture } from './profile-picture'
 
 export function SettingsForm() {
   const trpc = useTRPC()
@@ -72,6 +79,15 @@ export function SettingsForm() {
           have made, and rewriting those would rewrite other people&rsquo;s history too.
         </p>
 
+        {/* Item 3.13 (D-5) — the picture, beside the name it goes with. */}
+        <ProfilePicture
+          person={{
+            username: settings.user.username,
+            displayName: settings.user.displayName,
+            avatar: settings.user.avatar,
+          }}
+        />
+
         <form
           className="mt-6 space-y-5"
           onSubmit={(event) => {
@@ -84,7 +100,7 @@ export function SettingsForm() {
             <Input
               id="display-name"
               required
-              maxLength={80}
+              maxLength={PROFILE_CHARS.displayName.max}
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
               aria-describedby="display-name-hint"
@@ -99,12 +115,13 @@ export function SettingsForm() {
             <Textarea
               id="bio"
               rows={3}
-              maxLength={280}
+              maxLength={PROFILE_CHARS.bio.max}
               value={bio}
               onChange={(event) => setBio(event.target.value)}
             />
             <p className="text-[12.5px] text-ink-faint">
-              <span className="tabular-nums">{bio.length}</span> of 280 characters
+              <span className="tabular-nums">{bio.length}</span> of {PROFILE_CHARS.bio.max}{' '}
+              characters
             </p>
           </div>
 
@@ -123,6 +140,9 @@ export function SettingsForm() {
             </span>
           </div>
         </form>
+
+        {/* Item 3.15 — which option the create form and the import start on. */}
+        <DefaultVisibility value={settings.user.defaultVisibility} />
       </section>
 
       {/* ── Genres (FR-11.2) ───────────────────────────────────────────── */}

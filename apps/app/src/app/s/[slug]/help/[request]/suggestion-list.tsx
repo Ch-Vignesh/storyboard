@@ -3,8 +3,11 @@
 import { Button } from '@storyboard/ui/components/button'
 import { useMutation } from '@tanstack/react-query'
 import Link from '@/components/link'
+import { UserAvatar } from '@/components/user-avatar'
 import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PASS_CHIPS, suggestionStateLabel } from '@/lib/schemas/help'
 import { useTRPC } from '@/trpc/client'
 
@@ -16,12 +19,16 @@ type Suggestion = {
   wordCount: number
   passReason: string | null
   submittedAt: Date | null
+  /** Item 6.7 — changeable by its writer until an author opens it. */
+  openedAt: Date | null
+  editedAt: Date | null
   contributor: { id: string; username: string | null; displayName: string | null }
 }
 
 /** What has come back, and what the author can do about it (FR-6.4, FR-6.11). */
 export function SuggestionList({
   slug,
+  requestId,
   requestPublicId,
   suggestions,
   requestState,
@@ -29,6 +36,7 @@ export function SuggestionList({
   viewerId,
 }: {
   slug: string
+  requestId: string
   requestPublicId: string
   suggestions: Suggestion[]
   requestState: string
@@ -42,7 +50,24 @@ export function SuggestionList({
   const router = useRouter()
   const refresh = () => router.refresh()
 
-  const withdraw = useMutation(trpc.suggestion.withdraw.mutationOptions({ onSuccess: refresh }))
+  // Item 5.6 (FR-6.5) — withdrawing asks first; afterwards a new draft can
+  // start from the withdrawn words.
+  const [confirmWithdraw, setConfirmWithdraw] = useState<string | null>(null)
+  const [withdrawn, setWithdrawn] = useState<string | null>(null)
+  const withdraw = useMutation(
+    trpc.suggestion.withdraw.mutationOptions({
+      onSuccess: (_result, variables) => {
+        setWithdrawn(variables.suggestionId)
+        setConfirmWithdraw(null)
+        refresh()
+      },
+    }),
+  )
+  const startDraft = useMutation(
+    trpc.suggestion.startDraft.mutationOptions({
+      onSuccess: () => router.push(`/s/${slug}/help/${requestPublicId}/write`),
+    }),
+  )
   const rebase = useMutation(
     trpc.suggestion.rebase.mutationOptions({
       onSuccess: () => router.push(`/s/${slug}/help/${requestPublicId}/write`),
@@ -73,9 +98,18 @@ export function SuggestionList({
                 <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
                   <div className="min-w-0">
                     <p className="text-[14px] text-ink">
+                      <UserAvatar
+                        person={suggestion.contributor}
+                        size="sm"
+                        className="mr-2 align-middle"
+                      />
                       {mine ? 'You' : name}
                       <span className="text-ink-faint"> · {suggestion.wordCount} words</span>
                       <StateBadge state={suggestion.state} requestState={requestState} />
+                      {/* D-12 (item 6.7) — changed after it was sent. */}
+                      {suggestion.editedAt ? (
+                        <span className="text-ink-faint"> · edited</span>
+                      ) : null}
                     </p>
                     {suggestion.note ? (
                       // FR-6.2 — the note goes above the prose, not below it.
@@ -119,12 +153,22 @@ export function SuggestionList({
                       </Button>
                     ) : null}
 
+                    {/* Item 6.7 (D-12) — until an author opens it, its writer may change it. */}
+                    {mine && suggestion.state === 'SUBMITTED' && !suggestion.openedAt && !closed ? (
+                      <Button asChild size="sm" variant="ghost">
+                        <Link
+                          href={`/s/${slug}/help/${requestPublicId}/write?change=${suggestion.publicId}`}
+                        >
+                          Change it
+                        </Link>
+                      </Button>
+                    ) : null}
                     {mine && suggestion.state === 'SUBMITTED' && !closed ? (
                       <Button
                         size="sm"
                         variant="ghost"
                         disabled={withdraw.isPending}
-                        onClick={() => withdraw.mutate({ suggestionId: suggestion.id })}
+                        onClick={() => setConfirmWithdraw(suggestion.id)}
                       >
                         Withdraw
                       </Button>
@@ -137,9 +181,54 @@ export function SuggestionList({
         </ul>
       )}
 
-      {withdraw.isError || rebase.isError ? (
+      {withdrawn ? (
+        <p role="status" className="mt-4 text-[13.5px] text-ink-soft">
+          Withdrawn. The author no longer sees it.{' '}
+          <button
+            type="button"
+            className="text-pencil hover:underline disabled:text-ink-faint"
+            disabled={startDraft.isPending}
+            onClick={() => startDraft.mutate({ requestId, from: withdrawn })}
+          >
+            Start a new draft from it
+          </button>
+        </p>
+      ) : null}
+
+      <ConfirmDialog
+        open={confirmWithdraw !== null}
+        title="Withdraw this suggestion?"
+        confirmLabel="Withdraw it"
+        busy={withdraw.isPending}
+        onCancel={() => setConfirmWithdraw(null)}
+        onConfirm={() => {
+          if (confirmWithdraw) withdraw.mutate({ suggestionId: confirmWithdraw })
+        }}
+      >
+        <p>It frees a slot on this request, and the author no longer sees it.</p>
+        <p>You can start a new draft from it afterwards, with its words already in place.</p>
+        {(() => {
+          // Item 6.7 — while the author has not opened it, changing it is the
+          // smaller step, and is offered here too.
+          const confirming = suggestions.find((entry) => entry.id === confirmWithdraw)
+          return confirming && !confirming.openedAt ? (
+            <p>
+              Or{' '}
+              <Link
+                href={`/s/${slug}/help/${requestPublicId}/write?change=${confirming.publicId}`}
+                className="text-pencil hover:underline"
+              >
+                change it instead
+              </Link>
+              : the author has not opened it yet.
+            </p>
+          ) : null
+        })()}
+      </ConfirmDialog>
+
+      {withdraw.isError || rebase.isError || startDraft.isError ? (
         <p role="alert" className="mt-3 text-[13px] text-crimson">
-          {(withdraw.error ?? rebase.error)?.message}
+          {(withdraw.error ?? rebase.error ?? startDraft.error)?.message}
         </p>
       ) : null}
     </section>

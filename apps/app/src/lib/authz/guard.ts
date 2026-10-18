@@ -14,9 +14,13 @@
 import type { Prisma, PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 
+import { BLOCKED_FROM_HELPING } from '@/lib/schemas/help'
+
 import {
   assertCan,
+  blockedByAuthors,
   can,
+  isAuthor,
   permissionsFor,
   STORY_NOT_FOUND,
   type Action,
@@ -38,6 +42,7 @@ const AUTHZ_SELECT = {
   visibility: true,
   state: true,
   deletedAt: true,
+  hiddenAt: true,
   publicFrom: true,
   collaborators: {
     // Accepted co-authors only: an outstanding invitation grants nothing.
@@ -61,6 +66,7 @@ function toResource(row: LoadedStoryboard): StoryboardResource & { publicFrom: D
     ownerId: row.ownerId,
     visibility: row.visibility,
     deletedAt: row.deletedAt,
+    hiddenAt: row.hiddenAt,
     publicFrom: row.publicFrom,
     coauthorIds: row.collaborators.map((c) => c.userId),
     finished: row.state === 'FINISHED',
@@ -135,15 +141,23 @@ export async function loadVersion(
   actor: Actor,
   versionId: string,
   action: Action = 'storyboard:read',
-): Promise<StoryboardContext & { versionId: string; isMain: boolean }> {
+  options: { allowDeleted?: boolean } = {},
+): Promise<StoryboardContext & { versionId: string; isMain: boolean; deletedAt: Date | null }> {
   const version = await db.version.findUnique({
     where: { id: versionId },
-    select: { id: true, isMain: true, storyboard: { select: AUTHZ_SELECT } },
+    select: { id: true, isMain: true, deletedAt: true, storyboard: { select: AUTHZ_SELECT } },
   })
   if (!version) throw notFound()
 
   const resource = toResource(version.storyboard)
   assertCan(actor, action, resource)
+
+  // FR-10.1 (phase 14, item 1.1) — a removed alternate is not there, for
+  // reading, comparing, exporting and renaming alike. The one caller that
+  // wants to say *why* it refuses, rather than "not found", asks for it.
+  if (version.deletedAt && !options.allowDeleted) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'That version does not exist.' })
+  }
 
   return {
     storyboardId: version.storyboard.id,
@@ -151,6 +165,7 @@ export async function loadVersion(
     permissions: permissionsFor(actor, resource),
     versionId: version.id,
     isMain: version.isMain,
+    deletedAt: version.deletedAt,
   }
 }
 
@@ -252,16 +267,78 @@ export async function loadSection(
  */
 export function visibleStoryboardsWhere(actor: Actor): Prisma.StoryboardWhereInput {
   const base: Prisma.StoryboardWhereInput = { deletedAt: null }
+  // Hidden after a report (item 2.7, decision 0045): listed for its authors
+  // and for a moderator, and for nobody else.
+  const open: Prisma.StoryboardWhereInput = actor?.moderator
+    ? { visibility: 'PUBLIC' }
+    : { visibility: 'PUBLIC', hiddenAt: null }
 
-  if (!actor) return { ...base, visibility: 'PUBLIC' }
+  if (!actor) return { ...base, ...open }
 
   return {
     ...base,
     OR: [
-      { visibility: 'PUBLIC' },
+      open,
       { ownerId: actor.id },
       { collaborators: { some: { userId: actor.id, acceptedAt: { not: null } } } },
     ],
+  }
+}
+
+/**
+ * The `where` fragment for the stories a person writes: their own, and the
+ * ones they were invited to and accepted. The dashboard's own lists read it
+ * (FR-11.1; phase 14, item 6.14).
+ */
+export function authoredStoryboardsWhere(userId: string): Prisma.StoryboardWhereInput {
+  return {
+    deletedAt: null,
+    OR: [{ ownerId: userId }, { collaborators: { some: { userId, acceptedAt: { not: null } } } }],
+  }
+}
+
+/**
+ * The stories anyone may see listed: public, not deleted, not hidden. For the
+ * lists that have no actor at hand and show the same to everyone, such as a
+ * public profile's credits and the Sunday digest.
+ */
+export const PUBLICLY_LISTED = {
+  visibility: 'PUBLIC',
+  deletedAt: null,
+  hiddenAt: null,
+} as const satisfies Prisma.StoryboardWhereInput
+
+/**
+ * Decision 0046 (item 2.9) — someone an author has blocked cannot start, send
+ * or post help on that author's story; they still read it. One indexed query,
+ * asked only where help begins (the request page and the write procedures),
+ * never on every read.
+ */
+export async function blockedFromHelping(
+  db: Db,
+  actor: Actor,
+  resource: StoryboardResource,
+): Promise<boolean> {
+  if (!actor || isAuthor(actor, resource)) return false
+  const blocks = await db.userBlock.findMany({
+    where: { blockedId: actor.id, blockerId: { in: [resource.ownerId, ...resource.coauthorIds] } },
+    select: { blockerId: true },
+  })
+  return blockedByAuthors(
+    actor,
+    resource,
+    blocks.map((block) => block.blockerId),
+  )
+}
+
+/** The refusal, in the words the screen shows (item 2.9, D-9). */
+export async function assertNotBlocked(
+  db: Db,
+  actor: Actor,
+  resource: StoryboardResource,
+): Promise<void> {
+  if (await blockedFromHelping(db, actor, resource)) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: BLOCKED_FROM_HELPING })
   }
 }
 

@@ -4,24 +4,42 @@ import { z } from 'zod'
 
 import {
   assertNotFinished,
+  authoredStoryboardsWhere,
+  blockedFromHelping,
   loadSection,
   loadStoryboard,
   visibleStoryboardsWhere,
 } from '@/lib/authz/guard'
 import { suggestionVisibilityWhere } from '@/lib/authz'
-import { recordActivity } from '@/server/activity'
 import { afterCommit } from '@/server/after-commit'
-import { ANSWERS } from '@/server/answers'
+import {
+  ANSWERS,
+  AUTHORS_SELECT,
+  authorsOf,
+  ideaAnswerWhere,
+  withIdeaAnswers,
+} from '@/server/answers'
+import { redactIdea, redactSuggestionLine } from '@/server/hidden'
 import { closeRequest } from '@/server/close-requests'
+import { requestImpact } from '@/server/impact'
 import { publicId } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import {
   BROWSE_LIMITS,
   CONTINUE_TARGET_MAX_WORDS,
   GENRE_SELECTION_MAX,
+  NEEDS_YOU,
+  REQUEST_PRE_CONTEXT_WORDS,
   REWRITE_TARGET_MIN_WORDS,
 } from '@/lib/schemas/constants'
-import { createRequestSchema, passChipSchema, PROSE_KINDS } from '@/lib/schemas/help'
+import {
+  countWords,
+  createRequestSchema,
+  ideaChangeCutoff,
+  PRE_CONTEXT_TOO_SHORT,
+  PROSE_KINDS,
+  updateRequestSchema,
+} from '@/lib/schemas/help'
 
 import {
   activeProcedure,
@@ -42,12 +60,16 @@ const REQUEST_SELECT = {
   ask: true,
   preContext: true,
   toneNotes: true,
+  characterNotes: true,
   constraints: true,
   readingList: true,
   minWords: true,
   maxWords: true,
   state: true,
   createdAt: true,
+  /** Item 6.15 — when it was opened, or last opened again; "Closes on" counts from it. */
+  openedAt: true,
+  editedAt: true,
   closedAt: true,
   storyboardId: true,
   sectionId: true,
@@ -63,7 +85,9 @@ const REQUEST_SELECT = {
       chapter: { select: { id: true, title: true, order: true } },
     },
   },
-  storyboard: { select: { id: true, slug: true, title: true, type: true, state: true } },
+  storyboard: {
+    select: { id: true, slug: true, title: true, type: true, state: true, ...AUTHORS_SELECT },
+  },
 } satisfies Prisma.ContributionRequestSelect
 
 export const requestRouter = createTRPCRouter({
@@ -128,6 +152,7 @@ export const requestRouter = createTRPCRouter({
             // FR-5.4 is meaningless for UNBLOCK, so it is not stored for one.
             preContext: PROSE_KINDS.includes(input.kind) ? (input.preContext ?? null) : null,
             toneNotes: input.toneNotes ?? null,
+            characterNotes: input.characterNotes ?? null,
             constraints: input.constraints ?? [],
             readingList: input.readingList ?? [],
             minWords: input.minWords,
@@ -137,9 +162,6 @@ export const requestRouter = createTRPCRouter({
           select: { id: true, publicId: true },
         }),
     )
-
-    // Opening a request is work: it is how an author asks for help (FR-9.3).
-    await recordActivity(ctx.db, ctx.session.user.id)
 
     log.info(
       { event: 'request.open', requestId: created.id, storyboardId, kind: input.kind },
@@ -216,7 +238,18 @@ export const requestRouter = createTRPCRouter({
           submittedAt: true,
           decidedAt: true,
           baseRevisionId: true,
-          contributor: { select: { id: true, username: true, displayName: true } },
+          hiddenAt: true,
+          // Item 6.7 — the writer may change it until an author opens it.
+          openedAt: true,
+          editedAt: true,
+          contributor: {
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              avatar: { select: { updatedAt: true } },
+            },
+          },
         },
       })
 
@@ -228,19 +261,54 @@ export const requestRouter = createTRPCRouter({
           body: true,
           parentId: true,
           markedHelpful: true,
+          hiddenAt: true,
           createdAt: true,
-          author: { select: { id: true, username: true, displayName: true } },
+          // Item 6.8 — changed, or removed, by its writer.
+          editedAt: true,
+          deletedAt: true,
+          author: {
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              avatar: { select: { updatedAt: true } },
+            },
+          },
         },
       })
+
+      // Decision 0046 (item 2.9) — someone an author blocked reads this page
+      // and helps from nowhere on it; the buttons give way to a sentence.
+      const blocked = await blockedFromHelping(ctx.db, actor, resource)
+      // Item 6.8 — who may still change which idea, judged here by the same
+      // cutoff the edit writes against, so the page never offers a stale "Change".
+      const changeableAfter = ideaChangeCutoff()
 
       return {
         request: { ...row, constraints: asStringArray(row.constraints) },
         readingList,
-        suggestions,
-        ideas,
-        permissions,
+        // Hidden after a report (item 2.7): read as removed by everyone but
+        // the writer and a moderator.
+        suggestions: suggestions.map((suggestion) => redactSuggestionLine(suggestion, actor)),
+        ideas: ideas.map((idea) => ({
+          ...redactIdea(idea, actor),
+          canChange:
+            actor?.id === idea.author.id &&
+            !idea.markedHelpful &&
+            idea.deletedAt === null &&
+            idea.hiddenAt === null &&
+            idea.createdAt > changeableAfter,
+        })),
+        permissions: blocked
+          ? { ...permissions, canSubmitSuggestion: false, canPostIdea: false }
+          : permissions,
+        blockedFromHelping: blocked,
         /** FR-6.9 with OD-5: one idea per request may be marked (decision 0010). */
         hasHelpfulIdea: ideas.some((idea) => idea.markedHelpful),
+        /** The story's authors, whose own ideas cannot be the one that helped (item 1.7). */
+        authorIds: ((authors) => [authors.ownerId, ...authors.coauthorIds])(
+          authorsOf(row.storyboard),
+        ),
       }
     }),
 
@@ -251,7 +319,7 @@ export const requestRouter = createTRPCRouter({
       const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId } = await loadStoryboard(ctx.db, actor, { id: input.storyboardId })
 
-      return ctx.db.contributionRequest.findMany({
+      const rows = await ctx.db.contributionRequest.findMany({
         where: { storyboardId, state: { in: ['OPEN', 'ANSWERED'] } },
         orderBy: { createdAt: 'desc' },
         select: {
@@ -264,9 +332,13 @@ export const requestRouter = createTRPCRouter({
           minWords: true,
           maxWords: true,
           createdAt: true,
-          _count: { select: { suggestions: { where: ANSWERS }, ideas: true } },
+          _count: { select: { suggestions: { where: ANSWERS } } },
+          // Idea answers are counted in code (item 1.12): see `answers.ts`.
+          ideas: { where: { parentId: null }, select: { authorId: true } },
+          storyboard: { select: AUTHORS_SELECT },
         },
       })
+      return rows.map(withIdeaAnswers)
     }),
 
   /**
@@ -284,12 +356,22 @@ export const requestRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
-      return ctx.db.contributionRequest.findMany({
+      const rows = await ctx.db.contributionRequest.findMany({
         where: {
           state: { in: ['OPEN', 'ANSWERED'] },
           storyboard: {
             ...visibleStoryboardsWhere(actor),
             visibility: 'PUBLIC',
+            // FR-11.1 — other people's requests: the region is "open requests
+            // in your genres", and it listed the viewer's own (item 1.17).
+            ...(actor
+              ? {
+                  NOT: [
+                    { ownerId: actor.id },
+                    { collaborators: { some: { userId: actor.id, acceptedAt: { not: null } } } },
+                  ],
+                }
+              : {}),
             ...(input?.genreIds?.length
               ? { genres: { some: { genreId: { in: input.genreIds } } } }
               : {}),
@@ -307,6 +389,7 @@ export const requestRouter = createTRPCRouter({
           minWords: true,
           maxWords: true,
           createdAt: true,
+          openedAt: true,
           storyboard: {
             select: {
               slug: true,
@@ -315,11 +398,15 @@ export const requestRouter = createTRPCRouter({
               isSeed: true,
               owner: { select: { username: true, displayName: true } },
               genres: { select: { genre: { select: { id: true, name: true } } } },
+              ...AUTHORS_SELECT,
             },
           },
-          _count: { select: { suggestions: { where: ANSWERS }, ideas: true } },
+          _count: { select: { suggestions: { where: ANSWERS } } },
+          // Idea answers are counted in code (item 1.12): see `answers.ts`.
+          ideas: { where: { parentId: null }, select: { authorId: true } },
         },
       })
+      return rows.map(withIdeaAnswers)
     }),
 
   /**
@@ -389,17 +476,96 @@ export const requestRouter = createTRPCRouter({
   }),
 
   /**
+   * FR-11.1 with the prototype (phase 14, item 6.14) — what needs an author's
+   * hand: suggestions waiting for a decision on their stories, the one that
+   * has waited longest first; and "help me think" requests that have ideas
+   * and none yet marked as the one that helped. The dashboard leads with it,
+   * and hides it when there is nothing, which for someone who writes nothing
+   * here is always.
+   */
+  needsYou: protectedProcedure.query(async ({ ctx }) => {
+    const mine = authoredStoryboardsWhere(ctx.session.user.id)
+
+    const suggestions = await ctx.db.suggestion.findMany({
+      where: {
+        state: 'SUBMITTED',
+        // Hidden after a report (item 2.7): it cannot be accepted, so it waits on nobody.
+        hiddenAt: null,
+        // On a request still taking decisions: one closed without accepting
+        // left its suggestions readable, not waiting (FR-5.10).
+        request: { state: { in: ['OPEN', 'ANSWERED'] }, storyboard: mine },
+      },
+      orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
+      take: NEEDS_YOU.suggestions,
+      select: {
+        id: true,
+        publicId: true,
+        wordCount: true,
+        submittedAt: true,
+        contributor: { select: { id: true, username: true, displayName: true, status: true } },
+        request: {
+          select: {
+            publicId: true,
+            title: true,
+            storyboard: { select: { slug: true, title: true } },
+            section: { select: { chapter: { select: { order: true, title: true } } } },
+          },
+        },
+      },
+    })
+
+    const thinking = await ctx.db.contributionRequest.findMany({
+      where: {
+        kind: 'UNBLOCK',
+        // Answered: an idea from outside the story arrived (FR-5.9) and the
+        // request is not resolved, so none has been marked as having helped.
+        state: 'ANSWERED',
+        ideas: { none: { markedHelpful: true } },
+        storyboard: mine,
+      },
+      orderBy: { createdAt: 'asc' },
+      take: NEEDS_YOU.requests,
+      select: {
+        id: true,
+        publicId: true,
+        title: true,
+        createdAt: true,
+        storyboard: { select: { slug: true, title: true } },
+        section: { select: { chapter: { select: { order: true, title: true } } } },
+        _count: {
+          select: { ideas: { where: { parentId: null, deletedAt: null, hiddenAt: null } } },
+        },
+      },
+    })
+
+    return {
+      suggestions,
+      requests: thinking.map(({ _count, ...request }) => ({ ...request, ideas: _count.ideas })),
+    }
+  }),
+
+  /**
    * FR-5.10 — closing does not delete the suggestions; they stay readable,
    * marked as not accepted (`waitsOnClosedRequest`). Everyone with a draft or
    * a suggestion waiting is told, as they are when a story goes private.
    */
+  /** Item 5.5 — who would be told if this request closed now, for the dialog. */
+  closeImpact: protectedProcedure
+    .input(z.object({ requestId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const { request } = await requireAuthorOfRequest(ctx, input.requestId)
+      return requestImpact(ctx.db, { id: request.id })
+    }),
+
+  // Item 5.5 — the `reason` this used to take was written nowhere and read
+  // by nothing; it is gone.
   close: activeProcedure
-    .input(z.object({ requestId: z.string().min(1), reason: passChipSchema.optional() }))
+    .input(z.object({ requestId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const { request } = await requireAuthorOfRequest(ctx, input.requestId)
 
       // Only an open one: a resolved request has had its answer.
-      if (await closeRequest(ctx.db, request.id)) {
+      if (await closeRequest(ctx.db, request.id, ctx.session.user.id)) {
         log.info({ event: 'request.close', requestId: request.id }, 'request closed')
       }
       return ctx.db.contributionRequest.findUniqueOrThrow({
@@ -408,17 +574,76 @@ export const requestRouter = createTRPCRouter({
       })
     }),
 
+  /**
+   * Phase 14, item 6.1 (architecture §6) — the authors change a request while
+   * it is open or answered and the story is not finished: the title, the ask,
+   * the story so far, tone and character notes, the rules, the reading and
+   * the word bounds. Never the kind, never the section. Nobody is told; new
+   * bounds apply to what is sent from now on. Until this, the only way to fix
+   * a typo was to close the request, which emailed everyone with a draft.
+   */
+  update: activeProcedure.input(updateRequestSchema).mutation(async ({ ctx, input }) => {
+    const { request, storyboard } = await requireAuthorOfRequest(ctx, input.requestId)
+    assertNotFinished(storyboard.resource)
+    if (request.state !== 'OPEN' && request.state !== 'ANSWERED') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'A request can be changed while it is open. Open it again first.',
+      })
+    }
+    const { kind } = await ctx.db.contributionRequest.findUniqueOrThrow({
+      where: { id: request.id },
+      select: { kind: true },
+    })
+    const prose = PROSE_KINDS.includes(kind)
+    if (prose && countWords(input.preContext ?? '') < REQUEST_PRE_CONTEXT_WORDS.min) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: PRE_CONTEXT_TOO_SHORT })
+    }
+
+    const updated = await ctx.db.contributionRequest.update({
+      where: { id: request.id },
+      data: {
+        title: input.title,
+        ask: input.ask,
+        preContext: prose ? (input.preContext ?? null) : null,
+        toneNotes: input.toneNotes ?? null,
+        characterNotes: input.characterNotes ?? null,
+        constraints: input.constraints ?? [],
+        readingList: input.readingList ?? [],
+        minWords: input.minWords,
+        maxWords: input.maxWords,
+        editedAt: new Date(),
+      },
+      select: { id: true, publicId: true, editedAt: true },
+    })
+    log.info({ event: 'request.update', requestId: request.id }, 'request changed')
+    return updated
+  }),
+
   /** FR-5.9 — reopening notifies everyone who has ever submitted to it. */
   reopen: activeProcedure
     .input(z.object({ requestId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const { request, storyboard } = await requireAuthorOfRequest(ctx, input.requestId)
       assertNotFinished(storyboard.resource)
-      const { chapter } = await ctx.db.section.findUniqueOrThrow({
+      const section = await ctx.db.section.findUniqueOrThrow({
         where: { id: request.sectionId },
-        select: { chapter: { select: { versionId: true } } },
+        select: {
+          deletedAt: true,
+          mergedIntoId: true,
+          chapter: { select: { versionId: true, deletedAt: true } },
+        },
       })
-      await assertInMainDraft(ctx.db, chapter.versionId)
+      await assertInMainDraft(ctx.db, section.chapter.versionId)
+      // Found by item 5.2's flow: a request closed because its section was
+      // removed or joined away could be opened again, on text that was no
+      // longer in the story. Bring the section back first (item 5.7).
+      if (section.deletedAt || section.mergedIntoId || section.chapter.deletedAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That section is no longer in the story, so this cannot be opened again.',
+        })
+      }
 
       const clash = await ctx.db.contributionRequest.findFirst({
         where: {
@@ -435,9 +660,20 @@ export const requestRouter = createTRPCRouter({
         })
       }
 
-      const submitted = await ctx.db.suggestion.count({
-        where: { requestId: request.id, state: 'SUBMITTED' },
+      // What is waiting on the author: suggestions for a prose request, ideas
+      // from outside the story for a "help me think" one (item 1.12).
+      const { kind } = await ctx.db.contributionRequest.findUniqueOrThrow({
+        where: { id: request.id },
+        select: { kind: true },
       })
+      const submitted =
+        kind === 'UNBLOCK'
+          ? await ctx.db.idea.count({
+              where: { requestId: request.id, ...ideaAnswerWhere(storyboard.resource) },
+            })
+          : await ctx.db.suggestion.count({
+              where: { requestId: request.id, state: 'SUBMITTED' },
+            })
 
       // Only from closed or resolved, and so only once: a second click, or a
       // second tab, finds it open and tells nobody a second time.
@@ -450,6 +686,8 @@ export const requestRouter = createTRPCRouter({
               state: submitted > 0 ? 'ANSWERED' : 'OPEN',
               closedAt: null,
               resolvedAt: null,
+              // Item 6.15 (D-8) — opened again: a fresh thirty days.
+              openedAt: new Date(),
             },
           }),
       )
@@ -473,7 +711,8 @@ export const requestRouter = createTRPCRouter({
             data: senders.map((entry) => ({
               userId: entry.contributorId,
               type: 'REQUEST_REOPENED' as const,
-              payload: { requestId: request.id },
+              // Item 6.9 — who reopened it, for the row to name.
+              payload: { requestId: request.id, byId: deciderId },
             })),
           })
         })

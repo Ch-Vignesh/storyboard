@@ -77,7 +77,7 @@ export async function GET(_request: Request, { params }: Params): Promise<NextRe
   // to describe.
   const account = await prisma.user.findUnique({
     where: { id: userId },
-    select: { status: true, isAdmin: true, deletionRequestedAt: true },
+    select: { status: true, deletionRequestedAt: true },
   })
   try {
     await loadStoryboard(prisma, actorFrom(session, account), { id: storyboard.id })

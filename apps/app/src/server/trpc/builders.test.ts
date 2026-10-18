@@ -9,6 +9,8 @@ vi.mock('@/auth', () => ({ auth: async () => null }))
 type Account = {
   status: 'ACTIVE' | 'SUSPENDED' | 'DELETED'
   isAdmin: boolean
+  role: 'USER' | 'SUB_ADMIN' | 'ADMIN'
+  grants: string[]
   deletionRequestedAt: Date | null
   username: string | null
 }
@@ -16,6 +18,8 @@ type Account = {
 const fine: Account = {
   status: 'ACTIVE',
   isAdmin: false,
+  role: 'USER' as const,
+  grants: [],
   deletionRequestedAt: null,
   username: 'maya',
 }
@@ -31,7 +35,7 @@ async function callerAs(account: Account) {
   const router = createTRPCRouter({
     write: activeProcedure.mutation(() => 'written'),
     chooseName: accountProcedure.mutation(() => 'chosen'),
-    moderate: adminProcedure.mutation(() => 'moderated'),
+    moderate: adminProcedure('reports.decide').mutation(() => 'moderated'),
   })
   return createCallerFactory(router)({
     db: {} as never,
@@ -62,7 +66,22 @@ describe('activeProcedure and accountProcedure', () => {
 
 describe('adminProcedure', () => {
   it('lets an administrator in good standing moderate', async () => {
-    expect(await (await callerAs({ ...fine, isAdmin: true })).moderate()).toBe('moderated')
+    expect(
+      await (await callerAs({ ...fine, isAdmin: true, role: 'ADMIN' as const })).moderate(),
+    ).toBe('moderated')
+  })
+
+  // Decision 0043 (item 2b.2): a sub-admin holds the capabilities the admin
+  // granted, and nothing else. No grant, no door; a plain user has none.
+  it('lets a sub-admin through the door they were granted, and no other', async () => {
+    const granted = await callerAs({ ...fine, role: 'SUB_ADMIN', grants: ['reports.decide'] })
+    expect(await granted.moderate()).toBe('moderated')
+    const other = await callerAs({ ...fine, role: 'SUB_ADMIN', grants: ['flags.toggle'] })
+    await expect(other.moderate()).rejects.toThrow(/not found/iu)
+    const none = await callerAs({ ...fine, role: 'SUB_ADMIN' })
+    await expect(none.moderate()).rejects.toThrow(/not found/iu)
+    const user = await callerAs(fine)
+    await expect(user.moderate()).rejects.toThrow(/not found/iu)
   })
 
   // Only `isAdmin` used to be checked, for as long as the session lasted.
@@ -71,7 +90,7 @@ describe('adminProcedure', () => {
     ['being deleted', { deletionRequestedAt: new Date() }],
     ['erased', { status: 'DELETED' as const }],
   ])('refuses an administrator who is %s', async (_label, change) => {
-    const admin = await callerAs({ ...fine, isAdmin: true, ...change })
+    const admin = await callerAs({ ...fine, isAdmin: true, role: 'ADMIN' as const, ...change })
     await expect(admin.moderate()).rejects.toThrow(/not found/iu)
   })
 })

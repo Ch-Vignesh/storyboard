@@ -1,12 +1,14 @@
 import type { NextAuthConfig } from 'next-auth'
 
+import { SESSION } from '@/lib/schemas/constants'
+
 /**
  * The part of the Auth.js configuration that never touches the database. It is
  * imported by `proxy.ts`, which runs on every matched request. The Credentials
  * provider, which does query the database, is added in ./index.ts.
  */
 export const authConfig = {
-  session: { strategy: 'jwt', maxAge: 30 * 24 * 60 * 60 },
+  session: { strategy: 'jwt', maxAge: SESSION.slidingDays * 24 * 60 * 60 },
   pages: { signIn: '/signin' },
   providers: [],
   callbacks: {
@@ -38,6 +40,9 @@ export const authConfig = {
       session.user.id = asString(token.id) ?? token.sub ?? ''
       session.user.username = asString(token.username)
       session.user.onboarded = token.onboarded === true
+      // Item 3.2 — when this session signed in, for the few things that want
+      // a recent one.
+      session.authAt = typeof token.authAt === 'number' ? token.authAt : undefined
       return session
     },
   },
@@ -53,6 +58,28 @@ export function signedInBeforeReset(authAt: unknown, passwordChangedAt: Date | n
   if (!passwordChangedAt) return false
   const signedIn = typeof authAt === 'number' ? authAt : 0
   return signedIn < passwordChangedAt.getTime()
+}
+
+/**
+ * Phase 14, item 3.3 — the whole rule for whether a session is over: it signed
+ * in before the later of a password reset (decision 0036) and "Sign out on
+ * every device", or it is older than `SESSION.absoluteDays` (D-15), however
+ * active it has been. Read on every request from the one row the session
+ * callback loads anyway.
+ */
+export function sessionRefused(
+  authAt: unknown,
+  account: { passwordChangedAt: Date | null; sessionsEndedAt: Date | null },
+  now: number = Date.now(),
+): boolean {
+  const signedIn = typeof authAt === 'number' ? authAt : 0
+  if (
+    signedInBeforeReset(authAt, account.passwordChangedAt) ||
+    signedInBeforeReset(authAt, account.sessionsEndedAt)
+  ) {
+    return true
+  }
+  return now - signedIn > SESSION.absoluteDays * 24 * 60 * 60 * 1000
 }
 
 function asString(value: unknown): string | null {

@@ -1,30 +1,15 @@
 import { prisma } from '@storyboard/db'
-import NextAuth, { CredentialsSignin, type NextAuthConfig } from 'next-auth'
+import NextAuth, { type NextAuthConfig } from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import Google from 'next-auth/providers/google'
 
 import { env } from '@/env'
-import { credentialsSchema } from '@/lib/schemas/auth'
-import { TOO_MANY_SIGN_INS } from '@/lib/sign-in-error'
-import { clientAddress } from '@/server/client-address'
 
-import { authConfig, signedInBeforeReset } from './config'
+import { authorizeCredentials } from './authorize'
+import { authConfig, sessionRefused } from './config'
+import { GOOGLE_SIGN_IN_OFF } from '@/lib/sign-in-error'
+
 import { googleConfigured, resolveGoogleUser, type GoogleProfile } from './google'
-import { hashPassword, verifyPassword } from './password'
-import { signInAllowed } from './sign-in-limit'
-
-/** A sign-in refused by its limit, not by its password. Its `code` reaches the page. */
-class TooManyAttempts extends CredentialsSignin {
-  override code = TOO_MANY_SIGN_INS
-}
-
-// Verified against when the email is unknown, so both outcomes take about the
-// same time and a caller cannot tell registered addresses from unregistered ones.
-let decoyHash: Promise<string> | undefined
-function getDecoyHash(): Promise<string> {
-  decoyHash ??= hashPassword('decoy-password-never-accepted')
-  return decoyHash
-}
 
 /**
  * FR-1.6 — the Google provider, registered only when it is configured.
@@ -65,6 +50,13 @@ const callbacks: NextAuthConfig['callbacks'] = {
     const outcome = await resolveGoogleUser(profile as GoogleProfile)
     if (outcome.ok) return true
 
+    // Item 3.16 — the one refusal that is said plainly: the person turned
+    // Google off themselves, and Google has verified that whoever is asking
+    // owns the address. A string here is where Auth.js sends them instead.
+    if (outcome.reason === 'disconnected') {
+      return `/signin?error=AccessDenied&code=${GOOGLE_SIGN_IN_OFF}`
+    }
+
     // Auth.js turns `false` into a generic failure on the sign-in page, which
     // is the right amount to say: a message distinguishing "suspended" from
     // "no such account" would answer a question strangers should not get to ask.
@@ -96,11 +88,19 @@ const callbacks: NextAuthConfig['callbacks'] = {
     if (!params.user && typeof token.id === 'string') {
       const account = await prisma.user.findUnique({
         where: { id: token.id },
-        select: { passwordChangedAt: true, username: true, onboardedAt: true, status: true },
+        select: {
+          passwordChangedAt: true,
+          sessionsEndedAt: true,
+          username: true,
+          onboardedAt: true,
+          status: true,
+        },
       })
       // An erased account (decision 0024) has nobody left to be signed in.
       if (!account || account.status === 'DELETED') return null
-      if (signedInBeforeReset(token.authAt, account.passwordChangedAt)) return null
+      // ...nor is one that signed out everywhere, or is older than D-15
+      // allows (item 3.3).
+      if (sessionRefused(token.authAt, account)) return null
       // What the token says about onboarding follows the database, never the
       // browser. `update()` used to copy whatever the client sent, so anyone
       // could mark themselves onboarded with no username, and a second device
@@ -124,31 +124,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(raw, request) {
-        const parsed = credentialsSchema.safeParse(raw)
-        if (!parsed.success) return null
-        const { email, password } = parsed.data
-
-        // Before any lookup or hash, so a refused attempt costs nothing.
-        if (!(await signInAllowed(prisma, email, clientAddress(request.headers)))) {
-          throw new TooManyAttempts()
-        }
-
-        const user = await prisma.user.findUnique({ where: { email } })
-        if (!user?.passwordHash || !user.emailVerifiedAt || user.status !== 'ACTIVE') {
-          await verifyPassword(await getDecoyHash(), password)
-          return null
-        }
-        if (!(await verifyPassword(user.passwordHash, password))) return null
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.displayName ?? user.username ?? undefined,
-          username: user.username,
-          onboarded: user.onboardedAt !== null,
-        }
-      },
+      // The whole of it is in `authorize.ts`, where it can be tested without
+      // Auth.js around it (item 1.15).
+      authorize: (raw, request) => authorizeCredentials(prisma, raw, request.headers),
     }),
   ],
 })

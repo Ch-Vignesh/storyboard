@@ -39,7 +39,8 @@ test('an owner invites a co-author, who accepts and writes in the story', async 
 
   // The writer is told, on the dashboard and in notifications, and says yes.
   await writerPage.goto('/')
-  await expect(writerPage.getByText(/asked to co-author “written by two”/i)).toBeVisible()
+  // Item 6.14 — in the dashboard's "Needs you" region, with who asked.
+  await expect(writerPage.getByText(/asked you to co-author “written by two”/i)).toBeVisible()
   await writerPage.getByRole('link', { name: 'Answer' }).click()
   await writerPage.getByRole('button', { name: /become a co-author/i }).click()
   await expect(writerPage).toHaveURL(new RegExp(`${storyPath}$`))

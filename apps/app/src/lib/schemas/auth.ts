@@ -9,11 +9,58 @@ export const emailSchema = z
   .max(254, 'That email address is too long.')
   .pipe(z.email('Enter a valid email address.'))
 
-/** Length over composition rules; a passphrase is fine. */
+/**
+ * D-17 (phase 14, item 3.9), an addendum to decision 0002 — the owner's rule:
+ * at least `PASSWORD_CHARS.min` characters, with a lower-case letter, a
+ * capital, a digit and a symbol. No list of common passwords. The forms show
+ * these as a checklist that ticks as the person types; the server's refusal
+ * names the first one missing. Spaces are welcome, and are not symbols.
+ */
+export const PASSWORD_RULES = [
+  {
+    key: 'length',
+    label: `At least ${String(PASSWORD_CHARS.min)} characters`,
+    missing: `Use at least ${String(PASSWORD_CHARS.min)} characters.`,
+    met: (value: string) => value.length >= PASSWORD_CHARS.min,
+  },
+  {
+    key: 'lower',
+    label: 'A lower-case letter',
+    missing: 'Add a lower-case letter.',
+    met: (value: string) => /\p{Ll}/u.test(value),
+  },
+  {
+    key: 'upper',
+    label: 'A capital letter',
+    missing: 'Add a capital letter.',
+    met: (value: string) => /\p{Lu}/u.test(value),
+  },
+  {
+    key: 'digit',
+    label: 'A number',
+    missing: 'Add a number.',
+    met: (value: string) => /\p{Nd}/u.test(value),
+  },
+  {
+    key: 'symbol',
+    label: 'A symbol, like ! or ?',
+    missing: 'Add a symbol, like ! or ?.',
+    met: (value: string) => /[^\p{L}\p{N}\s]/u.test(value),
+  },
+] as const
+
+/** The first rule a password misses, in the words the person is told, or null. */
+export function passwordShortfall(value: string): string | null {
+  return PASSWORD_RULES.find((rule) => !rule.met(value))?.missing ?? null
+}
+
 export const passwordSchema = z
   .string()
-  .min(PASSWORD_CHARS.min, `Use at least ${String(PASSWORD_CHARS.min)} characters.`)
   .max(PASSWORD_CHARS.max, `Use at most ${String(PASSWORD_CHARS.max)} characters.`)
+  .superRefine((value, ctx) => {
+    const shortfall = passwordShortfall(value)
+    if (shortfall) ctx.addIssue({ code: 'custom', message: shortfall })
+  })
 
 /** What the sign-in form posts. Deliberately loose: never hint at the real rules. */
 export const credentialsSchema = z.object({
@@ -44,6 +91,36 @@ const RESERVED_USERNAMES = new Set([
   'support',
   'system',
   'verify',
+  // Item 3.7 — names that would pose as the place or its staff, names that
+  // would read as nobody, and every top-level route, so a profile address can
+  // never shadow a page.
+  'moderator',
+  'mod',
+  'staff',
+  'security',
+  'official',
+  'team',
+  'null',
+  'undefined',
+  'everyone',
+  'anonymous',
+  'former-member',
+  'former-contributor',
+  'about',
+  'contact',
+  'privacy',
+  'terms',
+  'rules',
+  'new',
+  'notifications',
+  'suggestions',
+  'invitations',
+  'onboarding',
+  'unsubscribe',
+  'forgot-password',
+  'reset-password',
+  's',
+  'u',
   // The seed's own accounts (packages/db/prisma/seed), and the platform
   // account's name before the rename. A person who took one of these would
   // make every later seed run fail on it, or wear the name that signs the
@@ -53,6 +130,11 @@ const RESERVED_USERNAMES = new Set([
   'example-helper-1',
   'example-helper-2',
 ])
+
+/** Item 3.8 — a display name may not pose as one of these either. */
+export function isReservedUsername(value: string): boolean {
+  return RESERVED_USERNAMES.has(value.trim().toLowerCase())
+}
 
 export const usernameSchema = z
   .string()

@@ -1,7 +1,12 @@
 import type { Metadata } from 'next'
 import Link from '@/components/link'
 
+import { AccountMenu } from '@/components/account-menu'
+
 import { auth } from '@/auth'
+import { DeletionBanner } from '@/components/deletion-banner'
+
+import { HiddenStoryBanner } from './hidden-banner'
 import type { AppRouter } from '@/server/trpc/routers/_app'
 import type { inferRouterOutputs } from '@trpc/server'
 
@@ -35,15 +40,35 @@ export async function Reader({
 
   return (
     <ReaderShell
+      // A new shell per chapter address (item 1.14): the chapter being read
+      // is the address, and no state from the last one carries over.
+      key={startAt?.chapterId ?? 'first'}
       data={data}
       startAt={startAt}
       // FR-1.2 — a guest reads, and is asked to sign in only to help.
       signedIn={Boolean(session?.user)}
+      // Decision 0024 — a pending deletion is said here too (item 1.5); and a
+      // story hidden after a report says so to the only people who still open
+      // it, its authors and a moderator (item 2.7).
+      notice={
+        <>
+          {session?.user ? <DeletionBanner /> : null}
+          {data.storyboard.hiddenAt ? (
+            <HiddenStoryBanner reason={data.storyboard.hiddenReason} />
+          ) : null}
+        </>
+      }
       header={
-        <Link href="/" className="font-manuscript text-[19px] font-medium tracking-tight text-ink">
+        <Link
+          // FR-1.2 (item 4.10) — a guest's way back is Browse; the dashboard needs an account.
+          href={session?.user ? '/' : '/browse'}
+          className="font-manuscript text-[19px] font-medium tracking-tight text-ink"
+        >
           Draftboard
         </Link>
       }
+      // Item 4.1 — the account end of the site header, inside the reader's own.
+      account={<AccountMenu session={session} />}
     />
   )
 }

@@ -13,6 +13,12 @@ export type Mail = {
   subject: string
   text: string
   html: string
+  /**
+   * Extra headers, passed to whichever provider carries the message. Set by
+   * the notification templates for `List-Unsubscribe` (item 2.4); the
+   * transactional templates set none.
+   */
+  headers?: Record<string, string>
 }
 
 export type Mailer = {
@@ -56,6 +62,7 @@ function createResendMailer(apiKey: string): Mailer {
         subject: mail.subject,
         text: mail.text,
         html: mail.html,
+        headers: mail.headers,
       })
       if (error) throw new Error(error.message)
     },

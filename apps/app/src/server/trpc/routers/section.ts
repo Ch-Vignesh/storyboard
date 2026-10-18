@@ -5,10 +5,11 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadChapter, loadSection } from '@/lib/authz/guard'
-import { recordActivity } from '@/server/activity'
 import { afterCommit } from '@/server/after-commit'
 import { closeRequestsOnSections } from '@/server/close-requests'
-import { isAuthor, revisionVisibilityWhere } from '@/lib/authz'
+import { sectionsRequestImpact } from '@/server/impact'
+import type { Person } from '@/lib/people'
+import { assertCan, isAuthor, revisionVisibilityWhere } from '@/lib/authz'
 import {
   emptyDoc,
   flavourForStoryType,
@@ -17,10 +18,16 @@ import {
   type StoryboardDoc,
 } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
-import { HISTORY, TITLE_MAX_CHARS } from '@/lib/schemas/constants'
+import { HISTORY, SOFT_DELETE_GRACE_DAYS, TITLE_MAX_CHARS } from '@/lib/schemas/constants'
 import { logger } from '@/lib/logger'
 
-import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
+import {
+  activeProcedure,
+  actorFrom,
+  createTRPCRouter,
+  protectedProcedure,
+  publicProcedure,
+} from '../init'
 
 const log = logger.child({ router: 'section' })
 
@@ -271,6 +278,193 @@ export const sectionRouter = createTRPCRouter({
     }),
 
   /** A tombstone (decision 0008). A chapter keeps at least one section. */
+  /**
+   * Phase 14, item 5.2 — what removing this section, or joining it into the
+   * one above, would do: its words, the requests on it that would close, and
+   * the people who would be told. Read with the right the change itself needs.
+   */
+  removalImpact: protectedProcedure
+    .input(z.object({ sectionId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { sectionId } = await loadSection(
+        ctx.db,
+        actor,
+        input.sectionId,
+        'storyboard:structure',
+      )
+      const section = await ctx.db.section.findUniqueOrThrow({
+        where: { id: sectionId },
+        select: { wordCount: true },
+      })
+      return { words: section.wordCount, ...(await sectionsRequestImpact(ctx.db, [sectionId])) }
+    }),
+
+  /**
+   * Phase 14, item 5.8 (decision 0008, FR-2.4, FR-8.2) — where a section is,
+   * or was: its story and chapter, whether it was removed or joined away and
+   * into what, and the sections joined into it. A removed or joined-away
+   * section has no position among the live ones, so this is how its history
+   * keeps an address. Read with the story's read right, as the history is.
+   */
+  whereabouts: publicProcedure
+    .input(z.object({ sectionId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { sectionId, permissions } = await loadSection(ctx.db, actor, input.sectionId)
+      const section = await ctx.db.section.findUniqueOrThrow({
+        where: { id: sectionId },
+        select: {
+          title: true,
+          deletedAt: true,
+          updatedAt: true,
+          mergedInto: { select: { id: true, title: true } },
+          mergedFrom: {
+            select: { id: true, title: true, updatedAt: true },
+            orderBy: { updatedAt: 'desc' },
+          },
+          chapter: {
+            select: {
+              title: true,
+              deletedAt: true,
+              version: {
+                select: {
+                  id: true,
+                  isMain: true,
+                  storyboard: { select: { slug: true, title: true } },
+                },
+              },
+            },
+          },
+        },
+      })
+      return {
+        title: section.title,
+        removedAt: section.deletedAt,
+        joinedInto: section.mergedInto
+          ? { id: section.mergedInto.id, title: section.mergedInto.title, at: section.updatedAt }
+          : null,
+        joinedFrom: section.mergedFrom.map((entry) => ({
+          id: entry.id,
+          title: entry.title,
+          at: entry.updatedAt,
+        })),
+        chapter: { title: section.chapter.title, removedAt: section.chapter.deletedAt },
+        version: { id: section.chapter.version.id, isMain: section.chapter.version.isMain },
+        storyboard: section.chapter.version.storyboard,
+        canRestore: permissions.canRestore,
+      }
+    }),
+
+  /**
+   * Item 5.7 (decision 0008) — a removed section comes back at the end of
+   * its chapter, lineage unchanged. Its chapter has to be in the story: a
+   * section in a removed chapter comes back with the chapter. Requests
+   * closed by the removal stay closed. Not from a deleted version, and not
+   * after the grace.
+   */
+  restore: activeProcedure
+    .input(z.object({ sectionId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      // Loaded for reading, because the loader refuses a removed section for
+      // anything else; the structure right is then checked by hand.
+      const { sectionId, chapterId, resource } = await loadSection(ctx.db, actor, input.sectionId)
+      assertCan(actor, 'storyboard:structure', resource)
+      const section = await ctx.db.section.findUniqueOrThrow({
+        where: { id: sectionId },
+        select: {
+          deletedAt: true,
+          mergedIntoId: true,
+          chapter: { select: { deletedAt: true, version: { select: { deletedAt: true } } } },
+        },
+      })
+      // Joined away first: a join sets no `deletedAt`, and is not undone here.
+      if (section.mergedIntoId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That section was joined into another; its words are there.',
+        })
+      }
+      if (!section.deletedAt) return { ok: true, restored: false }
+      if (section.chapter.deletedAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Bring its chapter back first; the section comes with it.',
+        })
+      }
+      if (section.chapter.version.deletedAt) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That version was deleted.' })
+      }
+      if (section.deletedAt.getTime() < Date.now() - SOFT_DELETE_GRACE_DAYS * 24 * 60 * 60 * 1000) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `A removed section can be brought back for ${String(SOFT_DELETE_GRACE_DAYS)} days.`,
+        })
+      }
+
+      await ctx.db.$transaction(async (tx) => {
+        const last = await tx.section.findFirst({
+          where: { chapterId, deletedAt: null, mergedIntoId: null },
+          orderBy: { order: 'desc' },
+          select: { order: true },
+        })
+        await tx.section.update({
+          where: { id: sectionId },
+          data: { deletedAt: null, order: (last?.order ?? -1) + 1 },
+        })
+      })
+      log.info({ event: 'section.restore', sectionId }, 'removed section brought back')
+      return { ok: true, restored: true }
+    }),
+
+  /**
+   * Item 5.3 — whose accepted words would leave the main draft if this
+   * revision were restored: the credits `restoreRevision` would unlink,
+   * named before it does, by the same rule (credited on a revision the
+   * restored text does not stand on). Nothing in an alternate version, where
+   * no credit moves.
+   */
+  restoreImpact: protectedProcedure
+    .input(z.object({ sectionId: z.string().min(1), revisionId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { sectionId, storyboardId } = await loadSection(
+        ctx.db,
+        actor,
+        input.sectionId,
+        'revision:restore',
+      )
+      const section = await ctx.db.section.findUniqueOrThrow({
+        where: { id: sectionId },
+        select: { lineageId: true, chapter: { select: { version: { select: { isMain: true } } } } },
+      })
+      const source = await ctx.db.revision.findFirst({
+        where: { id: input.revisionId, sectionId },
+        select: { id: true },
+      })
+      if (!source) throw new TRPCError({ code: 'NOT_FOUND', message: 'That version is not here.' })
+      if (!section.chapter.version.isMain) return { told: [] as Person[] }
+
+      const surviving = [...(await ancestorIds(ctx.db, source.id)), source.id]
+      const affected = await ctx.db.credit.findMany({
+        where: {
+          storyboardId,
+          sectionLineage: section.lineageId,
+          isLive: true,
+          revisionId: { not: null, notIn: surviving },
+          contributorId: { not: null },
+        },
+        select: {
+          contributor: { select: { id: true, username: true, displayName: true, status: true } },
+        },
+        distinct: ['contributorId'],
+      })
+      return {
+        told: affected.flatMap((credit) => (credit.contributor ? [credit.contributor] : [])),
+      }
+    }),
+
   delete: activeProcedure
     .input(z.object({ sectionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
@@ -659,10 +853,6 @@ export const sectionRouter = createTRPCRouter({
         return revision.id
       })
 
-      // After the write, never inside it: a calendar square is not worth
-      // failing a save over.
-      await recordActivity(ctx.db, userId)
-
       return { revisionId, unchanged: false as const }
     }),
 
@@ -863,8 +1053,6 @@ export const sectionRouter = createTRPCRouter({
           }),
         )
       }
-
-      await recordActivity(ctx.db, userId)
 
       log.info(
         {

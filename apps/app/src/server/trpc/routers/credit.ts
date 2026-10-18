@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { loadStoryboard } from '@/lib/authz/guard'
+import { mainDraftOwnShare } from '@/server/own-share'
 import { mainDraftPlaces, type Place } from '@/server/places'
 
 import { actorFrom, createTRPCRouter, publicProcedure } from '../init'
@@ -29,7 +30,12 @@ export const creditRouter = createTRPCRouter({
           sectionLineage: true,
           inheritedFromId: true,
           contributor: {
-            select: { id: true, username: true, displayName: true, avatarUrl: true },
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              avatar: { select: { updatedAt: true } },
+            },
           },
         },
       })
@@ -74,7 +80,14 @@ export const creditRouter = createTRPCRouter({
         ? await mainDraftPlaces(ctx.db, storyboardId, lineages)
         : new Map<string, Place>()
 
+      // Item 6.17 (decision 0041) — how much of the main draft is the author's
+      // own words, said only where somebody else has words in it. A co-author
+      // writes as the author, so a story with only co-authors says nothing.
+      const contributed = credits.some((credit) => credit.type !== 'COAUTHOR')
+      const ownShare = contributed ? await mainDraftOwnShare(ctx.db, storyboardId) : null
+
       return {
+        ownShare,
         credits: credits.map((credit) => ({
           ...credit,
           place: credit.sectionLineage ? (placeOf.get(credit.sectionLineage) ?? null) : null,

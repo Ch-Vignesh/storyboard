@@ -2,6 +2,7 @@ import { prisma } from '@storyboard/db'
 
 import { env } from '@/env'
 import { logger } from '@/lib/logger'
+import { displayNameSchema } from '@/lib/schemas/profile'
 
 /**
  * Signing in with Google (FR-1.6).
@@ -29,10 +30,15 @@ import { logger } from '@/lib/logger'
 
 const log = logger.child({ module: 'auth.google' })
 
-/** A trimmed name, or nothing. An empty string is not a name. */
+/**
+ * A cleaned name, or nothing. Google's name can be anything a person typed
+ * into their Google account, so it goes through the same rule as a name typed
+ * into settings (item 3.8): one that reads as somebody else, or as nobody, is
+ * dropped, and the username step fills the gap with the username.
+ */
 function displayNameFrom(name: string | null | undefined): string | null {
-  const trimmed = name?.trim()
-  return trimmed && trimmed.length > 0 ? trimmed : null
+  const parsed = displayNameSchema.safeParse(name ?? '')
+  return parsed.success ? parsed.data : null
 }
 
 export function googleConfigured(): boolean {
@@ -48,7 +54,7 @@ export type GoogleProfile = {
 
 export type GoogleOutcome =
   | { ok: true; userId: string; username: string | null; onboarded: boolean }
-  | { ok: false; reason: 'unverified' | 'suspended' | 'deleted' }
+  | { ok: false; reason: 'unverified' | 'suspended' | 'deleted' | 'disconnected' }
 
 /**
  * Find or create the account behind a Google sign-in.
@@ -71,12 +77,33 @@ export async function resolveGoogleUser(profile: GoogleProfile): Promise<GoogleO
 
   const existing = await prisma.user.findUnique({
     where: { email },
-    select: { id: true, username: true, onboardedAt: true, status: true, emailVerifiedAt: true },
+    select: {
+      id: true,
+      username: true,
+      onboardedAt: true,
+      status: true,
+      emailVerifiedAt: true,
+      googleLinkedAt: true,
+      googleDisconnectedAt: true,
+    },
   })
 
   if (existing) {
     if (existing.status === 'SUSPENDED') return { ok: false, reason: 'suspended' }
     if (existing.status === 'DELETED') return { ok: false, reason: 'deleted' }
+    // Item 3.16 — the person turned this way in off, from settings, signed in
+    // with their password. Linking by email alone would undo that here.
+    if (existing.googleDisconnectedAt) {
+      log.info({ event: 'auth.google.disconnected', userId: existing.id }, 'Google sign-in is off')
+      return { ok: false, reason: 'disconnected' }
+    }
+    // Item 3.16 — remembered, so settings can say Google is a way in.
+    if (!existing.googleLinkedAt) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { googleLinkedAt: new Date() },
+      })
+    }
 
     // A sign-up that was never confirmed, now confirmed by Google. Without
     // this the address went on receiving "choose a password" links for an
@@ -108,8 +135,11 @@ export async function resolveGoogleUser(profile: GoogleProfile): Promise<GoogleO
       email,
       // Google has already done what the verification email exists to do.
       emailVerifiedAt: new Date(),
-      // FR-13.4 — the rules are on the screen that produced this sign-in.
-      rulesSeenAt: new Date(),
+      googleLinkedAt: new Date(),
+      // Item 2.3 — the button that produced this sign-in said "By continuing
+      // you agree to the terms and the privacy policy". The rules are read on
+      // the last onboarding step (FR-13.4).
+      termsAcceptedAt: new Date(),
       // A name to show, changeable in settings. Not a username. `??` will not
       // do here: Google can send an empty string, and that should be no name
       // rather than a name that is nothing.

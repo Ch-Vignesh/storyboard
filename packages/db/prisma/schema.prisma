@@ -24,6 +24,16 @@ datasource db {
 
 // ---------------------------------------------------------------- enums
 
+/// Decision 0043 (phase 14, item 2b.1) — who may run the place. Exactly one
+/// ADMIN, kept by the partial unique index `one_admin` in the migration; a
+/// SUB_ADMIN has the capabilities the admin granted (item 2b.3). Not a story
+/// role: those are in `lib/authz/matrix.ts`.
+enum Role {
+  USER
+  SUB_ADMIN
+  ADMIN
+}
+
 enum UserStatus {
   ACTIVE
   SUSPENDED
@@ -126,6 +136,10 @@ enum NotificationType {
   REQUEST_CLOSED
   /// FR-5.9 — a request you sent a suggestion to is open again.
   REQUEST_REOPENED
+  IDEA_REPLY
+  SUGGESTION_WITHDRAWN
+  /// Item 6.15 (D-8) — a request of yours closed by itself after REQUEST_OPEN_DAYS.
+  REQUEST_AUTO_CLOSED
   WEEKLY_DIGEST
 }
 
@@ -164,50 +178,87 @@ enum ImportState {
 // ---------------------------------------------------------------- people
 
 model User {
-  id                  String     @id @default(cuid())
-  email               String     @unique
-  emailVerifiedAt     DateTime?
+  id                   String     @id @default(cuid())
+  email                String     @unique
+  emailVerifiedAt      DateTime?
+  /// Phase 14, item 3.16 — when Google first signed this account in, or
+  /// null for an account that never has. Cleared by "Disconnect Google".
+  googleLinkedAt       DateTime?
+  /// Item 3.16 — set by "Disconnect Google": a Google sign-in for this
+  /// address is refused until the person allows it again from settings,
+  /// signed in with their password. Linking by email alone would otherwise
+  /// undo the disconnection on the next attempt.
+  googleDisconnectedAt DateTime?
   /// Null until the "set password" onboarding step (FR-1.3).
-  passwordHash        String?
+  passwordHash         String?
   /// FR-1.7 — when the password was last reset. A session that signed in
   /// before this is refused (decision 0036), so a reset signs out every device.
-  passwordChangedAt   DateTime?
+  passwordChangedAt    DateTime?
+  /// Item 3.3 — "Sign out on every device": a session that signed in before
+  /// this is refused, as one from before a reset is.
+  sessionsEndedAt      DateTime?
   /// Null until chosen during onboarding; immutable afterwards and printed in
   /// every credit line forever (FR-1.3).
-  username            String?    @unique
-  displayName         String?
-  bio                 String?    @db.VarChar(280)
-  avatarUrl           String?
-  status              UserStatus @default(ACTIVE)
-  isAdmin             Boolean    @default(false)
+  username             String?    @unique
+  displayName          String?
+  bio                  String?    @db.VarChar(280)
+  /// Unused since phase 14, item 3.13: the picture lives in UserAvatar, as
+  /// bytes. Kept so that dropping it is a decision, not a side effect.
+  avatarUrl            String?
+  status               UserStatus @default(ACTIVE)
+  /// Read nowhere since decision 0043; `role` replaces it. Kept this phase,
+  /// dropped in a non-additive one.
+  isAdmin              Boolean    @default(false)
+  role                 Role       @default(USER)
   /// FR-13.5 — when the account was suspended, and by whom. The work stays
   /// readable (decision 0018); what stops is signing in and writing.
-  suspendedAt         DateTime?
-  suspendedById       String?
-  suspendedBy         User?      @relation("UserSuspender", fields: [suspendedById], references: [id])
-  suspendedUsers      User[]     @relation("UserSuspender")
+  suspendedAt          DateTime?
+  suspendedById        String?
+  suspendedBy          User?      @relation("UserSuspender", fields: [suspendedById], references: [id])
+  suspendedUsers       User[]     @relation("UserSuspender")
+  /// Decision 0043 (phase 14, item 2b.5) — a ban is a suspension that neither
+  /// the report review nor "Lift the suspension" undoes, and that stops the
+  /// person cancelling a deletion an administrator started.
+  bannedAt             DateTime?
+  /// Why the account stands as it does: the note left with the last
+  /// suspension, ban or deletion by an administrator. Admin eyes only;
+  /// cleared with a lift.
+  standingNote         String?    @db.VarChar(500)
   /// OD-3 second half, decision 0024 — when this person asked to be deleted.
   /// The account is frozen from that moment and the row is stripped of every
   /// identifying column once the grace period passes. The row itself stays: it
   /// is what every revision, credit and storyboard they touched still points
   /// at, and deleting it would take other people's work with it.
-  deletionRequestedAt DateTime?
-  /// FR-13.4 — the community rules are shown once, at sign-up. This records
-  /// that they were, so nobody is shown them twice or misses them once.
-  rulesSeenAt         DateTime?
+  deletionRequestedAt  DateTime?
+  /// FR-13.4 — set when the person ticks "I have read the community rules"
+  /// on the last onboarding step (phase 14, item 2.3). Accounts made before
+  /// that were stamped at creation, when the rules were only linked.
+  rulesSeenAt          DateTime?
+  /// Item 2.3 — when the account was created, which is when the person agreed
+  /// to the terms and the privacy policy, as the button beside the form said.
+  /// Null for an account made before this landed.
+  termsAcceptedAt      DateTime?
   /// Set when the four onboarding steps are complete (FR-1.3, FR-1.5).
-  onboardedAt         DateTime?
+  onboardedAt          DateTime?
+  /// Decision 0043 (phase 14, item 2b.4) — the last request this account
+  /// made, to the hour: written by the session read at most once an hour, by
+  /// plain SQL so `updatedAt` keeps meaning a change to the account. Null for
+  /// an account not seen since this landed.
+  lastSeenAt           DateTime?
   /// FR-9.4 — whether suggestions this person wrote that were passed on are
   /// shown to anyone but them. False by default: defaulting to public would
   /// make being passed on feel punitive, which FR-6.10 is at pains to avoid.
-  showPassedWork      Boolean    @default(false)
+  showPassedWork       Boolean    @default(false)
+  /// Phase 14, item 3.15 (screen 16) — what a new story starts as, in the
+  /// create form and the import. The form still shows FR-13.6's words.
+  defaultVisibility    Visibility @default(PUBLIC)
   /// NFR-5 — reading comfort, persisted per user rather than per browser.
   /// Percentages of the manuscript defaults (19px / 1.68) so they stay integers
   /// and the bounds in lib/schemas/constants.ts are exact. Decision 0009.
-  readingTypeScale    Int        @default(100)
-  readingLineHeight   Int        @default(168)
-  createdAt           DateTime   @default(now())
-  updatedAt           DateTime   @updatedAt
+  readingTypeScale     Int        @default(100)
+  readingLineHeight    Int        @default(168)
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
   featureFlagsSet     FeatureFlag[]
   pinnedGenres        UserGenre[]
@@ -231,6 +282,12 @@ model User {
   importJobs          ImportJob[]
   verificationTokens  EmailVerificationToken[]
   passwordResetTokens PasswordResetToken[]
+  emailChangeTokens   EmailChangeToken[]
+  adminGrants         SubAdminGrant[]          @relation("SubAdminGrantUser")
+  grantsGiven         SubAdminGrant[]          @relation("SubAdminGrantGranter")
+  blocksMade          UserBlock[]              @relation("BlocksMade")
+  blocksReceived      UserBlock[]              @relation("BlocksReceived")
+  avatar              UserAvatar?
 }
 
 /// FR-1.4 — single-use, hashed at rest, 24 h expiry, 60 s resend cooldown
@@ -249,6 +306,35 @@ model PasswordResetToken {
   createdAt  DateTime  @default(now())
 
   @@index([userId, createdAt])
+}
+
+/// Phase 14, item 3.2 — a change of address, confirmed from the new address.
+/// The same kind of token as a reset link's: hashed at rest, single use, an
+/// hour long. Nothing about the account changes until the link is opened.
+model EmailChangeToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  newEmail   String
+  /// sha256 of the token that was emailed. The plaintext is never stored.
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/// Phase 14, item 3.13 (D-5) — a profile picture, stored already cut square
+/// and shrunk to AVATAR.sizePx a side as WebP, so a row is a few kilobytes
+/// and no object store is needed. Served from /u/[username]/avatar;
+/// `updatedAt` is the version in that URL. The purge deletes the row.
+model UserAvatar {
+  userId      String   @id
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bytes       Bytes
+  contentType String   @db.VarChar(40)
+  updatedAt   DateTime @updatedAt
 }
 
 model EmailVerificationToken {
@@ -287,28 +373,34 @@ model UserGenre {
 // ---------------------------------------------------------------- the work
 
 model Storyboard {
-  id         String     @id @default(cuid())
+  id           String          @id @default(cuid())
   /// nanoid; appears in URLs and as the slug suffix.
-  publicId   String     @unique
+  publicId     String          @unique
   /// title slug + publicId suffix, e.g. `the-ship-never-lands-k3x9q2`.
-  slug       String     @unique
-  title      String     @db.VarChar(200)
-  logline    String?    @db.VarChar(300)
-  type       StoryType
-  visibility Visibility @default(PUBLIC)
-  state      StoryState @default(ACTIVE)
+  slug         String          @unique
+  title        String          @db.VarChar(200)
+  logline      String?         @db.VarChar(300)
+  type         StoryType
+  visibility   Visibility      @default(PUBLIC)
+  state        StoryState      @default(ACTIVE)
   /// FR-14.5 — free text, displayed verbatim, never verified.
-  rightsNote String?    @db.VarChar(500)
+  rightsNote   String?         @db.VarChar(500)
   /// FR-15.3 — seeded example content, labelled as such in the UI.
-  isSeed     Boolean    @default(false)
+  isSeed       Boolean         @default(false)
   /// FR-2.7 — revisions created before this instant stay private to authors.
-  publicFrom DateTime?
+  publicFrom   DateTime?
   /// FR-14.1
-  finishedAt DateTime?
+  finishedAt   DateTime?
   /// FR-2.6 — soft delete; a job hard-deletes 30 days later.
-  deletedAt  DateTime?
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  deletedAt    DateTime?
+  /// FR-13.5, FR-13.7 (phase 14, item 2.7; decision 0045) — hidden after an
+  /// upheld report: not found for anyone but its authors and the moderators.
+  /// Nothing is deleted, and "Show it again" undoes it.
+  hiddenAt     DateTime?
+  hiddenById   String?
+  hiddenReason ReportCategory?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
   ownerId String
   owner   User   @relation("StoryboardOwner", fields: [ownerId], references: [id])
@@ -378,6 +470,59 @@ model Collaborator {
   @@index([userId])
 }
 
+/// Decision 0043 (phase 14, item 2b.6) — why a name is unavailable: retired
+/// with a deleted account (decision 0042), or banned by an administrator.
+enum RetiredReason {
+  RETIRED
+  BANNED
+}
+
+/// Decision 0042 (phase 14, item 1.6) — the SHA-256 of a deleted account's
+/// lower-cased username, kept so the name is never taken again: it is printed
+/// in credit lines and exports for ever. Written by the account purge.
+/// Decision 0043 (item 2b.6) — and a name an administrator banned, kept in
+/// clear with its note so the Names screen can list it; a retired name stays
+/// a hash alone. The username step refuses both with the same sentence.
+model RetiredUsername {
+  hash      String        @id
+  retiredAt DateTime      @default(now())
+  reason    RetiredReason @default(RETIRED)
+  name      String?
+  note      String?       @db.VarChar(500)
+}
+
+/// Decision 0043 (phase 14, item 2b.3) — what the admin has let a sub-admin
+/// do: one row per capability, named as in `apps/app/src/lib/authz/admin.ts`
+/// and checked against that list before it is written. Demoting a sub-admin
+/// deletes their rows; so does deleting either account.
+model SubAdminGrant {
+  userId      String
+  capability  String   @db.VarChar(40)
+  grantedById String
+  grantedAt   DateTime @default(now())
+
+  user      User @relation("SubAdminGrantUser", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User @relation("SubAdminGrantGranter", fields: [grantedById], references: [id], onDelete: Cascade)
+
+  @@id([userId, capability])
+}
+
+/// Decision 0046 (phase 14, item 2.9; D-9) — blocking a person. Someone you
+/// block still reads every story, yours included; they cannot start, send or
+/// post help on a story you own or co-write (`lib/authz`), and you hear
+/// nothing from them. Their existing work stays, and can be passed.
+model UserBlock {
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("BlocksMade", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("BlocksReceived", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
+}
+
 /// "The main draft" (isMain) or an alternate version. Creating one copies the
 /// chapter/section tree; revisions are shared, never copied (architecture §2).
 /// Exactly one main per storyboard: partial unique index in the invariants migration.
@@ -394,6 +539,11 @@ model Version {
   createdBy     User       @relation(fields: [createdById], references: [id])
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
+  /// FR-10.1 — a removed alternate version (phase 14, item 1.1). A tombstone,
+  /// like every other structural delete (decision 0008): the chapters under it
+  /// are tombstoned too, and the row stays so nothing that points at it
+  /// dangles. Never set on the main draft.
+  deletedAt     DateTime?
 
   chapters Chapter[]
   spinOffs Storyboard[] @relation("SpinOffSourceVersion")
@@ -519,33 +669,40 @@ model SectionDraft {
 /// "A spot I'm stuck on." One open request per section: partial unique index
 /// in the invariants migration (FR-5.1).
 model ContributionRequest {
-  id           String       @id @default(cuid())
-  publicId     String       @unique
-  storyboardId String
-  storyboard   Storyboard   @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
-  sectionId    String
-  section      Section      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  kind         RequestKind
-  title        String       @db.VarChar(120)
+  id             String       @id @default(cuid())
+  publicId       String       @unique
+  storyboardId   String
+  storyboard     Storyboard   @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  sectionId      String
+  section        Section      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  kind           RequestKind
+  title          String       @db.VarChar(120)
   /// 20–500 words (FR-5.3).
-  ask          String       @db.Text
+  ask            String       @db.Text
   /// 100–500 words; required for REWRITE and CONTINUE (FR-5.4).
-  preContext   String?      @db.Text
-  toneNotes    String?      @db.Text
+  preContext     String?      @db.Text
+  toneNotes      String?      @db.Text
+  /// Phase 14, item 6.2 (FR-5.6) — who the people are, apart from how it sounds.
+  characterNotes String?      @db.Text
   /// string[] — hard constraints shown as a checklist on the composer (FR-5.6).
-  constraints  Json?
+  constraints    Json?
   /// lineageId[] — suggested reading, rendered inline (FR-5.5).
-  readingList  Json?
+  readingList    Json?
   /// FR-5.8 — adjustable within 100–2000.
-  minWords     Int          @default(150)
-  maxWords     Int          @default(1000)
-  state        RequestState @default(OPEN)
-  openedById   String
-  openedBy     User         @relation(fields: [openedById], references: [id])
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  resolvedAt   DateTime?
-  closedAt     DateTime?
+  minWords       Int          @default(150)
+  maxWords       Int          @default(1000)
+  state          RequestState @default(OPEN)
+  openedById     String
+  openedBy       User         @relation(fields: [openedById], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  resolvedAt     DateTime?
+  closedAt       DateTime?
+  /// Item 6.1 — when an author last changed it after opening it; shown as "edited".
+  editedAt       DateTime?
+  /// Item 6.15 (D-8, decision 0050) — when it was opened, or last opened again:
+  /// it closes by itself REQUEST_OPEN_DAYS later.
+  openedAt       DateTime     @default(now())
 
   suggestions Suggestion[]
   ideas       Idea[]
@@ -577,6 +734,18 @@ model Suggestion {
   decidedById    String?
   decidedBy      User?               @relation("SuggestionDecider", fields: [decidedById], references: [id])
   withdrawnAt    DateTime?
+  /// FR-6.5 — when an author first opened it (phase 14, item 1.10). A
+  /// withdrawal tells the authors only if this is set.
+  openedAt       DateTime?
+  /// Phase 14, item 6.7 (D-12) — changed by its writer after it was sent and
+  /// before an author opened it; shown as "edited" wherever it appears.
+  editedAt       DateTime?
+  /// Decision 0045 (item 2.7) — hidden after an upheld report: reads as
+  /// removed to everyone but its writer and the moderators, is no longer an
+  /// answer, cannot be accepted, and holds no place in the writer's quota.
+  hiddenAt       DateTime?
+  hiddenById     String?
+  hiddenReason   ReportCategory?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
@@ -604,6 +773,16 @@ model Idea {
   /// 20–400 words, plain text.
   body          String              @db.Text
   markedHelpful Boolean             @default(false)
+  /// Phase 14, item 6.8 — changed by its writer within IDEA_EDIT_MINUTES.
+  editedAt      DateTime?
+  /// Item 6.8 — removed by its writer; reads "Removed by its writer", replies stay.
+  deletedAt     DateTime?
+  /// Decision 0045 (item 2.7) — hidden after an upheld report: reads as
+  /// removed to everyone but its writer and the moderators, and is no longer
+  /// an answer or a candidate for "this one helped".
+  hiddenAt      DateTime?
+  hiddenById    String?
+  hiddenReason  ReportCategory?
   createdAt     DateTime            @default(now())
 
   credits Credit[]

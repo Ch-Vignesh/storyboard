@@ -1,6 +1,6 @@
 'use client'
 
-import NextLink from 'next/link'
+import NextLink, { useLinkStatus } from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { ComponentProps } from 'react'
 
@@ -57,6 +57,27 @@ export default function Link({
         onTouchStart?.(event)
       }}
       {...rest}
+    >
+      {rest.children}
+      <PendingBar />
+    </NextLink>
+  )
+}
+
+/**
+ * Phase 14, item 4.6 — a thin bar across the top of the window while the
+ * page this link leads to is on its way. Before it, a click on a cold start
+ * looked dead for a second or two. `useLinkStatus` reads the status of the
+ * enclosing link, so the bar belongs to the one link that was followed; the
+ * pulse is left out for people who asked for less motion, and the bar stays.
+ */
+function PendingBar() {
+  const { pending } = useLinkStatus()
+  if (!pending) return null
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 bg-pencil motion-safe:animate-pulse"
     />
   )
 }

@@ -1,6 +1,7 @@
 import { createCallerFactory, createTRPCRouter } from '../init'
 import { adminRouter } from './admin'
 import { authRouter } from './auth'
+import { blockRouter } from './block'
 import { browseRouter } from './browse'
 import { chapterRouter } from './chapter'
 import { coauthorRouter } from './coauthor'
@@ -41,6 +42,7 @@ export const appRouter = createTRPCRouter({
   spinOff: spinOffRouter,
   notification: notificationRouter,
   coauthor: coauthorRouter,
+  block: blockRouter,
 })
 
 export type AppRouter = typeof appRouter

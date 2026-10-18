@@ -3,6 +3,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { ADMIN_CAPABILITIES } from '@/lib/authz/admin'
+
 /**
  * A structural rule, checked by reading the routers rather than by calling them.
  *
@@ -14,13 +16,21 @@ import { describe, expect, it } from 'vitest'
  *
  * So the rule is the procedure builder, and this is what keeps it true: every
  * mutation is `activeProcedure` (which refuses a suspended account) or
- * `adminProcedure` (which refuses everyone but an administrator). A test that
+ * `adminProcedure(capability)` (which refuses everyone but an administrator
+ * holding that capability, decision 0043). A test that
  * reads source is a blunt instrument, and it is the right one here — the thing
  * being protected is a convention, and a convention with no check is a comment.
  */
 const DIR = join(import.meta.dirname, 'routers')
 
-type Procedure = { file: string; name: string; builder: string; kind: 'query' | 'mutation' }
+type Procedure = {
+  file: string
+  name: string
+  builder: string
+  /** What `adminProcedure('…')` was given; null for the other builders. */
+  capability: string | null
+  kind: 'query' | 'mutation'
+}
 
 function procedures(): Procedure[] {
   const found: Procedure[] = []
@@ -30,7 +40,7 @@ function procedures(): Procedure[] {
     const lines = readFileSync(join(DIR, file), 'utf8').split('\n')
 
     for (const [index, line] of lines.entries()) {
-      const match = /^ {2}(\w+): (\w+Procedure)/u.exec(line)
+      const match = /^ {2}(\w+): (\w+Procedure)(?:\('([\w.]+)'\))?/u.exec(line)
       if (!match) continue
 
       let end = lines.length
@@ -43,12 +53,13 @@ function procedures(): Procedure[] {
       }
 
       const body = lines.slice(index, end).join('\n')
-      const [, name, builder] = match
+      const [, name, builder, capability] = match
       if (!name || !builder) continue
       found.push({
         file,
         name,
         builder,
+        capability: capability ?? null,
         kind: body.includes('.mutation(') ? 'mutation' : 'query',
       })
     }
@@ -76,6 +87,9 @@ describe('how procedures are built', () => {
     'setPassword',
     'requestPasswordReset',
     'resetPassword',
+    // Item 3.2: a new address is confirmed from its own mailbox, signed in or
+    // not; the link is the authority, as a reset link is.
+    'confirmEmailChange',
   ])
 
   /**
@@ -150,5 +164,24 @@ describe('how procedures are built', () => {
     const queries = all.filter((procedure) => procedure.kind === 'query')
     expect(queries.some((procedure) => procedure.builder === 'publicProcedure')).toBe(true)
     expect(queries.filter((procedure) => procedure.builder === 'activeProcedure')).toHaveLength(1)
+  })
+
+  /**
+   * Decision 0043 (phase 14, item 2b.2): every admin procedure names the
+   * capability it needs, from the fixed list, so a sub-admin can hold some
+   * doors and not others. The parameter's type refuses a name outside the
+   * list already; this keeps that true if the type is ever widened, and keeps
+   * the inventory readable in one place.
+   */
+  it('names a known capability on every admin procedure', () => {
+    const admin = all.filter((procedure) => procedure.builder === 'adminProcedure')
+    expect(admin.length).toBeGreaterThan(0)
+    const known = new Set<string>(ADMIN_CAPABILITIES)
+    const wrong = admin
+      .filter((procedure) => !procedure.capability || !known.has(procedure.capability))
+      .map(
+        (procedure) => `${procedure.file}: ${procedure.name} (${procedure.capability ?? 'none'})`,
+      )
+    expect(wrong).toEqual([])
   })
 })

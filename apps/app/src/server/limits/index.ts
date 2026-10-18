@@ -195,6 +195,15 @@ export const key = {
   // Sign-in attempts: an address from one client, and one client in all.
   signIn: (email: string, client: string) => `auth:signin:${client}:${addressDigest(email)}`,
   signInsFrom: (client: string) => `auth:signin-from:${client}`,
+  // Item 3.1: tries at changing a password, per account and per client.
+  passwordChange: (userId: string) => `auth:change:${userId}`,
+  passwordChangesFrom: (client: string) => `auth:change-from:${client}`,
+  // Item 3.2: links to confirm a new address, per account.
+  emailChange: (userId: string) => `auth:email-change:${userId}`,
+  /** Item 3.13 — profile pictures set, per account. */
+  avatarUpload: (userId: string) => `settings:avatar:${userId}`,
+  /** Item 3.14 — copies of your own data, per account. */
+  dataExport: (userId: string) => `settings:export:${userId}`,
 } as const
 
 /**

@@ -6,6 +6,7 @@ import { createTRPCContext } from '@trpc/tanstack-react-query'
 import { useState } from 'react'
 import superjson from 'superjson'
 
+import { TIME_ZONE_HEADER } from '@/lib/time-zone'
 import type { AppRouter } from '@/server/trpc/routers/_app'
 
 import { makeQueryClient } from './query-client'
@@ -33,7 +34,15 @@ export function TRPCReactProvider(props: Readonly<{ children: React.ReactNode }>
   const queryClient = getQueryClient()
   const [trpcClient] = useState(() =>
     createTRPCClient<AppRouter>({
-      links: [httpBatchLink({ transformer: superjson, url: getUrl() })],
+      links: [
+        httpBatchLink({
+          transformer: superjson,
+          url: getUrl(),
+          // Item 1.18 — the browser's time zone, for whatever the server
+          // writes or counts by day (item 6.13 reads it).
+          headers: () => ({ [TIME_ZONE_HEADER]: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+        }),
+      ],
     }),
   )
 

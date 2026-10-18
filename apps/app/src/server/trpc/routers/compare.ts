@@ -5,6 +5,7 @@ import { z } from 'zod'
 
 import { loadSection, loadStoryboard, loadVersion } from '@/lib/authz/guard'
 import { canReadRevisionAt, canReadSuggestionSentAt } from '@/lib/authz'
+import { seesHidden } from '@/server/hidden'
 import { flavourForStoryType } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
 import { acceptedDoc } from '@/server/accepted-text'
@@ -236,6 +237,7 @@ export const compareRouter = createTRPCRouter({
           baseRevisionId: true,
           contributorId: true,
           submittedAt: true,
+          hiddenAt: true,
           request: {
             select: {
               storyboardId: true,
@@ -254,6 +256,12 @@ export const compareRouter = createTRPCRouter({
         id: suggestion.request.storyboardId,
       })
       if (suggestion.state === 'DRAFT' && suggestion.contributorId !== actor?.id) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
+      }
+      // Hidden after a report (item 2.7): the comparison would hand out the
+      // words the page no longer shows, so there is none for anyone but the
+      // writer and a moderator.
+      if (suggestion.hiddenAt && !seesHidden(actor, suggestion.contributorId)) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That suggestion does not exist.' })
       }
       // Decision 0007 (and 0039): sent while the story was private, it stays

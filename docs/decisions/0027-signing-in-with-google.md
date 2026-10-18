@@ -50,8 +50,9 @@ four tables to store what one email column already answers.
 
 The consequence worth knowing: somebody who signed up through Google has no
 password, so the credentials provider refuses them — by the `passwordHash` check
-it already made, with no new code. If they want a password later, the existing
-verification-link flow sets one.
+it already made, with no new code. If they want a password later, the
+password-reset flow sets one, and settings says so (phase 14, item 3.1; this
+line once said the verification-link flow did, which it does not).
 
 ## What it does not do
 

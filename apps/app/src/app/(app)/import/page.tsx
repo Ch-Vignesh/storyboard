@@ -29,6 +29,8 @@ export default async function ImportPage({
   if (!session?.user) redirect('/signin?next=/import')
 
   const genres = await caller.user.genres()
+  // Item 3.15 — the visibility the import starts on.
+  const { defaultVisibility } = await caller.user.me()
 
   // FR-3.2 — a file already read is reviewed where it was left: the job is in
   // the address once its proposal exists. A reload threw the proposal away,
@@ -43,7 +45,7 @@ export default async function ImportPage({
       : undefined
 
   return (
-    <main id="main" className="mx-auto max-w-2xl px-6 py-12">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-2xl px-6 py-12">
       <nav className="mb-6 text-[12.5px] text-ink-faint">
         <Link href="/" className="hover:text-ink hover:underline">
           Your dashboard
@@ -87,7 +89,7 @@ export default async function ImportPage({
         </p>
       </section>
 
-      <ImportFlow genres={genres} resume={resume} />
+      <ImportFlow genres={genres} resume={resume} defaultVisibility={defaultVisibility} />
     </main>
   )
 }

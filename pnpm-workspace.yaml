@@ -13,6 +13,7 @@ catalog:
   '@prisma/client': 7.10.0
   '@prisma/adapter-pg': 7.10.0
   pg: 8.23.0
+  sharp: 0.35.4
   # tooling
   typescript: 5.9.3
   '@types/node': 24.13.4

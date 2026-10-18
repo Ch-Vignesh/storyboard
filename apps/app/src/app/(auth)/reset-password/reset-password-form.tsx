@@ -7,9 +7,11 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { PasswordInput } from '@/components/password-input'
+import { PasswordRules } from '@/components/password-rules'
+import { PASSWORD_CHARS } from '@/lib/schemas/constants'
 import { useTRPC } from '@/trpc/client'
 
-export function ResetPasswordForm({ token }: { token: string }) {
+export function ResetPasswordForm({ token, email }: { token: string; email: string }) {
   const trpc = useTRPC()
   const router = useRouter()
   const [password, setPassword] = useState('')
@@ -36,25 +38,34 @@ export function ResetPasswordForm({ token }: { token: string }) {
         reset.mutate({ token, password, confirm })
       }}
     >
+      {/* Item 3.9 — which account this password belongs to, for password managers. */}
+      <input
+        type="text"
+        name="username"
+        autoComplete="username"
+        value={email}
+        readOnly
+        tabIndex={-1}
+        aria-hidden
+        className="sr-only"
+      />
       <div className="space-y-1.5">
         <Label htmlFor="new-password">New password</Label>
         <PasswordInput
           id="new-password"
           reveals="new password"
           autoComplete="new-password"
-          minLength={10}
-          maxLength={128}
+          maxLength={PASSWORD_CHARS.max}
           required
           value={password}
           onChange={(event) => {
             setPassword(event.target.value)
             setMismatch(false)
           }}
+          aria-describedby="new-password-rules"
           aria-invalid={reset.isError || undefined}
         />
-        <p className="text-[12.5px] text-ink-faint">
-          At least 10 characters. A short sentence works well.
-        </p>
+        <PasswordRules id="new-password-rules" value={password} />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="confirm-password">Type it again</Label>
@@ -62,7 +73,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
           id="confirm-password"
           reveals="the password typed again"
           autoComplete="new-password"
-          maxLength={128}
+          maxLength={PASSWORD_CHARS.max}
           required
           value={confirm}
           onChange={(event) => {

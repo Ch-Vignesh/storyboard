@@ -56,6 +56,8 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
       account: {
         status: 'ACTIVE',
         isAdmin: false,
+        role: 'USER' as const,
+        grants: [],
         deletionRequestedAt: null,
         username: who.username,
       },
@@ -236,7 +238,7 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
       where: { id: requestId },
       select: { publicId: true },
     })
-    const arrived = (await (await as(owner)).notification.list()).filter(
+    const arrived = (await (await as(owner)).notification.list({})).items.filter(
       (row) => row.type === 'IDEA_RECEIVED' && row.path?.endsWith(`/help/${publicId}`),
     )
     expect(arrived).toHaveLength(1)
@@ -995,12 +997,12 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     })
     const page = `/s/${slug}/help/${request.publicId}/s/${suggestion.publicId}`
 
-    const arrived = (await author.notification.list()).find(
+    const arrived = (await author.notification.list({})).items.find(
       (row) => row.type === 'SUGGESTION_RECEIVED' && row.path === page,
     )
     expect(arrived?.title).toBe('Make it land')
 
-    const accepted = (await writer.notification.list()).find(
+    const accepted = (await writer.notification.list({})).items.find(
       (row) => row.type === 'SUGGESTION_ACCEPTED',
     )
     expect(accepted).toMatchObject({ path: page, title: 'Make it land' })
@@ -1029,7 +1031,9 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
         baseRevisionId: revisionId,
       }),
     ).rejects.toThrow()
-    const invited = (await call.notification.list()).find((row) => row.type === 'COAUTHOR_INVITED')
+    const invited = (await call.notification.list({})).items.find(
+      (row) => row.type === 'COAUTHOR_INVITED',
+    )
     expect(invited).toMatchObject({ path: '/invitations', title: 'Integrity' })
     expect((await call.coauthor.invitations()).map((row) => row.id)).toContain(invitationId)
 
@@ -1218,11 +1222,261 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     )
   })
 
+  /**
+   * FR-10.1 — a deleted alternate version is gone from everywhere a version
+   * is resolved by id. Until phase 14 (item 1.1) `Version` had no tombstone:
+   * the delete removed the chapters and left the row, so the version stayed
+   * listed as "0 chapters", was still offered in Compare, and could still be
+   * promoted, which made a main draft with no chapters and closed every open
+   * request on the way.
+   */
+  it('removes a deleted alternate from the list, from compare and from promotion', async () => {
+    await aSection(60, 'Words the alternate will copy.')
+    const author = await as(owner)
+    const { slug } = await db.storyboard.findUniqueOrThrow({
+      where: { id: storyboardId },
+      select: { slug: true },
+    })
+    const main = await db.version.findFirstOrThrow({
+      where: { storyboardId, isMain: true },
+      select: { id: true },
+    })
+    const alternate = await author.version.create({ baseVersionId: main.id, name: 'Discarded' })
+    const before = (await author.version.list({ storyboardId })).versions.map((v) => v.id)
+    expect(before).toContain(alternate.id)
+
+    await author.version.delete({ versionId: alternate.id })
+
+    const after = (await author.version.list({ storyboardId })).versions.map((v) => v.id)
+    expect(after).not.toContain(alternate.id)
+    expect(after).toContain(main.id)
+    await expect(author.version.promoteToMain({ versionId: alternate.id })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    })
+    await expect(author.storyboard.get({ slug, versionId: alternate.id })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    })
+    await expect(
+      author.compare.versions({ baseVersionId: main.id, targetVersionId: alternate.id }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(
+      author.version.rename({ versionId: alternate.id, name: 'Back' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    // The main draft is untouched.
+    const still = await db.version.findUniqueOrThrow({
+      where: { id: main.id },
+      select: { isMain: true },
+    })
+    expect(still.isMain).toBe(true)
+  })
+
+  it('makes no version without a chapter the main draft', async () => {
+    const author = await as(owner)
+    const bare = await db.version.create({
+      data: { storyboardId, name: 'Bare', isMain: false, createdById: owner.id },
+      select: { id: true },
+    })
+    await expect(author.version.promoteToMain({ versionId: bare.id })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    })
+    const main = await db.version.findFirstOrThrow({
+      where: { storyboardId, isMain: true },
+      select: { id: true },
+    })
+    expect(main.id).not.toBe(bare.id)
+  })
+
+  /**
+   * FR-6.5 (phase 14, item 1.10) — a withdrawal is recorded, and the authors
+   * are told only if one of them had opened the suggestion. Nothing wrote
+   * `withdrawnAt`, nothing recorded an opening, and an author pressing Accept
+   * on a suggestion withdrawn a moment before read "already been decided".
+   */
+  it('records a withdrawal, and tells the authors only if one had opened it', async () => {
+    const helper = await as(reader)
+    const author = await as(owner)
+    // A clean slate for the per-story quota, whatever earlier tests left waiting.
+    await db.suggestion.updateMany({
+      where: { contributorId: reader.id, state: 'SUBMITTED', request: { storyboardId } },
+      data: { state: 'WITHDRAWN' },
+    })
+    const withdrawnTold = () =>
+      db.notification.count({ where: { userId: owner.id, type: 'SUGGESTION_WITHDRAWN' } })
+
+    // Unopened: recorded, and nobody told.
+    const first = await aDraft(await aRequest())
+    await helper.suggestion.submit({ suggestionId: first })
+    await helper.suggestion.withdraw({ suggestionId: first })
+    const quiet = await db.suggestion.findUniqueOrThrow({
+      where: { id: first },
+      select: { state: true, withdrawnAt: true, openedAt: true },
+    })
+    expect(quiet.state).toBe('WITHDRAWN')
+    expect(quiet.withdrawnAt).toBeInstanceOf(Date)
+    expect(quiet.openedAt).toBeNull()
+    expect(await withdrawnTold()).toBe(0)
+
+    // Opened by an author, then withdrawn: recorded, and the authors told.
+    const second = await aDraft(await aRequest())
+    const sent = await helper.suggestion.submit({ suggestionId: second })
+    await author.suggestion.get({ publicId: sent.publicId })
+    const opened = await db.suggestion.findUniqueOrThrow({
+      where: { id: second },
+      select: { openedAt: true },
+    })
+    expect(opened.openedAt).toBeInstanceOf(Date)
+    await helper.suggestion.withdraw({ suggestionId: second })
+    expect(await withdrawnTold()).toBe(1)
+
+    // An author deciding on it a moment later reads who withdrew it.
+    await expect(author.suggestion.accept({ suggestionId: second })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringMatching(/withdrew this a moment ago/i),
+    })
+    await expect(author.suggestion.pass({ suggestionId: second })).rejects.toMatchObject({
+      message: expect.stringMatching(/withdrew this a moment ago/i),
+    })
+  })
+
+  /**
+   * FR-6.2, FR-6.7 (phase 14, item 1.11) — the note to the author survives a
+   * draft and a re-send. The composer kept it in memory only, so leaving it as
+   * a draft lost it, and sending a rebased suggestion again without typing the
+   * note again erased it.
+   */
+  it('keeps the note through a draft and a re-send', async () => {
+    // A helper of its own: the shared reader is near the ten sends a day the
+    // earlier tests spend (FR-13.3).
+    const helper = await as(await person('noted'))
+    const noteOf = async (id: string) =>
+      (await db.suggestion.findUniqueOrThrow({ where: { id }, select: { note: true } })).note
+
+    const draft = (await helper.suggestion.startDraft({ requestId: await aRequest() })).id
+    await helper.suggestion.saveDraft({
+      suggestionId: draft,
+      contentJson: prose('It was empty.'),
+      note: 'Kept it short.',
+    })
+    expect(await noteOf(draft)).toBe('Kept it short.')
+
+    // Sent without the note in the input: the stored one stands.
+    await helper.suggestion.submit({ suggestionId: draft })
+    expect(await noteOf(draft)).toBe('Kept it short.')
+
+    // Gone stale, updated and sent again, still without typing the note again.
+    await db.suggestion.update({ where: { id: draft }, data: { state: 'STALE' } })
+    await helper.suggestion.rebase({ suggestionId: draft })
+    await helper.suggestion.submit({ suggestionId: draft })
+    expect(await noteOf(draft)).toBe('Kept it short.')
+  })
+
+  /**
+   * FR-5.9, FR-6.9, FR-12.4 (phase 14, item 1.12) — a "help me think" request
+   * moves through its states on ideas as a prose request does on suggestions:
+   * the first idea from outside the story answers it, "This one helped"
+   * resolves it, and the quiet nudge counts only such ideas. Ideas never
+   * moved a request, and the author's own reply took it out of the nudge.
+   */
+  it('moves a help-me-think request on ideas from outside, and nudges only without one', async () => {
+    const author = await as(owner)
+    const helper = await as(reader)
+    const requestId = await aRequest('UNBLOCK')
+    const stateOf = () =>
+      db.contributionRequest.findUniqueOrThrow({
+        where: { id: requestId },
+        select: { state: true, resolvedAt: true },
+      })
+    const idea =
+      'One option is that the harbour was never empty at all, and she has been looking at the wrong harbour since the first page.'
+
+    // The author's own idea is not an answer, and leaves the request quiet.
+    await author.idea.post({ requestId, body: idea })
+    expect((await stateOf()).state).toBe('OPEN')
+    await db.contributionRequest.update({
+      where: { id: requestId },
+      data: { createdAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) },
+    })
+    const { runQuietNudge } = await import('@/server/mail/digests')
+    const nudged: string[] = []
+    await runQuietNudge(db, new Date(), {
+      mailer: {
+        send: async (mail) => {
+          nudged.push(mail.subject)
+        },
+      },
+    })
+    expect(nudged.some((subject) => subject.includes('Make it land'))).toBe(true)
+
+    // A helper's idea answers it; marked as the one that helped, it is resolved.
+    const answer = await helper.idea.post({ requestId, body: idea })
+    expect((await stateOf()).state).toBe('ANSWERED')
+    await author.idea.markHelpful({ ideaId: answer.id })
+    const resolved = await stateOf()
+    expect(resolved.state).toBe('RESOLVED')
+    expect(resolved.resolvedAt).toBeInstanceOf(Date)
+
+    // Opened again, it is answered, because the answer is still there.
+    const before = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { openedAt: true },
+    })
+    await author.request.reopen({ requestId })
+    expect((await stateOf()).state).toBe('ANSWERED')
+    // Item 6.15 (D-8) — and its thirty days start again.
+    const again = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { openedAt: true },
+    })
+    expect(again.openedAt.getTime()).toBeGreaterThan(before.openedAt.getTime())
+  })
+
+  /**
+   * FR-11.1, FR-11.3 (phase 14, item 1.17) — lists show what they say. The
+   * dashboard's "in your genres" region listed the viewer's own requests, and
+   * browse's type filter never reached the query.
+   */
+  it('lists open requests from other people only, and filters stories by type', async () => {
+    const requestId = await aRequest()
+    const own = await (await as(owner)).request.listOpen()
+    expect(own.some((request) => request.id === requestId)).toBe(false)
+    const theirs = await (await as(reader)).request.listOpen()
+    expect(theirs.some((request) => request.id === requestId)).toBe(true)
+
+    const call = await as(reader)
+    const novels = await call.browse.storyboards({ types: ['NOVEL'] })
+    expect(novels.some((story) => story.id === storyboardId)).toBe(true)
+    const plays = await call.browse.storyboards({ types: ['STAGE_PLAY'] })
+    expect(plays.some((story) => story.id === storyboardId)).toBe(false)
+  })
+
+  /**
+   * FR-6.9, FR-9.1 (phase 14, item 1.7; decision 0041) — an owner who accepts
+   * their own suggestion on their own story is its author, not a contributor:
+   * the revision names them, and no credit is made.
+   */
+  it('makes no credit for an author accepting their own suggestion', async () => {
+    const author = await as(owner)
+    const requestId = await aRequest()
+    const draft = await author.suggestion.startDraft({ requestId })
+    await author.suggestion.saveDraft({
+      suggestionId: draft.id,
+      contentJson: prose('The author did it.'),
+    })
+    await author.suggestion.submit({ suggestionId: draft.id })
+    const accepted = await author.suggestion.accept({ suggestionId: draft.id })
+    const revision = await db.revision.findUniqueOrThrow({
+      where: { id: accepted.revisionId ?? '' },
+      select: { authorId: true },
+    })
+    expect(revision.authorId).toBe(owner.id)
+    expect(await db.credit.count({ where: { suggestionId: draft.id } })).toBe(0)
+  })
+
   // Last, because it makes the shared story private.
   it('stops naming a story in a reader’s own lists once it is private to them', async () => {
     const call = await as(reader)
     expect((await call.suggestion.listMine()).length).toBeGreaterThan(0)
-    expect((await call.notification.list()).some((row) => row.path !== null)).toBe(true)
+    expect((await call.notification.list({})).items.some((row) => row.path !== null)).toBe(true)
 
     await db.storyboard.update({
       where: { id: storyboardId },
@@ -1233,8 +1487,288 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     const news = await call.request.withNews()
     expect(JSON.stringify(news)).not.toContain('A new, private title')
     // Their notifications still say what happened, and no longer where.
-    const told = await call.notification.list()
+    const told = (await call.notification.list({})).items
     expect(told.length).toBeGreaterThan(0)
     expect(told.every((row) => row.path === null && row.title === null)).toBe(true)
+  })
+
+  // Phase 14, item 5.7 (decision 0008) — what was removed can come back.
+  it('brings a removed section back at the end of its chapter, and a chapter with its sections', async () => {
+    const author = await as(owner)
+    const { versionId } = await db.chapter.findUniqueOrThrow({
+      where: { id: chapterId },
+      select: { versionId: true },
+    })
+    await aSection(30)
+    const gone = await aSection(31)
+    await author.section.delete({ sectionId: gone.sectionId })
+    const listed = await author.chapter.removed({ versionId })
+    expect(listed.sections.map((section) => section.id)).toContain(gone.sectionId)
+
+    expect(await author.section.restore({ sectionId: gone.sectionId })).toEqual({
+      ok: true,
+      restored: true,
+    })
+    const last = await db.section.findFirst({
+      where: { chapterId, deletedAt: null, mergedIntoId: null },
+      orderBy: { order: 'desc' },
+      select: { id: true },
+    })
+    expect(last?.id).toBe(gone.sectionId)
+    // Not listed any more, and a second restore changes nothing.
+    expect((await author.chapter.removed({ versionId })).sections).not.toContainEqual(
+      expect.objectContaining({ id: gone.sectionId }),
+    )
+    expect(await author.section.restore({ sectionId: gone.sectionId })).toEqual({
+      ok: true,
+      restored: false,
+    })
+
+    // A chapter goes with its sections, and comes back with them, at the end.
+    const chapter = await db.chapter.create({
+      data: { versionId, lineageId: randomUUID(), order: 99, title: 'Removable' },
+      select: { id: true },
+    })
+    const inside = await aSection(0, 'Inside the removable chapter.', chapter.id)
+    await author.chapter.delete({ chapterId: chapter.id })
+    const removed = await author.chapter.removed({ versionId })
+    expect(removed.chapters.map((entry) => entry.id)).toContain(chapter.id)
+    // Its section is not offered on its own: it comes back with the chapter.
+    expect(removed.sections.map((entry) => entry.id)).not.toContain(inside.sectionId)
+    await expect(author.section.restore({ sectionId: inside.sectionId })).rejects.toThrow(
+      /chapter back first/u,
+    )
+
+    expect(await author.chapter.restore({ chapterId: chapter.id })).toEqual({
+      ok: true,
+      restored: true,
+    })
+    const rows = await db.section.findMany({
+      where: { chapterId: chapter.id },
+      select: { deletedAt: true },
+    })
+    expect(rows.every((row) => row.deletedAt === null)).toBe(true)
+    const lastChapter = await db.chapter.findFirst({
+      where: { versionId, deletedAt: null },
+      orderBy: { order: 'desc' },
+      select: { id: true },
+    })
+    expect(lastChapter?.id).toBe(chapter.id)
+  })
+
+  it('does not bring back a section joined into another, nor one from a deleted version', async () => {
+    const author = await as(owner)
+    const above = await aSection(40)
+    const below = await aSection(41)
+    await author.section.joinWithPrevious({ sectionId: below.sectionId })
+    await expect(author.section.restore({ sectionId: below.sectionId })).rejects.toThrow(
+      /joined into another/u,
+    )
+    expect(above.sectionId).toBeTruthy()
+
+    // Item 1.1 — a deleted version's chapters stay where they are.
+    const version = await db.version.create({
+      data: {
+        storyboardId,
+        name: 'Doomed',
+        isMain: false,
+        createdById: owner.id,
+        deletedAt: new Date(),
+      },
+      select: { id: true },
+    })
+    const chapter = await db.chapter.create({
+      data: {
+        versionId: version.id,
+        lineageId: randomUUID(),
+        order: 0,
+        title: 'Lost',
+        deletedAt: new Date(),
+      },
+      select: { id: true },
+    })
+    await expect(author.chapter.restore({ chapterId: chapter.id })).rejects.toThrow(
+      /version was deleted/u,
+    )
+  })
+
+  // Phase 14, item 6.1 — a request can be changed while it is open, by its
+  // authors, within the same bounds as opening; never its kind or section.
+  it('lets the author change an open request, within the rules, and nobody else', async () => {
+    const author = await as(owner)
+    const stranger = await as(reader)
+    const requestId = await aRequest('REWRITE')
+    const base = {
+      requestId,
+      title: 'The turn, again',
+      ask: 'The turn still does not land, and now I think the problem is the sentence before it rather than the one after.',
+      preContext: Array.from({ length: 110 }, (_, index) => `word${String(index)}`).join(' '),
+      toneNotes: 'Dry.',
+      characterNotes: 'Ruth never explains herself.',
+      constraints: ['No dialogue'],
+      minWords: 200,
+      maxWords: 900,
+    }
+
+    await expect(stranger.request.update(base)).rejects.toThrow()
+
+    const changed = await author.request.update(base)
+    expect(changed.editedAt).toBeInstanceOf(Date)
+    const row = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { title: true, characterNotes: true, minWords: true, maxWords: true, kind: true },
+    })
+    expect(row).toEqual({
+      title: 'The turn, again',
+      characterNotes: 'Ruth never explains herself.',
+      minWords: 200,
+      maxWords: 900,
+      kind: 'REWRITE',
+    })
+
+    // The bounds of opening still hold: a story-so-far too short for a prose
+    // request, and a smallest number above the largest.
+    await expect(author.request.update({ ...base, preContext: 'Too short.' })).rejects.toThrow(
+      /at least/u,
+    )
+    await expect(author.request.update({ ...base, minWords: 900, maxWords: 200 })).rejects.toThrow(
+      /smaller/u,
+    )
+
+    // Closed: not until it is open again.
+    await author.request.close({ requestId })
+    await expect(author.request.update(base)).rejects.toThrow(/open/u)
+  })
+
+  // Phase 14, items 6.3 and 6.4 — what may still be sent, read before writing.
+  it('says how many suggestions wait against the quota, and how many sends the day has left', async () => {
+    // An earlier test leaves the shared story private; a reader needs it public.
+    await db.storyboard.update({ where: { id: storyboardId }, data: { visibility: 'PUBLIC' } })
+    const helper = await as(reader)
+    const requestId = await aRequest('REWRITE')
+
+    // Earlier tests may have left the reader's suggestions waiting here, so
+    // the counts are read as differences.
+    const before = await helper.suggestion.allowance({ storyboardId })
+    expect(before.quota).toBe(3)
+    expect(before.sendsLeftToday).toBeGreaterThanOrEqual(0)
+    expect(before.sendsLeftToday).toBeLessThanOrEqual(10)
+
+    // A draft waits on nobody; a sent one does.
+    const draftId = await aDraft(requestId)
+    expect((await helper.suggestion.allowance({ storyboardId })).waiting).toBe(before.waiting)
+    await db.suggestion.update({
+      where: { id: draftId },
+      data: { state: 'SUBMITTED', submittedAt: new Date() },
+    })
+    expect((await helper.suggestion.allowance({ storyboardId })).waiting).toBe(before.waiting + 1)
+
+    // The owner has no cap on their own story.
+    expect((await (await as(owner)).suggestion.allowance({ storyboardId })).quota).toBeNull()
+  })
+
+  // Phase 14, item 6.5 — a draft can be thrown away; only yours, only a draft.
+  it('throws away only your own draft, and never a sent suggestion', async () => {
+    await db.storyboard.update({ where: { id: storyboardId }, data: { visibility: 'PUBLIC' } })
+    const helper = await as(reader)
+    const requestId = await aRequest('REWRITE')
+    const draftId = await aDraft(requestId)
+
+    await expect(
+      (await as(owner)).suggestion.discardDraft({ suggestionId: draftId }),
+    ).rejects.toThrow(/not a draft of yours/u)
+    expect(await helper.suggestion.discardDraft({ suggestionId: draftId })).toEqual({
+      removed: true,
+    })
+    expect(await db.suggestion.findUnique({ where: { id: draftId } })).toBeNull()
+
+    const sentId = await aDraft(requestId)
+    await db.suggestion.update({
+      where: { id: sentId },
+      data: { state: 'SUBMITTED', submittedAt: new Date() },
+    })
+    await expect(helper.suggestion.discardDraft({ suggestionId: sentId })).rejects.toThrow(
+      /withdrawn/u,
+    )
+  })
+
+  // Phase 14, item 6.6 — a draft started against old text can move its base;
+  // its words are left alone.
+  it('moves a draft to the new text when asked, and leaves its words as they were', async () => {
+    await db.storyboard.update({ where: { id: storyboardId }, data: { visibility: 'PUBLIC' } })
+    const helper = await as(reader)
+    const author = await as(owner)
+    const requestId = await aRequest('REWRITE')
+    const draftId = await aDraft(requestId)
+    const before = await db.suggestion.findUniqueOrThrow({
+      where: { id: draftId },
+      select: { baseRevisionId: true, contentText: true, request: { select: { sectionId: true } } },
+    })
+
+    await author.section.commitRevision({
+      sectionId: before.request.sectionId,
+      contentJson: prose('The harbour, revised while the draft waited.'),
+      baseRevisionId: before.baseRevisionId ?? undefined,
+    })
+
+    const moved = await helper.suggestion.rebase({ suggestionId: draftId })
+    expect(moved.state).toBe('DRAFT')
+    expect(moved.baseRevisionId).not.toBe(before.baseRevisionId)
+    const after = await db.suggestion.findUniqueOrThrow({
+      where: { id: draftId },
+      select: { contentText: true, baseRevisionId: true },
+    })
+    expect(after.contentText).toBe(before.contentText)
+    const head = await db.section.findUniqueOrThrow({
+      where: { id: before.request.sectionId },
+      select: { currentRevisionId: true },
+    })
+    expect(after.baseRevisionId).toBe(head.currentRevisionId)
+  })
+
+  // Phase 14, item 6.7 (D-12) — a sent suggestion changes until an author opens it.
+  it('lets its writer change a sent suggestion until an author opens it, and nobody else', async () => {
+    await db.storyboard.update({ where: { id: storyboardId }, data: { visibility: 'PUBLIC' } })
+    const helper = await as(reader)
+    const requestId = await aRequest('REWRITE')
+    const sentId = await aDraft(requestId)
+    await db.suggestion.update({
+      where: { id: sentId },
+      data: { state: 'SUBMITTED', submittedAt: new Date() },
+    })
+
+    await expect(
+      (await as(owner)).suggestion.edit({ suggestionId: sentId, contentJson: prose('Not mine.') }),
+    ).rejects.toThrow(/not yours/u)
+
+    const changed = await helper.suggestion.edit({
+      suggestionId: sentId,
+      contentJson: prose('The harbour had been empty for a year, and she had counted every day.'),
+      note: 'Tightened the first sentence.',
+    })
+    expect(changed.editedAt).toBeInstanceOf(Date)
+    const row = await db.suggestion.findUniqueOrThrow({
+      where: { id: sentId },
+      select: { contentText: true, note: true, editedAt: true, state: true },
+    })
+    expect(row.contentText).toContain('counted every day')
+    expect(row.note).toBe('Tightened the first sentence.')
+    expect(row.state).toBe('SUBMITTED')
+
+    // The bounds the request set still hold.
+    await db.contributionRequest.update({ where: { id: requestId }, data: { minWords: 50 } })
+    await expect(
+      helper.suggestion.edit({
+        suggestionId: sentId,
+        contentJson: prose('Five words are not enough.'),
+      }),
+    ).rejects.toThrow(/between 50 and/u)
+    await db.contributionRequest.update({ where: { id: requestId }, data: { minWords: 1 } })
+
+    // Opened by an author: the same words, whichever read saw it unopened.
+    await db.suggestion.update({ where: { id: sentId }, data: { openedAt: new Date() } })
+    await expect(
+      helper.suggestion.edit({ suggestionId: sentId, contentJson: prose('Too late.') }),
+    ).rejects.toThrow(/started reading/u)
   })
 })

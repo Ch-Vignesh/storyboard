@@ -8,6 +8,9 @@ import { useEffect, useRef, useState } from 'react'
 import { Manuscript } from '@/components/manuscript'
 
 import { LineageBanner } from './lineage-banner'
+import { CopyLink } from '@/components/copy-link'
+import { HeaderMenu } from '@/components/header-menu'
+import { ownShareSentence } from '@/lib/own-share'
 import { ReadingControls } from '@/components/reading-controls'
 import { flavourForStoryType } from '@/lib/doc/schema'
 import { nameOf } from '@/lib/people'
@@ -21,19 +24,35 @@ export function ReaderShell({
   data,
   signedIn,
   header,
+  notice,
+  account,
   startAt,
 }: {
   data: StoryboardData
   signedIn: boolean
   header: React.ReactNode
+  /** Shown under the header, across the page: the deletion banner (item 1.5). */
+  notice?: React.ReactNode
+  /** Item 4.1 — the account end of the site header, shared with it. */
+  account?: React.ReactNode
   /** A chapter's or a section's address was followed (SRS section 4). */
   startAt?: { chapterId: string; sectionId?: string }
 }) {
   const trpc = useTRPC()
   const { storyboard, chapters, permissions, historyVisibleFrom, privateStretches, version } = data
-  const [activeChapterId, setActiveChapterId] = useState(
-    startAt?.chapterId ?? chapters[0]?.id ?? null,
-  )
+  // FR-11.5, SRS section 4 (phase 14, item 1.14) — the chapter being read is
+  // the one the address names. It was state here, so a reload went back to
+  // chapter one and Back left the story. The shell is keyed by chapter in
+  // reader.tsx, so arriving at another chapter starts it afresh.
+  const activeChapterId = startAt?.chapterId ?? chapters[0]?.id ?? null
+  // On arrival at a chapter's address, its heading takes focus, so a keyboard
+  // or screen-reader user starts where the address points. A section's
+  // address scrolls to the section instead (below).
+  const heading = useRef<HTMLHeadingElement>(null)
+  const arrivedAtChapter = startAt?.chapterId !== undefined && startAt.sectionId === undefined
+  useEffect(() => {
+    if (arrivedAtChapter) heading.current?.focus({ preventScroll: true })
+  }, [arrivedAtChapter])
   // FR-11.5 — clicking a margin card scrolls to its section and highlights it.
   // A section's address does the same for the section it names.
   const [highlighted, setHighlighted] = useState<string | null>(startAt?.sectionId ?? null)
@@ -81,59 +100,77 @@ export function ReaderShell({
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-6 py-3">
           {header}
           <div className="flex items-center gap-3">
-            {signedIn ? <ReadingControls /> : null}
-            <Button asChild variant="ghost" size="sm">
-              <Link href={`/s/${storyboard.slug}/contributors`}>Contributors</Link>
-            </Button>
-            {/* FR-10.3 — the way to the spin-off button, which lives with the
-                story's family tree. Nothing led there for a story nobody had
-                spun off yet, until the 2026-10-16 spec review. */}
-            {signedIn && permissions.canSpinOff && storyboard.visibility === 'PUBLIC' ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/s/${storyboard.slug}/lineage`}>Your own version</Link>
-              </Button>
-            ) : null}
-            {/* FR-10.1 — an author has drafts; a reader has none to see. */}
-            {permissions.canCreateVersion ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/s/${storyboard.slug}/versions`}>Versions</Link>
-              </Button>
-            ) : null}
-            {/* SRS 3.1 — who writes it, for the people who do. */}
-            {permissions.canEdit ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/s/${storyboard.slug}/coauthors`}>Co-authors</Link>
-              </Button>
-            ) : null}
-            {permissions.canExport ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/s/${storyboard.slug}/export`}>Take it out</Link>
-              </Button>
-            ) : null}
+            {/* Item 4.3 — below `md` everything but the one primary action
+                folds behind "More"; from `md` up this is the row it was. */}
             {permissions.canOpenRequest && !finished ? (
-              <Button asChild variant="ghost" size="sm">
+              <Button asChild variant="ghost" size="sm" className="md:hidden">
                 <Link href={`/s/${storyboard.slug}/help/new`}>Ask for help</Link>
               </Button>
             ) : null}
-            {permissions.canStructure ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/s/${storyboard.slug}/contents`}>Contents</Link>
-              </Button>
-            ) : null}
-            {permissions.canSetVisibility ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`/s/${storyboard.slug}/settings`}>Settings</Link>
-              </Button>
-            ) : null}
-            {/* FR-1.2 — the account wall sits in front of helping, not reading. */}
             {!signedIn ? (
-              <Button asChild variant="primary" size="sm">
+              <Button asChild variant="primary" size="sm" className="md:hidden">
                 <Link href={`/signin?next=/s/${storyboard.slug}`}>Sign in to help</Link>
               </Button>
             ) : null}
+            <HeaderMenu label="More" from="md">
+              {signedIn ? <ReadingControls /> : null}
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/s/${storyboard.slug}/contributors`}>Contributors</Link>
+              </Button>
+              {/* Item 6.11 — the story's address, to hand to someone. */}
+              <CopyLink path={`/s/${storyboard.slug}`} appearance="ghost" />
+              {/* FR-10.3 — the way to the spin-off button, which lives with the
+                story's family tree. Nothing led there for a story nobody had
+                spun off yet, until the 2026-10-16 spec review. */}
+              {signedIn && permissions.canSpinOff && storyboard.visibility === 'PUBLIC' ? (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/s/${storyboard.slug}/lineage`}>Your own version</Link>
+                </Button>
+              ) : null}
+              {/* FR-10.1 — an author has drafts; a reader has none to see. */}
+              {permissions.canCreateVersion ? (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/s/${storyboard.slug}/versions`}>Versions</Link>
+                </Button>
+              ) : null}
+              {/* SRS 3.1 — who writes it, for the people who do. */}
+              {permissions.canEdit ? (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/s/${storyboard.slug}/coauthors`}>Co-authors</Link>
+                </Button>
+              ) : null}
+              {permissions.canExport ? (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/s/${storyboard.slug}/export`}>Take it out</Link>
+                </Button>
+              ) : null}
+              {permissions.canOpenRequest && !finished ? (
+                <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
+                  <Link href={`/s/${storyboard.slug}/help/new`}>Ask for help</Link>
+                </Button>
+              ) : null}
+              {permissions.canStructure ? (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/s/${storyboard.slug}/contents${versionSuffix}`}>Contents</Link>
+                </Button>
+              ) : null}
+              {permissions.canSetVisibility ? (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/s/${storyboard.slug}/settings`}>Settings</Link>
+                </Button>
+              ) : null}
+              {/* FR-1.2 — the account wall sits in front of helping, not reading. */}
+              {!signedIn ? (
+                <Button asChild variant="primary" size="sm" className="hidden md:inline-flex">
+                  <Link href={`/signin?next=/s/${storyboard.slug}`}>Sign in to help</Link>
+                </Button>
+              ) : null}
+              {account}
+            </HeaderMenu>
           </div>
         </div>
       </header>
+      {notice}
 
       <div className="mx-auto flex max-w-6xl gap-10 px-6 py-10">
         {/* Contents rail */}
@@ -142,46 +179,34 @@ export function ReaderShell({
             <p className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
               Contents
             </p>
-            <ol className="mt-3 space-y-0.5">
-              {chapters.map((entry, index) => (
-                <li key={entry.id}>
-                  <button
-                    type="button"
-                    aria-current={entry.id === activeChapterId ? 'true' : undefined}
-                    onClick={() => setActiveChapterId(entry.id)}
-                    className={
-                      entry.id === activeChapterId
-                        ? 'w-full border-l-2 border-pencil bg-pencil-wash py-1.5 pl-3 text-left text-[13.5px] text-pencil'
-                        : 'w-full border-l-2 border-transparent py-1.5 pl-3 text-left text-[13.5px] text-ink-soft hover:border-rule hover:text-ink'
-                    }
-                  >
-                    <span className="block truncate">
-                      {index + 1}. {entry.title}
-                    </span>
-                    {/* The active chapter sits on a pencil wash, and the faint
-                        ink that clears 4.5:1 on paper only reaches 4.0:1 on it
-                        (NFR-4). Tinted ground, darker ink. */}
-                    <span
-                      className={
-                        entry.id === activeChapterId
-                          ? 'mt-0.5 block text-[11.5px] text-pencil-deep tabular-nums'
-                          : 'mt-0.5 block text-[11.5px] text-ink-faint tabular-nums'
-                      }
-                    >
-                      {entry.sections
-                        .reduce((total, section) => total + section.wordCount, 0)
-                        .toLocaleString('en-GB')}{' '}
-                      words
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ol>
+            <ChapterList
+              chapters={chapters}
+              activeChapterId={activeChapterId}
+              slug={storyboard.slug}
+              versionSuffix={versionSuffix}
+            />
           </div>
         </nav>
 
         {/* Manuscript */}
-        <main className="min-w-0 flex-1">
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1">
+          {/* Item 4.3 — below `lg` the rail is gone; the same list opens here. */}
+          <nav aria-label="Chapters" className="mb-6 lg:hidden">
+            <HeaderMenu
+              label="Chapters"
+              from="lg"
+              panel="inline"
+              wide="hidden"
+              buttonClassName="rounded-control border border-rule px-2.5 py-1 text-[13px] text-ink-soft hover:border-ink-faint hover:text-ink"
+            >
+              <ChapterList
+                chapters={chapters}
+                activeChapterId={activeChapterId}
+                slug={storyboard.slug}
+                versionSuffix={versionSuffix}
+              />
+            </HeaderMenu>
+          </nav>
           <header className="mb-10">
             {storyboard.isSeed ? (
               // FR-15.3 — a seeded storyboard never looks like a real user's.
@@ -213,6 +238,12 @@ export function ReaderShell({
               </span>
               {storyboard.visibility === 'PRIVATE' ? ' · private' : ''}
             </p>
+            {/* Item 6.17 (decision 0041) — beside the contributors: how much is the author's own. */}
+            {ownShareSentence(storyboard.ownShare) ? (
+              <p className="mt-1 text-[12.5px] text-ink-faint">
+                {ownShareSentence(storyboard.ownShare)}.
+              </p>
+            ) : null}
             {storyboard.logline ? (
               <p className="mt-4 max-w-measure font-manuscript text-[17px] leading-relaxed text-ink-soft italic">
                 {storyboard.logline}
@@ -291,7 +322,11 @@ export function ReaderShell({
             <p className="text-ink-soft">This story has no chapters yet.</p>
           ) : (
             <article>
-              <h2 className="font-manuscript text-[24px] font-medium text-ink">
+              <h2
+                ref={heading}
+                tabIndex={-1}
+                className="font-manuscript text-[24px] font-medium text-ink"
+              >
                 {chapters[activeIndex]?.title}
               </h2>
 
@@ -428,25 +463,24 @@ export function ReaderShell({
               )}
 
               <nav className="mt-12 flex justify-between border-t border-rule pt-5">
+                {/* Real links to the chapters' addresses (item 1.14). */}
                 {activeIndex > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setActiveChapterId(chapters[activeIndex - 1]!.id)}
+                  <Link
+                    href={`/s/${storyboard.slug}/c/${activeIndex}${versionSuffix}`}
                     className="text-[13.5px] text-pencil hover:underline"
                   >
                     ← {chapters[activeIndex - 1]!.title}
-                  </button>
+                  </Link>
                 ) : (
                   <span />
                 )}
                 {activeIndex < chapters.length - 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => setActiveChapterId(chapters[activeIndex + 1]!.id)}
+                  <Link
+                    href={`/s/${storyboard.slug}/c/${activeIndex + 2}${versionSuffix}`}
                     className="text-[13.5px] text-pencil hover:underline"
                   >
                     {chapters[activeIndex + 1]!.title} →
-                  </button>
+                  </Link>
                 ) : (
                   <span />
                 )}
@@ -470,5 +504,59 @@ export function ReaderShell({
         </main>
       </div>
     </div>
+  )
+}
+
+/**
+ * The chapter list: the rail from `lg` up, and the "Chapters" disclosure
+ * below it (item 4.3). One component, so the two never drift; 7.2's request
+ * markers will go here once.
+ */
+function ChapterList({
+  chapters,
+  activeChapterId,
+  slug,
+  versionSuffix,
+}: {
+  chapters: StoryboardData['chapters']
+  activeChapterId: string | null
+  slug: string
+  versionSuffix: string
+}) {
+  return (
+    <ol className="mt-3 w-full space-y-0.5">
+      {chapters.map((entry, index) => (
+        <li key={entry.id}>
+          <Link
+            href={`/s/${slug}/c/${index + 1}${versionSuffix}`}
+            aria-current={entry.id === activeChapterId ? 'page' : undefined}
+            className={
+              entry.id === activeChapterId
+                ? 'block w-full border-l-2 border-pencil bg-pencil-wash py-1.5 pl-3 text-left text-[13.5px] text-pencil'
+                : 'block w-full border-l-2 border-transparent py-1.5 pl-3 text-left text-[13.5px] text-ink-soft hover:border-rule hover:text-ink'
+            }
+          >
+            <span className="block truncate">
+              {index + 1}. {entry.title}
+            </span>
+            {/* The active chapter sits on a pencil wash, and the faint ink
+                that clears 4.5:1 on paper only reaches 4.0:1 on it (NFR-4).
+                Tinted ground, darker ink. */}
+            <span
+              className={
+                entry.id === activeChapterId
+                  ? 'mt-0.5 block text-[11.5px] text-pencil-deep tabular-nums'
+                  : 'mt-0.5 block text-[11.5px] text-ink-faint tabular-nums'
+              }
+            >
+              {entry.sections
+                .reduce((total, section) => total + section.wordCount, 0)
+                .toLocaleString('en-GB')}{' '}
+              words
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ol>
   )
 }

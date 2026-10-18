@@ -1,6 +1,7 @@
 import Link from '@/components/link'
 
-import { REQUEST_KINDS } from '@/lib/schemas/help'
+import { REQUEST_KINDS, closesOn } from '@/lib/schemas/help'
+import { formatInZone } from '@/lib/time-zone'
 
 type Request = {
   id: string
@@ -11,6 +12,8 @@ type Request = {
   minWords: number
   maxWords: number
   createdAt: Date
+  /** Item 6.15 — "Closes on" counts from it. */
+  openedAt: Date
   quiet: boolean
   storyboard: {
     slug: string
@@ -26,7 +29,7 @@ type Request = {
  * One stuck passage. The kind and the size lead, because those are what decide
  * whether a helper can take it on; the title is what makes them want to.
  */
-export function RequestCard({ request }: { request: Request }) {
+export function RequestCard({ request, timeZone }: { request: Request; timeZone: string }) {
   const kind = REQUEST_KINDS.find((option) => option.value === request.kind)
   const answers = request.kind === 'UNBLOCK' ? request._count.ideas : request._count.suggestions
   const ask = request.ask.length > 200 ? `${request.ask.slice(0, 200).trimEnd()}…` : request.ask
@@ -63,6 +66,8 @@ export function RequestCard({ request }: { request: Request }) {
           {request.kind === 'UNBLOCK'
             ? `${String(answers)} ${answers === 1 ? 'idea' : 'ideas'}`
             : `${String(answers)} ${answers === 1 ? 'suggestion' : 'suggestions'} · ${String(request.minWords)}–${String(request.maxWords)} words`}
+          {/* Item 6.15 (D-8) — said from the day it opens, in the reader's zone. */}
+          {` · Closes on ${formatInZone(closesOn(request.openedAt), 'dayMonth', timeZone)}`}
         </p>
       </div>
     </Link>

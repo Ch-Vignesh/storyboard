@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 
+import { readTimeZone } from '@/lib/dates'
 import { filtersFromParams } from '@/lib/schemas/browse'
 import { caller } from '@/trpc/server'
 
@@ -31,14 +32,21 @@ export default async function BrowsePage({ searchParams }: Params) {
   }
 
   const filters = filtersFromParams(params)
+  // Item 6.15 — the cards say when each request closes, in the reader's zone.
+  const timeZone = await readTimeZone()
   const [{ requests }, storyboards, genres] = await Promise.all([
     caller.browse.requests(filters),
-    caller.browse.storyboards({ query: filters.query, genreIds: filters.genreIds, take: 12 }),
+    caller.browse.storyboards({
+      query: filters.query,
+      genreIds: filters.genreIds,
+      types: filters.types,
+      take: 12,
+    }),
     caller.user.genres(),
   ])
 
   return (
-    <main id="main" className="mx-auto max-w-6xl px-6 py-12">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-6xl px-6 py-12">
       <header className="max-w-measure">
         <h1 className="font-manuscript text-[30px] leading-tight font-medium text-ink">
           Where people are stuck
@@ -72,7 +80,7 @@ export default async function BrowsePage({ searchParams }: Params) {
             <ul className="mt-5 grid gap-4 sm:grid-cols-2">
               {requests.map((request) => (
                 <li key={request.id}>
-                  <RequestCard request={request} />
+                  <RequestCard request={request} timeZone={timeZone} />
                 </li>
               ))}
             </ul>

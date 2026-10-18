@@ -11,6 +11,9 @@ export const SECTION_WORDS = { softMin: 200, softMax: 2000 } as const
 export const REQUEST_TITLE_MAX_CHARS = 120
 export const REQUEST_ASK_WORDS = { min: 20, max: 500 } as const
 
+/** Item 6.3 — an ask longer than this is folded in the composer behind "Read all". */
+export const REQUEST_ASK_PREVIEW_CHARS = 240
+
 /** FR-5.4 */
 export const REQUEST_PRE_CONTEXT_WORDS = { min: 100, max: 500 } as const
 
@@ -48,6 +51,16 @@ export const REQUEST_EXTRAS = {
 /** FR-6.9 */
 export const IDEA_WORDS = { min: 20, max: 400 } as const
 
+/** Item 6.8 (D-7) — a reply is an answer, not an essay: one word is enough. */
+export const IDEA_REPLY_WORDS = { min: 1, max: 400 } as const
+
+/**
+ * Item 6.8 — how long an idea may be changed by its writer after posting.
+ * Long enough to fix what was meant; short enough that a reply never answers
+ * words that have since been changed under it.
+ */
+export const IDEA_EDIT_MINUTES = 15
+
 /**
  * FR-13.2 with OD-6 resolved (decision 0016): submitted suggestions a person
  * may hold on one storyboard at a time. The owner has no ceiling on their own
@@ -84,6 +97,22 @@ export const AUTH_LIMITS = {
   /** FR-1.7, per hour: a reset link asked for again and again is somebody else asking. */
   resetsPerAddress: 5,
   /**
+   * Item 3.1, per hour: tries at changing a password from settings, per
+   * account and per client, so the current password cannot be guessed there.
+   */
+  passwordChangesPerAccountPerHour: 10,
+  passwordChangesPerClientPerHour: 30,
+  /** Item 3.2, per hour: links to confirm a new address, per account. */
+  emailChangesPerAccountPerHour: 5,
+  /** Item 3.13, per hour: pictures set, per account. Each one is decoded and resized. */
+  avatarUploadsPerAccountPerHour: 20,
+  /**
+   * Item 3.14, per day: copies of your own data. One, because each one reads
+   * and renders every story you own; the limit is taken after the request has
+   * been validated, so a refusal costs nothing (decision 0037).
+   */
+  dataExportsPerAccountPerDay: 1,
+  /**
    * Emails the sign-up, resend and reset forms may send for one client in a
    * day, whatever addresses it types. The per-address limits above do nothing
    * against a script that changes the address every time, and Gmail stops
@@ -103,6 +132,14 @@ export const AUTH_LIMITS = {
 
 /** The window `AUTH_LIMITS`' sign-in counts are taken over. */
 export const SIGN_IN_WINDOW_MINUTES = 15
+
+/**
+ * D-15 (phase 14, item 3.3) — how long a session lasts. `slidingDays` is the
+ * cookie's life, renewed as it is used; `absoluteDays` is the most a session
+ * may be from the sign-in that made it, however active it is. The owner chose
+ * 30 days for both.
+ */
+export const SESSION = { slidingDays: 30, absoluteDays: 30 } as const
 
 /**
  * Prisma's interactive-transaction limits for the few writes that are many
@@ -147,6 +184,25 @@ export const TITLE_MAX_CHARS = 200
 export const USERNAME_CHARS = { min: 3, max: 30 } as const
 export const PASSWORD_CHARS = { min: 10, max: 128 } as const
 
+/** Item 3.8 — the display name and the bio (`User.bio` is VARCHAR(280)). */
+export const PROFILE_CHARS = { displayName: { min: 1, max: 80 }, bio: { max: 280 } } as const
+
+/**
+ * Phase 14, item 3.13 (D-5) — a profile picture is an icon, not a portrait.
+ * Whatever is uploaded, up to `maxUploadBytes`, is cut to a centred square
+ * and shrunk to `sizePx` a side as WebP: enough for the 24 to 48 pixels it is
+ * ever drawn at on a sharp screen, and a few kilobytes in the database.
+ * `maxStoredBytes` is the bound the shrink must come in under, which the
+ * test checks and the procedure refuses to exceed.
+ */
+export const AVATAR = {
+  maxUploadBytes: 5 * 1024 * 1024,
+  sizePx: 96,
+  maxStoredBytes: 24 * 1024,
+  /** What the upload may be; the bytes are checked, not the declared type. */
+  types: ['image/jpeg', 'image/png', 'image/webp'],
+} as const
+
 /**
  * FR-4.4 — a private draft after this many seconds without typing, and a
  * durable revision every this many minutes of continuous editing.
@@ -161,6 +217,12 @@ export const REVISION_INTERVAL_MINUTES = 5
  */
 export const HISTORY = { pageDefault: 50, pageMax: 200, chainMax: 5000 } as const
 
+/** FR-12.1 (phase 14, item 6.9) — notifications per page; "Show older" fetches the next by cursor. */
+export const NOTIFICATION_PAGE = 30
+
+/** FR-11.1 (item 6.14) — how many of each kind the dashboard's "Needs you" lists. */
+export const NEEDS_YOU = { suggestions: 20, requests: 10 } as const
+
 /** FR-15.4 — what the seeded library should hold at launch. */
 export const SEED_TARGETS = {
   storyboards: 25,
@@ -169,7 +231,7 @@ export const SEED_TARGETS = {
   answeredRequests: 15,
 } as const
 
-/** FR-9.3, FR-9.4 — how many credits, and passed suggestions, a profile lists. */
+/** FR-9.3, FR-9.4 — how many credits, and passed suggestions, a profile lists at a time; "Show older" pages on (item 6.10). */
 export const PROFILE_LISTS = { credits: 100, passed: 50 } as const
 
 /** FR-12.3 — how far back the weekly digest looks. */
@@ -188,6 +250,14 @@ export const VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
  */
 export const PASSWORD_RESET_TTL_MINUTES = 60
 
+/**
+ * Phase 14, item 3.2 — how long a link to confirm a new email address works,
+ * and how recently a Google-only account must have signed in to ask for one,
+ * since it has no password to prove itself with.
+ */
+export const EMAIL_CHANGE_TTL_MINUTES = 60
+export const RECENT_SIGN_IN_MINUTES = 10
+
 /** FR-13.5 */
 export const REPORTS_TO_SUSPEND = 10
 
@@ -204,6 +274,13 @@ export const PINNED_GENRES_MIN = 3
 export const SOFT_DELETE_GRACE_DAYS = 30
 
 /**
+ * Decision 0033 — how long a nightly backup is kept. The number the backup
+ * workflow uses lives in that workflow; this one is what the privacy policy
+ * says (item 2.1), and the two are kept the same by hand.
+ */
+export const BACKUP_RETENTION_DAYS = 30
+
+/**
  * OD-3, second half (decision 0024). Shorter than a storyboard's thirty days,
  * and deliberately: a storyboard is a thing somebody may want back, an account
  * is a person asking to be gone. Seven days is long enough to undo a click made
@@ -211,6 +288,22 @@ export const SOFT_DELETE_GRACE_DAYS = 30
  * and short enough to still read as prompt erasure.
  */
 export const ACCOUNT_DELETION_GRACE_DAYS = 7
+
+/**
+ * Phase 14, item 3.12 — an address that signed up and never confirmed is a
+ * row with an email in it and nothing else. Thirty days is long enough for
+ * the slowest "I'll finish that later", after which keeping somebody's
+ * address for an account they never had is the thing the privacy policy
+ * would have to explain.
+ */
+export const UNCONFIRMED_ACCOUNT_RETENTION_DAYS = 30
+
+/**
+ * Item 3.12 — how long a used or expired sign-in link (confirmation, reset,
+ * email change) is kept before the daily prune drops it. A week, so a link
+ * opened late can still be told apart from one that never existed (item 1.16).
+ */
+export const USED_TOKEN_RETENTION_DAYS = 7
 
 /** FR-3.1 */
 export const IMPORT_LIMITS = { maxBytes: 5 * 1024 * 1024, maxWords: 300_000 } as const
@@ -233,6 +326,12 @@ export const READING_LINE_HEIGHT = { min: 140, max: 210, default: 168, step: 7 }
 export const QUIET_REQUEST_NUDGE_DAYS = 7
 
 /**
+ * FR-11.3 with D-8 (item 6.15, decision 0050) — a request closes by itself
+ * this many days after it was opened, or last opened again.
+ */
+export const REQUEST_OPEN_DAYS = 30
+
+/**
  * FR-12 over SMTP (decision 0029). A sign-up waits on its verification email,
  * so a mail server that stops answering has to fail the request in seconds —
  * the library's own defaults are two minutes to connect and ten to idle.
@@ -245,3 +344,23 @@ export const SMTP_TIMEOUTS_MS = { connect: 10_000, greeting: 10_000, socket: 20_
  * a line in the log.
  */
 export const SLOW_PROCEDURE_MS = 500
+
+/**
+ * Phase 14, item 1.18 — how long the browser's time-zone cookie lives. A
+ * necessary cookie (no consent banner): it holds a zone name, nothing else.
+ */
+export const TIME_ZONE_COOKIE_DAYS = 365
+
+/**
+ * Decision 0043 (phase 14, item 2b.4) — `User.lastSeenAt` is written by the
+ * session read at most this often, and the admin's overview counts the
+ * accounts seen, and the accounts new, within these windows.
+ */
+export const LAST_SEEN_TOUCH_HOURS = 1
+export const OVERVIEW_WINDOW_DAYS = { recent: 7, month: 30 } as const
+
+/**
+ * Decision 0043 (phase 14, item 2b.5) — the note an administrator leaves with
+ * a suspension, a ban or a deletion. `User.standingNote` is VARCHAR(500).
+ */
+export const STANDING_NOTE_MAX_CHARS = 500

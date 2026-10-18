@@ -2,13 +2,43 @@ import type { Prisma, PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
+import { canAdmin, GRANTABLE_CAPABILITIES } from '@/lib/authz/admin'
 import { logger } from '@/lib/logger'
-import { REPORTS_TO_SUSPEND, SEED_TARGETS } from '@/lib/schemas/constants'
+import {
+  ACCOUNT_DELETION_GRACE_DAYS,
+  REPORTS_TO_SUSPEND,
+  SEED_TARGETS,
+  STANDING_NOTE_MAX_CHARS,
+} from '@/lib/schemas/constants'
+import { reportCategorySchema } from '@/lib/schemas/report'
 import { nameOf } from '@/lib/people'
+import { usernameSchema } from '@/lib/schemas/auth'
+import { contactAddress } from '@/lib/site'
+import { formatInZone, timeZoneFromCookieHeader } from '@/lib/time-zone'
+import {
+  countReportsAgainst,
+  describeAccount,
+  refuseIfUntouchable,
+  suspendsForReports,
+} from '@/server/account-standing'
+import { overviewCounts } from '@/server/admin-overview'
+import { setHiddenState } from '@/server/hidden'
+import { afterResponse } from '@/server/after-response'
+import { getMailer } from '@/server/mail/mailer'
+import { deletionByAdminMail } from '@/server/mail/templates/account-deletion'
+import { banUsername, unbanUsername } from '@/server/retired-usernames'
 
-import { adminProcedure, createTRPCRouter } from '../init'
+import { type Account, adminProcedure, createTRPCRouter } from '../init'
 
 const log = logger.child({ router: 'admin' })
+
+/** The note left with a suspension, ban or deletion (item 2b.5): empty is none. */
+const noteSchema = z
+  .string()
+  .trim()
+  .max(STANDING_NOTE_MAX_CHARS)
+  .optional()
+  .transform((value) => (value?.length ? value : null))
 
 /**
  * FR-13.7 and FR-15.5 — moderation is the owner's own time in v1.
@@ -19,12 +49,16 @@ const log = logger.child({ router: 'admin' })
  * is a tool that will not be used at eleven at night by the one person who has
  * to use it.
  *
- * Every procedure is `adminProcedure`, which 404s a non-admin rather than
- * forbidding them: an admin screen is not a thing to be told about.
+ * Every procedure is `adminProcedure(capability)`, which 404s anyone without
+ * that capability (decision 0043) rather than forbidding them: an admin screen
+ * is not a thing to be told about.
  */
 export const adminRouter = createTRPCRouter({
+  /** Decision 0043 (item 2b.4) — the numbers the admin opens on. Counts, never pages. */
+  overview: adminProcedure('overview.read').query(({ ctx }) => overviewCounts(ctx.db, new Date())),
+
   /** The queue. Open reports first, oldest first — a queue, not a feed. */
-  reports: adminProcedure
+  reports: adminProcedure('reports.decide')
     .input(
       z.object({
         state: z.enum(['OPEN', 'UPHELD', 'DISMISSED']).default('OPEN'),
@@ -34,7 +68,10 @@ export const adminRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const reports = await ctx.db.report.findMany({
         where: { state: input.state },
-        orderBy: { createdAt: 'asc' },
+        // The open queue is worked oldest first; the upheld and dismissed
+        // lists are histories, read newest first (found by flow 8 once a
+        // database had more upheld reports than one page shows).
+        orderBy: { createdAt: input.state === 'OPEN' ? 'asc' : 'desc' },
         take: input.limit,
         select: {
           id: true,
@@ -76,11 +113,13 @@ export const adminRouter = createTRPCRouter({
    *
    * Upholding is what counts towards FR-13.5's ten. Filing does not.
    */
-  decide: adminProcedure
+  decide: adminProcedure('reports.decide')
     .input(
       z.object({
         reportId: z.string().min(1),
         decision: z.enum(['UPHELD', 'DISMISSED', 'OPEN']),
+        /** Item 2.7 — "Uphold and hide": the thing reported goes with the decision. */
+        hide: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -88,7 +127,7 @@ export const adminRouter = createTRPCRouter({
 
       const report = await ctx.db.report.findUnique({
         where: { id: input.reportId },
-        select: { id: true, targetType: true, targetId: true, state: true },
+        select: { id: true, targetType: true, targetId: true, state: true, category: true },
       })
       if (!report) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such report.' })
 
@@ -100,18 +139,40 @@ export const adminRouter = createTRPCRouter({
             : { state: input.decision, resolvedAt: new Date(), resolvedById: adminId },
       })
 
+      // Item 2.7 (decision 0045) — hidden with the report's category as the
+      // reason, until "Show it again". Never a person: an account is
+      // suspended, not hidden.
+      let hidden = false
+      if (input.decision === 'UPHELD' && input.hide && report.targetType !== 'USER') {
+        hidden = await setHiddenState(
+          ctx.db,
+          { type: report.targetType, id: report.targetId },
+          { hidden: true, byId: adminId, reason: report.category },
+        )
+        log.warn(
+          {
+            event: 'admin.content_hidden',
+            targetType: report.targetType,
+            targetId: report.targetId,
+            reportId: report.id,
+            adminId,
+          },
+          'content hidden after a report',
+        )
+      }
+
       // FR-13.5 — ten upheld against one person suspends them pending review.
       // Counted against the *person*, which is why reports resolve to an owner.
       const subject = await subjectUserId(ctx.db, report.targetType, report.targetId)
       let suspended = false
       if (subject && input.decision === 'UPHELD') {
-        const upheld = await countUpheldAgainst(ctx.db, subject)
+        const upheld = await countReportsAgainst(ctx.db, subject, 'UPHELD')
         if (upheld >= REPORTS_TO_SUSPEND) {
           const user = await ctx.db.user.findUnique({
             where: { id: subject },
-            select: { status: true },
+            select: { status: true, role: true },
           })
-          if (user?.status === 'ACTIVE') {
+          if (suspendsForReports(user)) {
             await ctx.db.user.update({
               where: { id: subject },
               data: { status: 'SUSPENDED', suspendedAt: new Date(), suspendedById: adminId },
@@ -121,6 +182,13 @@ export const adminRouter = createTRPCRouter({
               { event: 'admin.auto_suspended', userId: subject, upheld },
               'account suspended by upheld report count',
             )
+          } else if (user?.role === 'ADMIN') {
+            // Decision 0043 — the one person who runs the place is not locked
+            // out of it by reports; the count is logged for whoever reads them.
+            log.warn(
+              { event: 'admin.auto_suspend_skipped', userId: subject, upheld },
+              'ten upheld reports against the administrator',
+            )
           }
         }
       }
@@ -129,40 +197,43 @@ export const adminRouter = createTRPCRouter({
         { event: 'admin.report_decided', reportId: report.id, decision: input.decision, adminId },
         'report decided',
       )
-      return { decision: input.decision, suspended }
+      return { decision: input.decision, suspended, hidden }
     }),
 
-  /** Suspend or restore by hand. FR-13.7 — reversible, and it says who did it. */
-  setUserStatus: adminProcedure
+  /**
+   * Suspend or lift by hand (FR-13.7 — reversible, and it says who did it),
+   * with a note for the People screen (item 2b.5). A ban is lifted by
+   * `unban`, never here: that is what makes it a ban.
+   */
+  setUserStatus: adminProcedure('accounts.suspend')
     .input(
       z.object({
         userId: z.string().min(1),
         status: z.enum(['ACTIVE', 'SUSPENDED']),
+        note: noteSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const adminId = ctx.session.user.id
-      if (input.userId === adminId) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'You cannot suspend yourself.' })
-      }
-
-      // An erased account stays erased (decision 0024). Restoring one to
-      // ACTIVE would let a session it still had write again, as nobody.
-      const target = await ctx.db.user.findUnique({
-        where: { id: input.userId },
-        select: { status: true },
-      })
-      if (!target) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such account.' })
-      if (target.status === 'DELETED') {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That account has been deleted.' })
+      const target = await touchable(ctx, input.userId)
+      if (input.status === 'ACTIVE' && target.bannedAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'That account is banned. Lift the ban instead.',
+        })
       }
 
       const user = await ctx.db.user.update({
-        where: { id: input.userId },
+        where: { id: target.id },
         data:
           input.status === 'SUSPENDED'
-            ? { status: 'SUSPENDED', suspendedAt: new Date(), suspendedById: adminId }
-            : { status: 'ACTIVE', suspendedAt: null, suspendedById: null },
+            ? {
+                status: 'SUSPENDED',
+                suspendedAt: new Date(),
+                suspendedById: adminId,
+                standingNote: input.note,
+              }
+            : { status: 'ACTIVE', suspendedAt: null, suspendedById: null, standingNote: null },
         select: { id: true, username: true, displayName: true, status: true },
       })
 
@@ -174,27 +245,151 @@ export const adminRouter = createTRPCRouter({
       return user
     }),
 
-  /** Who this is, and what has been upheld against them. Admin eyes only. */
-  user: adminProcedure
+  /**
+   * Decision 0043 (item 2b.5) — a ban: a suspension that neither the report
+   * review nor "Lift the suspension" undoes. Only `unban` does.
+   */
+  ban: adminProcedure('accounts.suspend')
+    .input(
+      z.object({
+        userId: z.string().min(1),
+        note: noteSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const adminId = ctx.session.user.id
+      const target = await touchable(ctx, input.userId)
+      const now = new Date()
+      const user = await ctx.db.user.update({
+        where: { id: target.id },
+        data: {
+          status: 'SUSPENDED',
+          suspendedAt: target.suspendedAt ?? now,
+          suspendedById: adminId,
+          bannedAt: now,
+          standingNote: input.note,
+        },
+        select: { id: true, username: true, displayName: true, status: true, bannedAt: true },
+      })
+      log.warn({ event: 'admin.user_banned', userId: user.id, adminId }, 'account banned')
+      return user
+    }),
+
+  /**
+   * Lifts a ban, and the suspension with it. A deletion that came with the
+   * ban (`deleteAccount`) is stopped too: lifting the ban says the decision
+   * was wrong, and the deletion was part of it.
+   */
+  unban: adminProcedure('accounts.suspend')
     .input(z.object({ userId: z.string().min(1) }))
-    .query(async ({ ctx, input }) => {
-      const user = await ctx.db.user.findUnique({
-        where: { id: input.userId },
-        select: {
-          id: true,
-          username: true,
-          displayName: true,
-          email: true,
-          status: true,
-          suspendedAt: true,
-          createdAt: true,
-          suspendedBy: { select: { username: true, displayName: true } },
-          _count: { select: { storyboards: true, suggestions: true, ideas: true } },
+    .mutation(async ({ ctx, input }) => {
+      const adminId = ctx.session.user.id
+      const target = await touchable(ctx, input.userId)
+      if (!target.bannedAt) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That account is not banned.' })
+      }
+      const user = await ctx.db.user.update({
+        where: { id: target.id },
+        data: {
+          status: 'ACTIVE',
+          suspendedAt: null,
+          suspendedById: null,
+          bannedAt: null,
+          standingNote: null,
+          deletionRequestedAt: null,
+        },
+        select: { id: true, username: true, displayName: true, status: true },
+      })
+      log.warn({ event: 'admin.user_unbanned', userId: user.id, adminId }, 'ban lifted')
+      return user
+    }),
+
+  /**
+   * Decision 0043 (item 2b.5) — deletes an account the way the person could
+   * have (decision 0024): frozen at once, erased by the purge after the grace
+   * period, the writing kept as a former member's. Frozen as a ban, so the
+   * person cannot keep the account from the settings; the notice to the
+   * address says where to write instead. The note stays inside.
+   */
+  deleteAccount: adminProcedure('accounts.delete')
+    .input(
+      z.object({
+        userId: z.string().min(1),
+        note: noteSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const adminId = ctx.session.user.id
+      const target = await touchable(ctx, input.userId)
+      const now = new Date()
+      // A deletion the person had already asked for keeps its earlier date.
+      const requestedAt = target.deletionRequestedAt ?? now
+      const finishesAt = new Date(requestedAt.getTime() + ACCOUNT_DELETION_GRACE_DAYS * DAY_MS)
+      await ctx.db.user.update({
+        where: { id: target.id },
+        data: {
+          status: 'SUSPENDED',
+          suspendedAt: target.suspendedAt ?? now,
+          suspendedById: adminId,
+          bannedAt: target.bannedAt ?? now,
+          standingNote: input.note,
+          deletionRequestedAt: requestedAt,
         },
       })
-      if (!user) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such person.' })
 
-      return { ...user, upheld: await countUpheldAgainst(ctx.db, user.id) }
+      const mailer = getMailer()
+      const mail = deletionByAdminMail({
+        to: target.email,
+        finishesOn: formatInZone(
+          finishesAt,
+          'long',
+          timeZoneFromCookieHeader(ctx.headers.get('cookie')),
+        ),
+        supportAddress: contactAddress(),
+      })
+      await afterResponse(async () => {
+        try {
+          await mailer.send(mail)
+        } catch (error) {
+          log.error(
+            { event: 'admin.deletion.mail_failed', userId: target.id, error: String(error) },
+            'could not send the deletion notice',
+          )
+        }
+      })
+      log.warn(
+        { event: 'admin.account_deleted', userId: target.id, adminId },
+        'account deletion scheduled by an administrator',
+      )
+      return { finishesAt }
+    }),
+
+  /** Who this is, how they stand, and what has been reported against them (item 2b.5). */
+  user: adminProcedure('accounts.suspend')
+    .input(z.object({ userId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const user = await describeAccount(ctx.db, input.userId, viewerOf(ctx))
+      if (!user) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such person.' })
+      return user
+    }),
+
+  /**
+   * Item 2b.5 — an account by its exact username or email address. Null when
+   * nobody has it: not finding a person is an ordinary outcome, not an error.
+   * Exact, because a search over members would be a browsing tool, and this
+   * is not one.
+   */
+  findAccount: adminProcedure('accounts.suspend')
+    .input(z.object({ query: z.string().trim().min(1).max(320) }))
+    .query(async ({ ctx, input }) => {
+      const query = input.query.replace(/^@/u, '')
+      const match = await ctx.db.user.findFirst({
+        where: query.includes('@')
+          ? { email: { equals: query, mode: 'insensitive' } }
+          : { username: { equals: query, mode: 'insensitive' } },
+        select: { id: true },
+      })
+      return match ? describeAccount(ctx.db, match.id, viewerOf(ctx)) : null
     }),
 
   /**
@@ -203,7 +398,7 @@ export const adminRouter = createTRPCRouter({
    * it, until the 2026-10-16 spec review: "suspended pending review" had no
    * review.
    */
-  suspended: adminProcedure.query(async ({ ctx }) => {
+  suspended: adminProcedure('accounts.suspend').query(async ({ ctx }) => {
     const users = await ctx.db.user.findMany({
       where: { status: 'SUSPENDED' },
       orderBy: { suspendedAt: 'desc' },
@@ -212,17 +407,22 @@ export const adminRouter = createTRPCRouter({
         username: true,
         displayName: true,
         suspendedAt: true,
+        bannedAt: true,
+        standingNote: true,
         // Null when the ten upheld reports did it rather than a person.
         suspendedBy: { select: { username: true, displayName: true } },
       },
     })
     return Promise.all(
-      users.map(async (user) => ({ ...user, upheld: await countUpheldAgainst(ctx.db, user.id) })),
+      users.map(async (user) => ({
+        ...user,
+        upheld: await countReportsAgainst(ctx.db, user.id, 'UPHELD'),
+      })),
     )
   }),
 
   /** FR-15.5 — the seeded-content manager. What is seeded, and is it labelled. */
-  seeded: adminProcedure.query(async ({ ctx }) => {
+  seeded: adminProcedure('seeds.manage').query(async ({ ctx }) => {
     const storyboards = await ctx.db.storyboard.findMany({
       where: { isSeed: true },
       orderBy: { createdAt: 'asc' },
@@ -267,11 +467,11 @@ export const adminRouter = createTRPCRouter({
   }),
 
   /** FR-15.5 — feature flags, readable by anyone, writable here. */
-  flags: adminProcedure.query(({ ctx }) =>
+  flags: adminProcedure('flags.toggle').query(({ ctx }) =>
     ctx.db.featureFlag.findMany({ orderBy: { key: 'asc' } }),
   ),
 
-  setFlag: adminProcedure
+  setFlag: adminProcedure('flags.toggle')
     .input(
       z.object({
         key: z
@@ -305,36 +505,224 @@ export const adminRouter = createTRPCRouter({
       )
       return flag
     }),
+
+  /**
+   * Decision 0043 (item 2b.3) — the admin alone makes a user a sub-admin, or a
+   * sub-admin a user again. The admin's own role is set from the command line
+   * and never here; and there is only one admin, so "the admin" and "yourself"
+   * are the same account. Demotion takes the grants with it.
+   */
+  setRole: adminProcedure('roles.manage')
+    .input(z.object({ userId: z.string().min(1), role: z.enum(['USER', 'SUB_ADMIN']) }))
+    .mutation(async ({ ctx, input }) => {
+      const adminId = ctx.session.user.id
+      if (input.userId === adminId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Your own role is set from the command line.',
+        })
+      }
+      const target = await ctx.db.user.findUnique({
+        where: { id: input.userId },
+        select: { role: true, status: true },
+      })
+      if (!target) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such account.' })
+      if (target.role === 'ADMIN') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: "The administrator's role is set from the command line.",
+        })
+      }
+      if (target.status === 'DELETED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That account has been deleted.' })
+      }
+
+      const user = await ctx.db.$transaction(async (tx) => {
+        if (input.role === 'USER') {
+          await tx.subAdminGrant.deleteMany({ where: { userId: input.userId } })
+        }
+        return tx.user.update({
+          // Checked again inside the transaction: the one row that may not change.
+          where: { id: input.userId, role: { not: 'ADMIN' } },
+          data: { role: input.role },
+          select: { id: true, username: true, displayName: true, role: true },
+        })
+      })
+      log.warn(
+        { event: 'admin.role_set', userId: user.id, role: user.role, adminId },
+        'role changed',
+      )
+      return user
+    }),
+
+  /**
+   * A sub-admin's grants, replaced as a set, by the admin alone. The input
+   * schema refuses a name outside the grantable list, so `roles.manage` cannot
+   * be written whatever the caller sends.
+   */
+  setGrants: adminProcedure('roles.manage')
+    .input(
+      z.object({
+        userId: z.string().min(1),
+        capabilities: z.array(z.enum(GRANTABLE_CAPABILITIES)).max(GRANTABLE_CAPABILITIES.length),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const adminId = ctx.session.user.id
+      const target = await ctx.db.user.findUnique({
+        where: { id: input.userId },
+        select: { role: true },
+      })
+      if (!target) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such account.' })
+      if (target.role !== 'SUB_ADMIN') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Only a sub-admin holds grants. Make them one first.',
+        })
+      }
+
+      const wanted = [...new Set(input.capabilities)]
+      await ctx.db.$transaction(async (tx) => {
+        await tx.subAdminGrant.deleteMany({
+          where: { userId: input.userId, capability: { notIn: wanted } },
+        })
+        for (const capability of wanted) {
+          await tx.subAdminGrant.upsert({
+            where: { userId_capability: { userId: input.userId, capability } },
+            create: { userId: input.userId, capability, grantedById: adminId },
+            update: {},
+          })
+        }
+      })
+      log.warn(
+        { event: 'admin.grants_set', userId: input.userId, capabilities: wanted, adminId },
+        'sub-admin grants changed',
+      )
+      return { userId: input.userId, capabilities: wanted }
+    }),
+
+  /**
+   * Decision 0043 (item 2b.6) — the banned names, newest first. Retired names
+   * are not listed: they are hashes (decision 0042).
+   */
+  bannedNames: adminProcedure('names.ban').query(({ ctx }) =>
+    ctx.db.retiredUsername.findMany({
+      where: { reason: 'BANNED' },
+      orderBy: { retiredAt: 'desc' },
+      select: { name: true, note: true, retiredAt: true },
+    }),
+  ),
+
+  /**
+   * Bans a username nobody holds: the username step refuses it with the
+   * taken-name sentence, as it does a retired one. A name an account holds is
+   * refused here (ban the account, from People); a name already unavailable
+   * is left as it is, and nothing says why it is unavailable.
+   */
+  banName: adminProcedure('names.ban')
+    .input(z.object({ name: usernameSchema, note: noteSchema }))
+    .mutation(async ({ ctx, input }) => {
+      const adminId = ctx.session.user.id
+      const held = await ctx.db.user.findFirst({
+        where: { username: { equals: input.name, mode: 'insensitive' } },
+        select: { id: true },
+      })
+      if (held) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'An account has that name. Ban the account instead, from People.',
+        })
+      }
+      const row = await banUsername(ctx.db, input.name, input.note)
+      if (!row) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That name is already unavailable.' })
+      }
+      log.warn({ event: 'admin.name_banned', name: input.name, adminId }, 'username banned')
+      return row
+    }),
+
+  unbanName: adminProcedure('names.ban')
+    .input(z.object({ name: usernameSchema }))
+    .mutation(async ({ ctx, input }) => {
+      const lifted = await unbanUsername(ctx.db, input.name)
+      if (!lifted) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That name is not banned.' })
+      }
+      log.warn(
+        { event: 'admin.name_unbanned', name: input.name, adminId: ctx.session.user.id },
+        'username ban lifted',
+      )
+      return { name: input.name }
+    }),
+
+  /**
+   * Item 2.7 (decision 0045) — hide what a report was about, or show it
+   * again. Reversible, and nothing is deleted: credit is permanent.
+   */
+  setHidden: adminProcedure('reports.decide')
+    .input(
+      z.object({
+        targetType: z.enum(['STORYBOARD', 'SUGGESTION', 'IDEA']),
+        targetId: z.string().min(1),
+        hidden: z.boolean(),
+        reason: reportCategorySchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const adminId = ctx.session.user.id
+      const changed = await setHiddenState(
+        ctx.db,
+        { type: input.targetType, id: input.targetId },
+        { hidden: input.hidden, byId: adminId, reason: input.reason ?? null },
+      )
+      if (!changed) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'That is not here any more.' })
+      }
+      log.warn(
+        {
+          event: input.hidden ? 'admin.content_hidden' : 'admin.content_shown',
+          targetType: input.targetType,
+          targetId: input.targetId,
+          adminId,
+        },
+        input.hidden ? 'content hidden after a report' : 'content shown again',
+      )
+      return { hidden: input.hidden }
+    }),
 })
 
 type Db = PrismaClient | Prisma.TransactionClient
 
-/**
- * Upheld reports against one person, across every kind of target.
- *
- * There is no `Report.subjectUserId` column: a report points at the thing, not
- * the person. So this resolves the other way — find everything of theirs that
- * could have been reported, and count upheld reports against those ids. It is
- * a handful of indexed queries and it runs once per decision, not per page.
- */
-async function countUpheldAgainst(db: Db, userId: string): Promise<number> {
-  const [storyboards, suggestions, ideas] = await Promise.all([
-    db.storyboard.findMany({ where: { ownerId: userId }, select: { id: true } }),
-    db.suggestion.findMany({ where: { contributorId: userId }, select: { id: true } }),
-    db.idea.findMany({ where: { authorId: userId }, select: { id: true } }),
-  ])
+const DAY_MS = 24 * 60 * 60 * 1000
 
-  return db.report.count({
-    where: {
-      state: 'UPHELD',
-      OR: [
-        { targetType: 'USER', targetId: userId },
-        { targetType: 'STORYBOARD', targetId: { in: storyboards.map((row) => row.id) } },
-        { targetType: 'SUGGESTION', targetId: { in: suggestions.map((row) => row.id) } },
-        { targetType: 'IDEA', targetId: { in: ideas.map((row) => row.id) } },
-      ],
+type AdminContext = { db: Db; session: { user: { id: string } }; account: Account }
+
+/** Who is looking: grants are shown to the admin alone (decision 0043). */
+function viewerOf(ctx: AdminContext): { id: string; seesGrants: boolean } {
+  return { id: ctx.session.user.id, seesGrants: canAdmin(ctx.account, 'roles.manage') }
+}
+
+/**
+ * Loads an account for an action on it, and refuses the ones nobody may act
+ * on (item 2b.5): the administrator, yourself, another sub-admin unless you
+ * are the admin, and an erased account (decision 0024).
+ */
+async function touchable(ctx: AdminContext, userId: string) {
+  const target = await ctx.db.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      role: true,
+      status: true,
+      email: true,
+      suspendedAt: true,
+      bannedAt: true,
+      deletionRequestedAt: true,
     },
   })
+  if (!target) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such account.' })
+  refuseIfUntouchable({ id: ctx.session.user.id, role: ctx.account?.role ?? 'USER' }, target)
+  return target
 }
 
 /** The person a report is about. */
@@ -366,58 +754,72 @@ async function subjectUserId(db: Db, targetType: string, targetId: string): Prom
   }
 }
 
-/** A one-line description of what a report is about, for the queue. */
+/**
+ * A one-line description of what a report is about, for the queue, and
+ * whether it is hidden (item 2.7). An account is never hidden: it is
+ * suspended.
+ */
 async function describe(
   db: Db,
   targetType: string,
   targetId: string,
-): Promise<{ label: string; href: string | null; excerpt: string | null }> {
+): Promise<{ label: string; href: string | null; excerpt: string | null; hidden: boolean }> {
   switch (targetType) {
     case 'USER': {
       const user = await db.user.findUnique({
         where: { id: targetId },
         select: { username: true, displayName: true, bio: true, status: true },
       })
-      if (!user) return { label: 'a deleted account', href: null, excerpt: null }
+      if (!user) return { label: 'a deleted account', href: null, excerpt: null, hidden: false }
       return {
         label: nameOf(user),
         href: user.username ? `/@${user.username}` : null,
         excerpt: user.bio,
+        hidden: false,
       }
     }
     case 'STORYBOARD': {
       const storyboard = await db.storyboard.findUnique({
         where: { id: targetId },
-        select: { title: true, slug: true, logline: true },
+        select: { title: true, slug: true, logline: true, hiddenAt: true },
       })
-      if (!storyboard) return { label: 'a deleted story', href: null, excerpt: null }
+      if (!storyboard) return { label: 'a deleted story', href: null, excerpt: null, hidden: false }
       return {
         label: storyboard.title,
         href: `/s/${storyboard.slug}`,
         excerpt: storyboard.logline,
+        hidden: storyboard.hiddenAt !== null,
       }
     }
     case 'SUGGESTION': {
       const suggestion = await db.suggestion.findUnique({
         where: { id: targetId },
-        select: { contentText: true, publicId: true },
+        select: { contentText: true, publicId: true, hiddenAt: true },
       })
-      if (!suggestion) return { label: 'a deleted suggestion', href: null, excerpt: null }
+      if (!suggestion) {
+        return { label: 'a deleted suggestion', href: null, excerpt: null, hidden: false }
+      }
       return {
         label: 'a suggestion',
         href: null,
-        excerpt: suggestion.contentText?.slice(0, 300) ?? null,
+        excerpt: suggestion.contentText.slice(0, 300),
+        hidden: suggestion.hiddenAt !== null,
       }
     }
     case 'IDEA': {
       const idea = await db.idea.findUnique({
         where: { id: targetId },
-        select: { body: true },
+        select: { body: true, hiddenAt: true },
       })
-      if (!idea) return { label: 'a deleted idea', href: null, excerpt: null }
-      return { label: 'an idea', href: null, excerpt: idea.body.slice(0, 300) }
+      if (!idea) return { label: 'a deleted idea', href: null, excerpt: null, hidden: false }
+      return {
+        label: 'an idea',
+        href: null,
+        excerpt: idea.body.slice(0, 300),
+        hidden: idea.hiddenAt !== null,
+      }
     }
     default:
-      return { label: targetType, href: null, excerpt: null }
+      return { label: targetType, href: null, excerpt: null, hidden: false }
   }
 }

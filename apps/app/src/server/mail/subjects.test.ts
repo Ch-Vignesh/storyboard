@@ -23,7 +23,9 @@ describe('subject lines cannot carry headers', () => {
       to: 'author@example.test',
       requestTitle: `Chapter four${CR}${LF}Bcc: everyone@example.test`,
       requestUrl: 'https://example.test/s/a/help/b',
+      editUrl: 'https://example.test/s/a/help/b/edit',
       appUrl: 'https://example.test',
+      unsubscribeUrl: 'http://t/unsubscribe?t=x',
     })
 
     expect(mail.subject).not.toContain(CR)
@@ -40,6 +42,7 @@ describe('subject lines cannot carry headers', () => {
         subject: `A title with${NUL} a null and${LF}a newline`,
       },
       appUrl: 'https://example.test',
+      unsubscribeUrl: 'http://t/unsubscribe?t=x',
     })
 
     expect(mail.subject).not.toContain(NUL)
@@ -52,7 +55,9 @@ describe('subject lines cannot carry headers', () => {
       to: 'author@example.test',
       requestTitle: 'x'.repeat(500),
       requestUrl: 'https://example.test/s/a/help/b',
+      editUrl: 'https://example.test/s/a/help/b/edit',
       appUrl: 'https://example.test',
+      unsubscribeUrl: 'http://t/unsubscribe?t=x',
     })
     expect(mail.subject.length).toBeLessThanOrEqual(200)
   })

@@ -62,7 +62,15 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  /**
+   * Phase 14, item 4.9 — two projects: the desktop one runs everything not
+   * tagged `@mobile`; the phone one runs only what is. `pnpm e2e` runs both,
+   * here and in CI.
+   */
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, grepInvert: /@mobile/u },
+    { name: 'mobile', use: { ...devices['Pixel 7'] }, grep: /@mobile/u },
+  ],
   webServer: deployed
     ? undefined
     : {

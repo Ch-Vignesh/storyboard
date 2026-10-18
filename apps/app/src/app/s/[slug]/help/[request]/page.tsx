@@ -4,9 +4,12 @@ import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
 import { auth } from '@/auth'
+import { CopyLink } from '@/components/copy-link'
 import { Manuscript } from '@/components/manuscript'
 import { flavourForStoryType } from '@/lib/doc/schema'
-import { REQUEST_KINDS, REQUEST_STATE_LABELS } from '@/lib/schemas/help'
+import { closesOn, REQUEST_KINDS, REQUEST_STATE_LABELS } from '@/lib/schemas/help'
+import { readTimeZone } from '@/lib/dates'
+import { formatInZone } from '@/lib/time-zone'
 import { caller } from '@/trpc/server'
 
 import { IdeaThread } from './idea-thread'
@@ -42,9 +45,16 @@ export default async function RequestPage({ params }: Params) {
   const kind = REQUEST_KINDS.find((option) => option.value === request.kind)!
   const flavour = flavourForStoryType(request.storyboard.type)
   const signedIn = Boolean(session?.user)
+  const timeZone = await readTimeZone()
+  // Item 6.4 — what this person may still send here. Nothing for a guest or
+  // an author; a refusal shows nothing rather than failing the page.
+  const allowance =
+    signedIn && permissions.canSubmitSuggestion
+      ? await caller.suggestion.allowance({ storyboardId: request.storyboard.id }).catch(() => null)
+      : null
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10">
+    <main id="main" tabIndex={-1} className="mx-auto max-w-3xl px-6 py-10">
       <nav className="mb-6 text-[12.5px] text-ink-faint">
         <Link href={`/s/${slug}`} className="hover:text-ink hover:underline">
           {request.storyboard.title}
@@ -71,15 +81,44 @@ export default async function RequestPage({ params }: Params) {
         <p className="mt-2 text-[13px] text-ink-faint">
           opened by {request.openedBy.displayName ?? request.openedBy.username ?? 'the author'} ·{' '}
           <time dateTime={request.createdAt.toISOString()}>
-            {request.createdAt.toLocaleDateString('en-GB', {
-              day: 'numeric',
-              month: 'long',
-              year: 'numeric',
-            })}
+            {formatInZone(request.createdAt, 'long', timeZone)}
           </time>
           {kind.returns === 'prose'
             ? ` · ${String(request.minWords)}–${String(request.maxWords)} words`
             : null}
+          {/* Item 6.1 — changed after it was opened, and by whom it may be changed. */}
+          {request.editedAt ? (
+            <>
+              {' · edited '}
+              <time dateTime={request.editedAt.toISOString()}>
+                {formatInZone(request.editedAt, 'dayMonthShort', timeZone)}
+              </time>
+            </>
+          ) : null}
+          {permissions.canOpenRequest &&
+          (request.state === 'OPEN' || request.state === 'ANSWERED') ? (
+            <>
+              {' · '}
+              <Link
+                href={`/s/${slug}/help/${request.publicId}/edit`}
+                className="text-pencil hover:underline"
+              >
+                Change this request
+              </Link>
+            </>
+          ) : null}
+          {/* Item 6.15 (D-8) — from the day it opens, in the reader's zone. */}
+          {request.state === 'OPEN' || request.state === 'ANSWERED' ? (
+            <>
+              {' · Closes on '}
+              <time dateTime={closesOn(request.openedAt).toISOString()}>
+                {formatInZone(closesOn(request.openedAt), 'long', timeZone)}
+              </time>
+            </>
+          ) : null}
+          {' · '}
+          {/* Item 6.11 — its address, to hand to someone who might help. */}
+          <CopyLink path={`/s/${slug}/help/${request.publicId}`} />
         </p>
       </header>
 
@@ -104,9 +143,7 @@ export default async function RequestPage({ params }: Params) {
 
       {request.toneNotes ? (
         <section className="mt-8">
-          <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
-            Tone and characters
-          </h2>
+          <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">Tone</h2>
           <p className="mt-3 max-w-measure text-[14px] leading-relaxed whitespace-pre-line text-ink-soft">
             {request.toneNotes}
           </p>
@@ -114,6 +151,18 @@ export default async function RequestPage({ params }: Params) {
       ) : null}
 
       {/* FR-5.6 — constraints, as a checklist. */}
+      {/* Item 6.2 (FR-5.6) — the people, apart from how it sounds. */}
+      {request.characterNotes ? (
+        <section className="mt-8">
+          <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
+            Characters
+          </h2>
+          <p className="mt-3 max-w-measure text-[14.5px] leading-relaxed whitespace-pre-line text-ink">
+            {request.characterNotes}
+          </p>
+        </section>
+      ) : null}
+
       {request.constraints.length > 0 ? (
         <section className="mt-8">
           <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
@@ -167,11 +216,14 @@ export default async function RequestPage({ params }: Params) {
         canDecide={permissions.canOpenRequest}
         canContribute={permissions.canSubmitSuggestion}
         signedIn={signedIn}
+        blockedFromHelping={data.blockedFromHelping}
+        allowance={allowance}
       />
 
       {kind.returns === 'prose' ? (
         <SuggestionList
           slug={slug}
+          requestId={request.id}
           requestPublicId={request.publicId}
           suggestions={data.suggestions}
           requestState={request.state}
@@ -181,12 +233,18 @@ export default async function RequestPage({ params }: Params) {
       ) : (
         <IdeaThread
           requestId={request.id}
+          slug={slug}
+          requestPublicId={request.publicId}
+          timeZone={timeZone}
           ideas={data.ideas}
           canDecide={permissions.canOpenRequest}
           canPost={permissions.canPostIdea}
           signedIn={signedIn}
+          blockedFromHelping={data.blockedFromHelping}
           hasHelpfulIdea={data.hasHelpfulIdea}
           viewerId={session?.user?.id ?? null}
+          requestState={request.state}
+          authorIds={data.authorIds}
         />
       )}
     </main>

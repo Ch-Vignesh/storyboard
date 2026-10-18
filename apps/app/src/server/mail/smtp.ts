@@ -60,6 +60,7 @@ export function createSmtpMailer(config: SmtpConfig): SmtpMailer {
         subject: mail.subject,
         text: mail.text,
         html: mail.html,
+        headers: mail.headers,
       })
     },
     async verify() {

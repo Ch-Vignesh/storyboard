@@ -75,6 +75,25 @@ test('an author tries a different draft and makes it the main one', async ({ pag
   await page.getByRole('button', { name: /save now/i }).click()
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
 
+  // FR-10.1 (phase 14, item 1.2) — Contents follows the version being read.
+  // The reader's Contents link dropped `?version=` until then, so rearranging
+  // "an alternate" rearranged the main draft that readers see.
+  await page.goto(`${path}/versions`)
+  await alternate.getByRole('link', { name: 'The other ending' }).click()
+  await expect(page).toHaveURL(/\?version=/)
+  await page.getByRole('link', { name: 'Contents' }).click()
+  await expect(page).toHaveURL(/\/contents\?version=/)
+  await expect(page.getByRole('heading', { name: /contents of/i })).toContainText(
+    'The other ending',
+  )
+  await page.getByLabel('New chapter name').fill('Only in the other ending')
+  await page.getByRole('button', { name: /add a chapter/i }).click()
+  await expect(page.getByLabel('Chapter 2 name')).toHaveValue('Only in the other ending')
+  // The main draft is unchanged.
+  await page.goto(`${path}/contents`)
+  await expect(page.getByLabel('Chapter 1 name')).toBeVisible()
+  await expect(page.getByLabel('Chapter 2 name')).toHaveCount(0)
+
   // FR-7.5 — the two versions, side by side, differing in one section.
   await page.goto(`${path}/compare`)
   await expect(page.getByRole('heading', { name: /compare versions/i })).toBeVisible()
@@ -114,6 +133,20 @@ test('an author tries a different draft and makes it the main one', async ({ pag
 
   await page.goto(path)
   await expect(page.getByText(/the harbour filled overnight/i)).toBeVisible()
+
+  // FR-10.1 (phase 14, item 1.1) — a deleted alternate is gone from Versions
+  // and from Compare. It stayed in both, as "0 chapters", until then.
+  await page.goto(`${path}/versions`)
+  await versions
+    .filter({ hasText: '11 words' })
+    .getByRole('button', { name: 'Delete', exact: true })
+    .click()
+  await expect(page.getByText(/this draft will no longer be listed/i)).toBeVisible()
+  await page.getByRole('button', { name: /delete this version/i }).click()
+  await expect(versions).toHaveCount(1)
+  await expect(versions.first()).toContainText('The other ending')
+  await page.goto(`${path}/compare`)
+  await expect(page.getByText(/has one version/i)).toBeVisible()
 })
 
 test('a reader spins off a public storyboard and keeps its credits', async ({ browser }) => {

@@ -15,7 +15,27 @@ export const pinGenresSchema = z.object({
     .min(PINNED_GENRES_MIN, `Pick at least ${PINNED_GENRES_MIN} genres.`)
     .max(GENRE_SELECTION_MAX, 'That is more genres than exist.')
     .refine((ids) => new Set(ids).size === ids.length, 'Pick each genre once.'),
+  /**
+   * FR-13.4 (phase 14, item 2.3) — the last onboarding step shows the rules
+   * and asks for this tick. Required by the procedure for an account that has
+   * not read them yet; absent when settings re-pins genres later.
+   */
+  rulesRead: z.boolean().optional(),
 })
+
+/**
+ * FR-13.4 (item 2.3) — the six rules in a line each, for the last onboarding
+ * step. The page at /rules says the rest; this is so nobody finishes without
+ * having met them.
+ */
+export const RULES_SUMMARY = [
+  'A good suggestion answers what was asked, in the author’s voice rather than yours.',
+  'Three suggestions waiting at a time, per story.',
+  'An author can pass on a suggestion without explaining.',
+  'You are reading work nobody has published.',
+  'Credit travels with the writing, for ever.',
+  'Nothing here is private: everything anyone writes is attached to a piece of work.',
+] as const
 
 /**
  * Shown on the username step. Not a validation rule — a promise the product

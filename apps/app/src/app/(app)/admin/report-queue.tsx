@@ -5,12 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from '@/components/link'
 import { useState } from 'react'
 
-import { REPORT_CATEGORIES } from '@/lib/schemas/report'
+import { REPORT_CATEGORIES, type ReportTarget } from '@/lib/schemas/report'
 import { useTRPC } from '@/trpc/client'
-
-import { FlagsPanel } from './flags-panel'
-import { SeededPanel } from './seeded-panel'
-import { SuspendedPanel } from './suspended-panel'
 
 const CATEGORY_LABELS = Object.fromEntries(
   REPORT_CATEGORIES.map((category) => [category.value, category.label]),
@@ -21,6 +17,15 @@ const TABS = [
   { state: 'UPHELD' as const, label: 'Upheld' },
   { state: 'DISMISSED' as const, label: 'Dismissed' },
 ]
+
+/** A report's subject as something that can be hidden (item 2.7): never a person. */
+function hideable(report: {
+  targetType: ReportTarget
+  targetId: string
+}): { targetType: Exclude<ReportTarget, 'USER'>; targetId: string } | null {
+  if (report.targetType === 'USER') return null
+  return { targetType: report.targetType, targetId: report.targetId }
+}
 
 /**
  * FR-13.7 — the queue, with one decision per row.
@@ -38,13 +43,13 @@ export function ReportQueue() {
   const options = trpc.admin.reports.queryOptions({ state })
   const { data, isPending } = useQuery(options)
 
-  const decide = useMutation(
-    trpc.admin.decide.mutationOptions({
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: trpc.admin.reports.queryKey() })
-      },
-    }),
-  )
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: trpc.admin.reports.queryKey() })
+  }
+  const decide = useMutation(trpc.admin.decide.mutationOptions({ onSuccess: refresh }))
+  // Item 2.7 (decision 0045) — hide what a report was about, or show it again.
+  const setHidden = useMutation(trpc.admin.setHidden.mutationOptions({ onSuccess: refresh }))
+  const busy = decide.isPending || setHidden.isPending
 
   return (
     <>
@@ -94,6 +99,11 @@ export function ReportQueue() {
                       <span>{report.subject.label}</span>
                     )}
                     <span className="text-ink-faint"> · {report.targetType.toLowerCase()}</span>
+                    {report.subject.hidden ? (
+                      <span className="ml-1.5 border border-rule px-1.5 py-0.5 text-[11px] tracking-wide text-ink-faint uppercase">
+                        hidden
+                      </span>
+                    ) : null}
                   </p>
                   <time
                     dateTime={report.createdAt.toISOString()}
@@ -131,15 +141,27 @@ export function ReportQueue() {
                       <Button
                         size="sm"
                         variant="destructive"
-                        disabled={decide.isPending}
+                        disabled={busy}
                         onClick={() => decide.mutate({ reportId: report.id, decision: 'UPHELD' })}
                       >
                         Uphold
                       </Button>
+                      {report.targetType !== 'USER' && !report.subject.hidden ? (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={busy}
+                          onClick={() =>
+                            decide.mutate({ reportId: report.id, decision: 'UPHELD', hide: true })
+                          }
+                        >
+                          Uphold and hide
+                        </Button>
+                      ) : null}
                       <Button
                         size="sm"
                         variant="ghost"
-                        disabled={decide.isPending}
+                        disabled={busy}
                         onClick={() =>
                           decide.mutate({ reportId: report.id, decision: 'DISMISSED' })
                         }
@@ -148,14 +170,46 @@ export function ReportQueue() {
                       </Button>
                     </>
                   ) : (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={decide.isPending}
-                      onClick={() => decide.mutate({ reportId: report.id, decision: 'OPEN' })}
-                    >
-                      Put it back in the queue
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() => decide.mutate({ reportId: report.id, decision: 'OPEN' })}
+                      >
+                        Put it back in the queue
+                      </Button>
+                      {report.targetType !== 'USER' && report.subject.hidden ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => {
+                            const target = hideable(report)
+                            if (target) setHidden.mutate({ ...target, hidden: false })
+                          }}
+                        >
+                          Show it again
+                        </Button>
+                      ) : null}
+                      {report.targetType !== 'USER' &&
+                      !report.subject.hidden &&
+                      report.state === 'UPHELD' ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => {
+                            const target = hideable(report)
+                            if (target) {
+                              setHidden.mutate({ ...target, hidden: true, reason: report.category })
+                            }
+                          }}
+                        >
+                          Hide it
+                        </Button>
+                      ) : null}
+                    </>
                   )}
                 </div>
               </li>
@@ -163,6 +217,20 @@ export function ReportQueue() {
           </ul>
         )}
 
+        {decide.data?.hidden ? (
+          <p
+            role="status"
+            className="mt-4 border-l-2 border-rule bg-paper-sunk py-2 pl-4 text-[13.5px] text-ink"
+          >
+            Hidden. It reads as removed to everyone but its writer and the moderators, and
+            &ldquo;Show it again&rdquo; undoes it. Nothing is deleted.
+          </p>
+        ) : null}
+        {(setHidden.error ?? decide.error) ? (
+          <p role="alert" className="mt-2 text-[13px] text-crimson">
+            {(setHidden.error ?? decide.error)?.message}
+          </p>
+        ) : null}
         {decide.data?.suspended ? (
           <p
             role="status"
@@ -173,10 +241,6 @@ export function ReportQueue() {
           </p>
         ) : null}
       </section>
-
-      <SuspendedPanel />
-      <SeededPanel />
-      <FlagsPanel />
     </>
   )
 }

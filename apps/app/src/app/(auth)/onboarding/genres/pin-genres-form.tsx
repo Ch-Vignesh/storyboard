@@ -7,9 +7,10 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { PINNED_GENRES_MIN } from '@/lib/schemas/constants'
+import { RULES_SUMMARY } from '@/lib/schemas/onboarding'
 import { useTRPC } from '@/trpc/client'
 
-export function PinGenresForm() {
+export function PinGenresForm({ next = '/' }: { next?: string }) {
   const trpc = useTRPC()
   const router = useRouter()
   const { update } = useSession()
@@ -17,13 +18,16 @@ export function PinGenresForm() {
 
   // Selection order is the ranking (FR-11.2), so this is an array, not a set.
   const [picked, setPicked] = useState<string[]>([])
+  // FR-13.4 (item 2.3) — the rules, read here, once.
+  const [rulesRead, setRulesRead] = useState(false)
 
   const pinGenres = useMutation(
     trpc.user.pinGenres.mutationOptions({
       onSuccess: async () => {
         await update({ onboarded: true })
-        // FR-1.5: onboarding ends on the dashboard, never on an empty state.
-        router.replace('/')
+        // FR-1.5: onboarding ends on the dashboard, never on an empty state;
+        // or, for somebody who came to help (item 3.5), where they were going.
+        router.replace(next)
       },
     }),
   )
@@ -34,14 +38,14 @@ export function PinGenresForm() {
     )
 
   const remaining = PINNED_GENRES_MIN - picked.length
-  const canSubmit = remaining <= 0 && !pinGenres.isPending
+  const canSubmit = remaining <= 0 && rulesRead && !pinGenres.isPending
 
   return (
     <form
       className="mt-8"
       onSubmit={(event) => {
         event.preventDefault()
-        if (canSubmit) pinGenres.mutate({ genreIds: picked })
+        if (canSubmit) pinGenres.mutate({ genreIds: picked, rulesRead })
       }}
     >
       <fieldset>
@@ -83,6 +87,33 @@ export function PinGenresForm() {
           ? `Pick ${remaining} more.`
           : `${picked.length} picked, in the order you chose them.`}
       </p>
+
+      {/* FR-13.4 (item 2.3) — the rules, once, where nobody can finish without meeting them. */}
+      <section aria-labelledby="rules-heading" className="mt-8 border-l-2 border-rule pl-4">
+        <h2 id="rules-heading" className="text-[13.5px] font-medium text-ink">
+          How this place works
+        </h2>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-[13.5px] leading-relaxed text-ink-soft">
+          {RULES_SUMMARY.map((rule) => (
+            <li key={rule}>{rule}</li>
+          ))}
+        </ol>
+        <p className="mt-2 text-[12.5px] text-ink-faint">
+          <a href="/rules" target="_blank" rel="noreferrer" className="text-pencil hover:underline">
+            Read the six in full
+          </a>
+          , in a new tab. Two minutes.
+        </p>
+        <label className="mt-3 flex items-start gap-2 text-[13.5px] text-ink">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={rulesRead}
+            onChange={(event) => setRulesRead(event.target.checked)}
+          />
+          I have read the community rules
+        </label>
+      </section>
 
       {pinGenres.isError ? (
         <p role="alert" className="mt-2 text-[13.5px] text-crimson">

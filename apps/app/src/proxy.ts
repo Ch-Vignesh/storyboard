@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { authConfig } from '@/auth/config'
 import { contentSecurityPolicy, makeNonce, withObjectStore } from '@/lib/csp'
 import { needsAnAccount } from '@/lib/protected-routes'
+import { safeNext } from '@/lib/safe-next'
 
 /**
  * Navigation, and the Content-Security-Policy. Three jobs:
@@ -78,15 +79,26 @@ export const proxy = auth((request) => {
       ? '/onboarding/genres'
       : null
 
+  // Item 3.5 — the page they were going to rides along to the step, and from
+  // step to step, so finishing onboarding lands them there and not on the
+  // dashboard. Validated at each end; a loop through onboarding itself is
+  // refused by `safeNext`.
+  const carried = safeNext(request.nextUrl.searchParams.get('next') ?? undefined)
   if (step && !isOnboardingRoute) {
-    return withPolicy(NextResponse.redirect(new URL(step, request.nextUrl)))
+    const target = new URL(step, request.nextUrl)
+    const here = `${pathname}${search}`
+    if (safeNext(here) !== '/') target.searchParams.set('next', here)
+    return withPolicy(NextResponse.redirect(target))
   }
   if (step && isOnboardingRoute && !pathname.startsWith(step)) {
     // Asked for the genres step without a username, or the reverse.
-    return withPolicy(NextResponse.redirect(new URL(step, request.nextUrl)))
+    const target = new URL(step, request.nextUrl)
+    if (carried !== '/') target.searchParams.set('next', carried)
+    return withPolicy(NextResponse.redirect(target))
   }
   if (!step && isOnboardingRoute) {
-    return withPolicy(NextResponse.redirect(new URL('/', request.nextUrl)))
+    // Done already: on to wherever they were going, or home.
+    return withPolicy(NextResponse.redirect(new URL(carried, request.nextUrl)))
   }
 
   return proceed()

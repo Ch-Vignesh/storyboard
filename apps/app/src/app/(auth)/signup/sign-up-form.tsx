@@ -9,7 +9,7 @@ import { useState } from 'react'
 
 import { useTRPC } from '@/trpc/client'
 
-export function SignUpForm() {
+export function SignUpForm({ next = '/' }: { next?: string }) {
   const trpc = useTRPC()
   const [email, setEmail] = useState('')
   const signUp = useMutation(trpc.auth.signUp.mutationOptions())
@@ -36,9 +36,21 @@ export function SignUpForm() {
             type="button"
             className="text-pencil underline-offset-2 hover:underline disabled:text-ink-faint"
             disabled={resend.isPending}
-            onClick={() => resend.mutate({ email })}
+            onClick={() => resend.mutate({ email, next })}
           >
             {resend.isPending ? 'Sending' : 'Send it again'}
+          </button>
+          {' · '}
+          {/* Item 3.10 — a typo in the address is the commonest reason nothing comes. */}
+          <button
+            type="button"
+            className="text-pencil underline-offset-2 hover:underline"
+            onClick={() => {
+              resend.reset()
+              signUp.reset()
+            }}
+          >
+            Use a different address
           </button>
         </p>
         {resend.isError ? (
@@ -55,7 +67,7 @@ export function SignUpForm() {
       className="mt-8 space-y-5"
       onSubmit={(event) => {
         event.preventDefault()
-        signUp.mutate({ email })
+        signUp.mutate({ email, next })
       }}
     >
       <div className="space-y-1.5">
@@ -78,6 +90,18 @@ export function SignUpForm() {
       <Button type="submit" variant="primary" className="w-full" disabled={signUp.isPending}>
         {signUp.isPending ? 'Sending' : 'Email me a link'}
       </Button>
+      {/* Item 2.3 — what the button means, where the button is. */}
+      <p className="text-[12.5px] leading-relaxed text-ink-faint">
+        By creating an account you agree to the{' '}
+        <Link href="/terms" className="text-pencil hover:underline">
+          terms
+        </Link>{' '}
+        and the{' '}
+        <Link href="/privacy" className="text-pencil hover:underline">
+          privacy policy
+        </Link>
+        .
+      </p>
       {/* FR-13.4 — the rules, once, where somebody joining will see them. */}
       <p className="text-[12.5px] leading-relaxed text-ink-faint">
         Most of what is here is a draft nobody has published. Before you help with one, read{' '}
@@ -86,7 +110,7 @@ export function SignUpForm() {
         </Link>{' '}
         — six short things, and they are the ones that matter.
       </p>
-      {/* Decision 0020 — why the checkbox above is the whole of the policy. */}
+      {/* Decision 0020 — the whole of the privacy promise, said where somebody joining reads it. */}
       <p className="text-[12.5px] leading-relaxed text-ink-faint">
         There are no private messages here and there never will be. Everything anyone writes to
         anyone is attached to a piece of work and visible to whoever can read it.

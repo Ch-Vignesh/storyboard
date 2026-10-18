@@ -37,6 +37,7 @@ Each step produces a value the next one needs, so this order is not arbitrary.
 4. The two Vercel projects, with the values from 1–3.
 5. Scheduled work.
 6. Seed, then the restore drill.
+7. The administrator, from the command line (below).
 
 ---
 
@@ -310,14 +311,14 @@ box where none of it matters. It should never be set on the real thing.
 
 Six jobs, in `.github/workflows/cron.yml` (decisions 0012 and 0030):
 
-| Job         | Schedule      | What it does                                                                  |
-| ----------- | ------------- | ----------------------------------------------------------------------------- |
-| `immediate` | every 10 min  | Decisions on your own work (FR-12.3)                                          |
-| `hourly`    | hourly        | Everything that is not about your own work                                    |
-| `weekly`    | Sundays 09:00 | The weekly digest (FR-12.3)                                                   |
-| `nudge`     | daily 08:30   | The seven-day silence nudge (FR-12.4)                                         |
-| `prune`     | daily 03:15   | Expired rate-limit rows                                                       |
-| `purge`     | daily 03:45   | Storyboards past their 30 days, accounts past their 7, imports left for a day |
+| Job         | Schedule      | What it does                                                                                                                    |
+| ----------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `immediate` | every 10 min  | Decisions on your own work (FR-12.3)                                                                                            |
+| `hourly`    | hourly        | Everything that is not about your own work                                                                                      |
+| `weekly`    | Sundays 09:00 | The weekly digest (FR-12.3)                                                                                                     |
+| `nudge`     | daily 08:30   | The seven-day silence nudge (FR-12.4)                                                                                           |
+| `prune`     | daily 03:15   | Expired rate-limit rows, dead sign-in links, sign-ups never confirmed (item 3.12)                                               |
+| `purge`     | daily 03:45   | Requests open past their 30 days (decision 0050), storyboards past their 30 days, accounts past their 7, imports left for a day |
 
 Times are UTC. Each run sends `Authorization: Bearer $CRON_SECRET`, which is
 what `/api/cron/[job]` checks — with a constant-time comparison, so the secret
@@ -501,6 +502,23 @@ upload's origin. Uploads are signed path-style, on the account's R2 endpoint
 One thing it cannot check, and says so rather than implying otherwise: whether
 the email actually _arrived_, and in which folder, is something only you can
 look at.
+
+---
+
+## The administrator
+
+There is exactly one, and no screen makes one (decision 0043). From a machine
+whose `.env` names the production database, once the migrations are applied:
+
+```sh
+pnpm admin:grant you@example.com --production
+```
+
+It promotes that account, demotes whoever held the role, and prints both.
+Without `--production` it refuses any database that is not on this machine.
+Sub-admins are then made from the panel's People screen, each with the grants
+you choose. The panel is at `/admin`, and "Admin" appears in the header for
+anyone who may open a screen of it.
 
 ---
 

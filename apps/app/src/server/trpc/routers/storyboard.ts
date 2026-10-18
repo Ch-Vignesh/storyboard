@@ -6,7 +6,12 @@ import { z } from 'zod'
 import { emptyDoc, flavourForStoryType } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
 import { publicId, slugify } from '@/lib/ids'
-import { loadStoryboard, visibleStoryboardsWhere } from '@/lib/authz/guard'
+import {
+  authoredStoryboardsWhere,
+  loadStoryboard,
+  visibleStoryboardsWhere,
+} from '@/lib/authz/guard'
+import { mainDraftOwnShare } from '@/server/own-share'
 import { DAILY_LIMITS, SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
 import { STORY_NOT_FOUND } from '@/lib/authz'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
@@ -17,6 +22,7 @@ import {
 } from '@/lib/schemas/storyboard'
 import { logger } from '@/lib/logger'
 import { closeOpenRequests } from '@/server/close-requests'
+import { storyboardRequestImpact } from '@/server/impact'
 
 import {
   activeProcedure,
@@ -170,6 +176,10 @@ export const storyboardRouter = createTRPCRouter({
           isSeed: true,
           publicFrom: true,
           finishedAt: true,
+          // Item 2.7 — only its authors and a moderator ever get this far on a
+          // hidden story; the reader shows them why.
+          hiddenAt: true,
+          hiddenReason: true,
           createdAt: true,
           owner: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
           genres: { select: { genre: { select: { id: true, slug: true, name: true } } } },
@@ -182,9 +192,10 @@ export const storyboardRouter = createTRPCRouter({
 
       // The requested version must belong to this storyboard; otherwise a valid
       // id from someone else's storyboard would read through.
+      // A removed alternate (FR-10.1, phase 14 item 1.1) is not there either.
       const version = await ctx.db.version.findFirst({
         where: input.versionId
-          ? { id: input.versionId, storyboardId }
+          ? { id: input.versionId, storyboardId, deletedAt: null }
           : { storyboardId, isMain: true },
         select: { id: true, name: true, isMain: true },
       })
@@ -239,6 +250,14 @@ export const storyboardRouter = createTRPCRouter({
         if (written > 0) privateStretches.push({ from: span.startedAt, to: span.endedAt })
       }
 
+      // Item 6.17 (FR-9.2, decision 0041) — how much of the main draft is the
+      // author's own words, for the header line; nothing for a story nobody
+      // else has words in, and nothing on an alternate version.
+      const contributed =
+        version.isMain &&
+        (await ctx.db.credit.count({ where: { storyboardId, type: { not: 'COAUTHOR' } } })) > 0
+      const ownShare = contributed ? await mainDraftOwnShare(ctx.db, storyboardId) : null
+
       return {
         storyboard: {
           ...storyboard,
@@ -250,6 +269,7 @@ export const storyboardRouter = createTRPCRouter({
               total + chapter.sections.reduce((sum, section) => sum + section.wordCount, 0),
             0,
           ),
+          ownShare,
         },
         version,
         chapters,
@@ -265,13 +285,7 @@ export const storyboardRouter = createTRPCRouter({
   listMine: protectedProcedure.query(async ({ ctx }) => {
     const userId = ctx.session.user.id
     const rows = await ctx.db.storyboard.findMany({
-      where: {
-        deletedAt: null,
-        OR: [
-          { ownerId: userId },
-          { collaborators: { some: { userId, acceptedAt: { not: null } } } },
-        ],
-      },
+      where: authoredStoryboardsWhere(userId),
       orderBy: { updatedAt: 'desc' },
       select: {
         id: true,
@@ -281,6 +295,7 @@ export const storyboardRouter = createTRPCRouter({
         visibility: true,
         state: true,
         isSeed: true,
+        hiddenAt: true,
         ownerId: true,
         updatedAt: true,
         genres: { select: { genre: { select: { id: true, name: true } } } },
@@ -559,6 +574,24 @@ export const storyboardRouter = createTRPCRouter({
    * because "3 contributors" is a number and "Leah, Arjun and Maya" is a
    * decision.
    */
+  /**
+   * Phase 14, item 5.4 — what making the story private would do: the open
+   * requests that close, and the people with a draft or a waiting suggestion
+   * who are told. Read with the right the switch itself needs.
+   */
+  privacyImpact: protectedProcedure
+    .input(z.object({ storyboardId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { storyboardId } = await loadStoryboard(
+        ctx.db,
+        actor,
+        { id: input.storyboardId },
+        'storyboard:setVisibility',
+      )
+      return storyboardRequestImpact(ctx.db, storyboardId)
+    }),
+
   deletionImpact: protectedProcedure
     .input(z.object({ storyboardId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {

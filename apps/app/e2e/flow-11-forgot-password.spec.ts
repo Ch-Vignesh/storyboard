@@ -12,7 +12,7 @@ import { readEmailedLink, signIn, signUpAndOnboard } from './helpers'
  * used link are both dead.
  */
 
-const NEW_PASSWORD = 'a completely different passphrase'
+const NEW_PASSWORD = 'A completely different passphrase 2?'
 
 test('a writer who forgot their password resets it, and every earlier session ends', async ({
   page,
@@ -31,6 +31,9 @@ test('a writer who forgot their password resets it, and every earlier session en
   await phone.getByLabel('Email').fill(email)
   await phone.getByRole('button', { name: 'Email me a reset link' }).click()
   await expect(phone.getByText(/a link to choose a new password is on its way/iu)).toBeVisible()
+  // Item 3.10 — back to the form, the address still there to correct.
+  await phone.getByRole('button', { name: 'Use a different address' }).click()
+  await expect(phone.getByLabel('Email')).toHaveValue(email)
 
   // Step 2 — the link, read from the email it was sent in.
   const link = await readEmailedLink(email, '/reset-password')
@@ -51,7 +54,7 @@ test('a writer who forgot their password resets it, and every earlier session en
 
   // The old password is dead.
   await phone.getByLabel('Email').fill(email)
-  await phone.getByLabel('Password').fill('a-long-enough-passphrase')
+  await phone.getByLabel('Password').fill('A-long-enough-passphrase-1!')
   await phone.getByRole('button', { name: 'Sign in' }).click()
   await expect(
     phone.getByText('That email and password do not match.', { exact: false }),
@@ -70,4 +73,100 @@ test('a writer who forgot their password resets it, and every earlier session en
   await expect(phone.getByRole('heading', { name: 'This link has expired' })).toBeVisible()
 
   await elsewhere.close()
+})
+
+/**
+ * Phase 14, item 3.1 — changing the password from settings while signed in.
+ * The old one stops working, the new one works, and this device stays signed
+ * in: behind the scenes it signs in again with the new password.
+ */
+test('a password is changed from settings, and this device stays signed in', async ({
+  page,
+  browser,
+}) => {
+  const changed = 'A changed passphrase 3?'
+  const { email } = await signUpAndOnboard(page)
+
+  await page.goto('/settings')
+  // Two forms ask for the current password (the address form first, item 3.2).
+  await page
+    .getByLabel('Current password', { exact: true })
+    .last()
+    .fill('A-long-enough-passphrase-1!')
+  await page.getByLabel('New password', { exact: true }).fill(changed)
+  await page.getByLabel('Type it again').fill(changed)
+  await page.getByRole('button', { name: 'Change password' }).click()
+  await expect(page.getByText(/^Changed\./)).toBeVisible()
+
+  // Still signed in here.
+  await page.goto('/settings')
+  await expect(page).toHaveURL(/\/settings/u)
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+
+  // Elsewhere, the old password is dead and the new one works.
+  const elsewhere = await browser.newContext()
+  const phone = await elsewhere.newPage()
+  await phone.goto('/signin')
+  await phone.getByLabel('Email').fill(email)
+  await phone.getByLabel('Password').fill('A-long-enough-passphrase-1!')
+  await phone.getByRole('button', { name: 'Sign in' }).click()
+  await expect(
+    phone.getByText('That email and password do not match.', { exact: false }),
+  ).toBeVisible()
+  await signIn(phone, email, changed)
+  await expect(phone.getByRole('heading', { name: /your dashboard/iu })).toBeVisible()
+  await elsewhere.close()
+})
+
+/**
+ * Phase 14, item 3.3 — "Sign out on every device" ends this session and the
+ * others, and says so on the sign-in page.
+ */
+test('signing out on every device ends the other sessions too', async ({ page, browser }) => {
+  const { email } = await signUpAndOnboard(page)
+  const elsewhere = await browser.newContext()
+  const phone = await elsewhere.newPage()
+  await signIn(phone, email, 'A-long-enough-passphrase-1!')
+  await expect(phone.getByRole('heading', { name: /your dashboard/iu })).toBeVisible()
+
+  await page.goto('/settings')
+  await page.getByRole('button', { name: 'Sign out on every device' }).click()
+  await expect(page).toHaveURL(/\/signin\?ended=1/u)
+
+  await phone.goto('/settings')
+  await expect(phone).toHaveURL(/\/signin/u)
+  await elsewhere.close()
+})
+
+/**
+ * Phase 14, item 3.2 — changing the address, through the mail log: the link
+ * goes to the new address, the button there makes it the account's, every
+ * session ends, and the new address signs in with the old password.
+ */
+test('a writer changes their email address from the link sent to the new one', async ({ page }) => {
+  const { email } = await signUpAndOnboard(page)
+  const newEmail = email.replace('@', '-moved@')
+
+  await page.goto('/settings')
+  await page.getByLabel('New email address').fill(newEmail)
+  await page
+    .getByLabel('Current password', { exact: true })
+    .first()
+    .fill('A-long-enough-passphrase-1!')
+  await page.getByRole('button', { name: 'Email me a link' }).click()
+  await expect(page.getByText(/sent a link to/i)).toBeVisible()
+
+  const link = await readEmailedLink(newEmail, '/settings/email')
+  await page.goto(link)
+  await expect(page.getByRole('heading', { name: new RegExp(`Make ${newEmail}`) })).toBeVisible()
+  await page.getByRole('button', { name: 'Make this my address' }).click()
+  await expect(page.getByText(/is now your address/i)).toBeVisible()
+
+  // Every session ended with it; the new address signs in.
+  await page.goto('/settings')
+  await expect(page).toHaveURL(/\/signin/u)
+  await signIn(page, newEmail, 'A-long-enough-passphrase-1!')
+  await expect(page.getByRole('heading', { name: /your dashboard/iu })).toBeVisible()
+  await page.goto('/settings')
+  await expect(page.getByText(newEmail, { exact: false }).first()).toBeVisible()
 })

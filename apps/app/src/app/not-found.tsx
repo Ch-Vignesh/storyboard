@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+
+import { auth } from '@/auth'
 import Link from '@/components/link'
 
 export const metadata: Metadata = {
@@ -22,11 +24,19 @@ export const metadata: Metadata = {
  * who was sent a link to work that is not theirs to read. So it says what is
  * true for both — that there is nothing here *for you* — and it neither
  * apologises nor hints.
+ *
+ * Phase 14, items 4.7 and 4.10: the way in to a private story is an
+ * invitation from its co-authors page, not "its settings"; and a guest's way
+ * out is Browse, because the dashboard needs an account.
  */
-export default function NotFound() {
+export default async function NotFound() {
+  const session = await auth().catch(() => null)
+  const signedIn = Boolean(session?.user)
+
   return (
     <main
       id="main"
+      tabIndex={-1}
       className="mx-auto flex min-h-[70svh] max-w-2xl flex-col justify-center px-6 py-16"
     >
       <p className="text-[11px] tracking-[0.09em] text-ink-faint uppercase">404</p>
@@ -38,13 +48,17 @@ export default function NotFound() {
         published. Unpublished writing is not listed and not readable, which is the point of it.
       </p>
       <p className="mt-3 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
-        If somebody sent you this link and meant you to read it, they can add you to the story from
-        its settings.
+        If it&rsquo;s private, ask its author to invite you as a co-author.
       </p>
 
       <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-[13.5px]">
         <Link href="/browse">Read something else</Link>
-        <Link href="/">Go to your dashboard</Link>
+        {signedIn ? (
+          <Link href="/">Go to your dashboard</Link>
+        ) : (
+          <Link href="/signin">Sign in</Link>
+        )}
+        <Link href="/contact">Write to a person</Link>
       </div>
     </main>
   )

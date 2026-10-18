@@ -44,7 +44,7 @@ export default async function ResetPasswordPage({ searchParams }: Props) {
         For {email}. Every device signed in to this account will be signed out, and you will sign in
         again with the new password.
       </p>
-      <ResetPasswordForm token={tokenValue} />
+      <ResetPasswordForm token={tokenValue} email={email} />
     </div>
   )
 }

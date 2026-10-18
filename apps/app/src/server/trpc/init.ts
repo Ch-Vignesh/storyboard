@@ -1,4 +1,4 @@
-import { prisma } from '@storyboard/db'
+import { prisma, type Role, type UserStatus } from '@storyboard/db'
 import { initTRPC, TRPCError } from '@trpc/server'
 import type { Session } from 'next-auth'
 import superjson from 'superjson'
@@ -6,9 +6,25 @@ import { z, ZodError } from 'zod'
 
 import { auth } from '@/auth'
 import type { Actor } from '@/lib/authz'
+import { canAdmin, type AdminCapability } from '@/lib/authz/admin'
 import { loadStoryboardAsAuthor } from '@/lib/authz/guard'
 import { logger } from '@/lib/logger'
 import { SLOW_PROCEDURE_MS } from '@/lib/schemas/constants'
+import { grantsOf } from '@/server/admin-actor'
+import { noteSeen } from '@/server/last-seen'
+
+/**
+ * The signed-in account's live state, read once per request (FR-13.5): its
+ * standing, its role and, for a sub-admin, its grants (decision 0043).
+ */
+export type Account = {
+  status: UserStatus
+  isAdmin: boolean
+  role: Role
+  deletionRequestedAt: Date | null
+  username: string | null
+  grants: string[]
+} | null
 
 export async function createTRPCContext(opts: { headers: Headers }) {
   const session = await auth()
@@ -18,12 +34,28 @@ export async function createTRPCContext(opts: { headers: Headers }) {
   // the account's live state is read once per authenticated request and carried
   // on the actor. One indexed lookup by primary key; the alternative is a
   // suspended person writing for a month.
-  const account = session?.user
+  const row = session?.user
     ? await prisma.user.findUnique({
         where: { id: session.user.id },
-        select: { status: true, isAdmin: true, deletionRequestedAt: true, username: true },
+        select: {
+          status: true,
+          isAdmin: true,
+          role: true,
+          deletionRequestedAt: true,
+          username: true,
+          lastSeenAt: true,
+        },
       })
     : null
+  let account: Account = null
+  if (row && session?.user) {
+    const { lastSeenAt, ...rest } = row
+    // A sub-admin's grants ride along (decision 0043); for anyone else that is
+    // no second query. And the hour's visit is noted (item 2b.4), after the
+    // response has gone.
+    account = { ...rest, grants: await grantsOf(prisma, { id: session.user.id, role: row.role }) }
+    await noteSeen(prisma, { id: session.user.id, lastSeenAt })
+  }
 
   return { db: prisma, session, account, headers: opts.headers }
 }
@@ -90,16 +122,26 @@ export function actorFrom(
   account?: {
     status: 'ACTIVE' | 'SUSPENDED' | 'DELETED'
     deletionRequestedAt?: Date | null
+    role?: Role
+    grants?: readonly string[]
   } | null,
 ): Actor {
   if (!session?.user) return null
-  return account
-    ? {
-        id: session.user.id,
-        status: account.status,
-        deletionRequestedAt: account.deletionRequestedAt ?? null,
-      }
-    : { id: session.user.id }
+  if (!account) return { id: session.user.id }
+  const deletionRequestedAt = account.deletionRequestedAt ?? null
+  return {
+    id: session.user.id,
+    status: account.status,
+    deletionRequestedAt,
+    // Decision 0045 (item 2.7) — may see what moderation has hidden. Only a
+    // caller that knows the role says so; the export routes pass none.
+    moderator:
+      account.role !== undefined &&
+      canAdmin(
+        { role: account.role, status: account.status, deletionRequestedAt, grants: account.grants },
+        'reports.decide',
+      ),
+  }
 }
 
 /**
@@ -145,24 +187,20 @@ export const activeProcedure = accountProcedure.use(({ ctx, next }) => {
 })
 
 /**
- * Requires a signed-in administrator (FR-15.5) whose own account is in good
- * standing. Until the phase 12 audit only `isAdmin` was checked, so a
- * suspended admin, or one whose account was being deleted, kept every power
- * for as long as their session lasted.
+ * Requires a signed-in administrator with the named capability (FR-15.5,
+ * decision 0043) whose own account is in good standing. Until the phase 12
+ * audit only `isAdmin` was checked, so a suspended admin kept every power for
+ * as long as their session lasted; until phase 14 (item 2b.2) there was one
+ * power rather than several, and no way to hold some of them.
  */
-export const adminProcedure = timedProcedure.use(({ ctx, next }) => {
-  // Not FORBIDDEN: an admin screen is not a thing to be told about.
-  if (!ctx.session?.user || !isActiveAdmin(ctx.account)) {
-    throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found.' })
-  }
-  return next({ ctx: { ...ctx, session: { ...ctx.session, user: ctx.session.user } } })
-})
-
-/** The admin test, shared by `adminProcedure` and the admin page. */
-export function isActiveAdmin(
-  account: { isAdmin: boolean; status: string; deletionRequestedAt: Date | null } | null,
-): boolean {
-  return Boolean(account?.isAdmin && account.status === 'ACTIVE' && !account.deletionRequestedAt)
+export function adminProcedure(capability: AdminCapability) {
+  return timedProcedure.use(({ ctx, next }) => {
+    // Not FORBIDDEN: an admin screen is not a thing to be told about.
+    if (!ctx.session?.user || !canAdmin(ctx.account, capability)) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Not found.' })
+    }
+    return next({ ctx: { ...ctx, session: { ...ctx.session, user: ctx.session.user } } })
+  })
 }
 
 export const createTRPCRouter = t.router

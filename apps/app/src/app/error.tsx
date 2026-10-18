@@ -36,6 +36,7 @@ export default function Error({
   return (
     <main
       id="main"
+      tabIndex={-1}
       className="mx-auto flex min-h-[70svh] max-w-2xl flex-col justify-center px-6 py-16"
     >
       <p className="text-[11px] tracking-[0.09em] text-ochre uppercase">Something broke</p>

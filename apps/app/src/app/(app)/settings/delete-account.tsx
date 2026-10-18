@@ -1,6 +1,8 @@
 'use client'
 
 import { Button } from '@storyboard/ui/components/button'
+
+import { DownloadData } from '@/components/download-data'
 import { Input } from '@storyboard/ui/components/input'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -104,6 +106,11 @@ export function DeleteAccount({
             Your name and everything that identifies you is erased after{' '}
             {ACCOUNT_DELETION_GRACE_DAYS} days. The writing stays.
           </p>
+          {/* Item 3.14 — a copy of everything, offered before the button. */}
+          <p className="mt-3 max-w-measure text-[13.5px] leading-relaxed text-ink-soft">
+            Want a copy of everything first? <DownloadData /> It is one zip: your profile, your
+            stories as Markdown, and your own suggestions, ideas and credits.
+          </p>
           <button
             type="button"
             className="mt-3 text-[13.5px] text-crimson underline underline-offset-2"
@@ -124,8 +131,8 @@ export function DeleteAccount({
           <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 text-[13.5px] leading-relaxed">
             <dt className="text-crimson">Erased</dt>
             <dd className="text-ink-soft">
-              Your name, username, email, biography, picture and password. Your notifications, your
-              reading settings, and any manuscript you uploaded but never turned into a story.
+              Your name, username, email, biography and password. Your notifications, your reading
+              settings, and any manuscript you uploaded but never turned into a story.
             </dd>
             <dt className="text-moss">Kept</dt>
             <dd className="text-ink-soft">
@@ -166,12 +173,17 @@ export function DeleteAccount({
             <p className="mt-3 text-[13px] text-crimson">{request.error.message}</p>
           ) : null}
 
+          <p className="mt-4 max-w-measure text-[13.5px] leading-relaxed text-ink-soft">
+            Before you do: <DownloadData /> — the copy is yours to keep, whatever happens next.
+          </p>
+
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button
               variant="primary"
               disabled={typed !== username || request.isPending}
               onClick={() => {
-                request.mutate()
+                // The server checks it again (phase 14, item 1.5).
+                request.mutate({ confirm: typed })
               }}
             >
               {request.isPending ? 'Starting' : 'Delete my account'}

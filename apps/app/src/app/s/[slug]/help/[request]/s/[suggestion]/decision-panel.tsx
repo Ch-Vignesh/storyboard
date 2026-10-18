@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { ComparisonView } from '@/components/comparison-view'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PASS_CHIPS } from '@/lib/schemas/help'
 import { useTRPC } from '@/trpc/client'
 
@@ -92,68 +93,60 @@ export function DecisionPanel({
             </p>
           ) : null}
 
-          {!passing ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                variant="accept"
-                size="lg"
-                disabled={accept.isPending}
-                onClick={() => accept.mutate({ suggestionId, acknowledgedHeadId: headRevisionId })}
-              >
-                {accept.isPending ? 'Accepting' : 'Accept into the main draft'}
-              </Button>
-              <Button variant="ghost" onClick={() => setPassing(true)}>
-                Go a different way
-              </Button>
-              <p className="w-full text-[12.5px] leading-relaxed text-ink-faint">
-                {continues
-                  ? `Accepting adds this after the end of the section and credits ${contributorName} permanently. What you wrote before it stays as it is.`
-                  : `Accepting writes this into your draft and credits ${contributorName} permanently. Your earlier version stays in the history.`}
-              </p>
-            </div>
-          ) : (
-            <div>
-              <p className="text-[14px] text-ink">
-                You do not owe anyone a reason. If you want to give one, pick the nearest.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {PASS_CHIPS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-pressed={chip === option.value}
-                    onClick={() => setChip(chip === option.value ? null : option.value)}
-                    className={
-                      chip === option.value
-                        ? 'rounded-control border border-pencil bg-pencil-wash px-3 py-1.5 text-[13px] text-pencil'
-                        : 'rounded-control border border-rule bg-paper px-3 py-1.5 text-[13px] text-ink-soft hover:border-ink-faint'
-                    }
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-4 flex items-center gap-3">
-                <Button
-                  disabled={pass.isPending}
-                  onClick={() => pass.mutate({ suggestionId, reason: chip ?? undefined })}
-                >
-                  {pass.isPending ? 'Saving' : 'Pass on this one'}
-                </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="accept"
+              size="lg"
+              disabled={accept.isPending}
+              onClick={() => accept.mutate({ suggestionId, acknowledgedHeadId: headRevisionId })}
+            >
+              {accept.isPending ? 'Accepting' : 'Accept into the main draft'}
+            </Button>
+            <Button variant="ghost" onClick={() => setPassing(true)}>
+              Go a different way
+            </Button>
+            <p className="w-full text-[12.5px] leading-relaxed text-ink-faint">
+              {continues
+                ? `Accepting adds this after the end of the section and credits ${contributorName} permanently. What you wrote before it stays as it is.`
+                : `Accepting writes this into your draft and credits ${contributorName} permanently. Your earlier version stays in the history.`}
+            </p>
+          </div>
+
+          {/* Item 5.6 (FR-6.10) — passing asks first: the four optional chips,
+              each one click, and a button that names what it does. */}
+          <ConfirmDialog
+            open={passing}
+            title="Go a different way?"
+            confirmLabel="Pass on it"
+            busy={pass.isPending}
+            onCancel={() => setPassing(false)}
+            onConfirm={() => pass.mutate({ suggestionId, reason: chip ?? undefined })}
+          >
+            <p>
+              {contributorName} will be told you went a different way. Their version stays on their
+              profile and at this address.
+            </p>
+            <p className="text-ink">
+              You do not owe anyone a reason. If you want to give one, pick the nearest.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {PASS_CHIPS.map((option) => (
                 <button
+                  key={option.value}
                   type="button"
-                  className="text-[13.5px] text-ink-soft hover:text-ink"
-                  onClick={() => setPassing(false)}
+                  aria-pressed={chip === option.value}
+                  onClick={() => setChip(chip === option.value ? null : option.value)}
+                  className={
+                    chip === option.value
+                      ? 'rounded-control border border-pencil bg-pencil-wash px-3 py-1.5 text-[13px] text-pencil'
+                      : 'rounded-control border border-rule bg-paper px-3 py-1.5 text-[13px] text-ink-soft hover:border-ink-faint'
+                  }
                 >
-                  Back
+                  {option.label}
                 </button>
-              </div>
-              <p className="mt-3 max-w-measure text-[12.5px] leading-relaxed text-ink-faint">
-                {contributorName} will be told you went a different way. Their version stays on
-                their profile and at this address.
-              </p>
+              ))}
             </div>
-          )}
+          </ConfirmDialog>
 
           {accept.isError && !conflict ? (
             <p role="alert" className="mt-3 text-[13px] text-crimson">
