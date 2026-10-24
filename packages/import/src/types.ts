@@ -19,7 +19,12 @@ export type Format = (typeof FORMATS)[number]
 export const IMPORT_LIMITS = {
   bytes: 5 * 1024 * 1024,
   words: 300_000,
+  /** The longest file name accepted (phase 14, item 10.5: it was a bare 255). */
+  fileNameChars: 255,
 } as const
+
+/** FR-3.1 — the refusal for a file over the size limit, worded from the limit. */
+export const TOO_LARGE = `That file is larger than ${String(IMPORT_LIMITS.bytes / (1024 * 1024))} MB.`
 
 export function formatOf(fileName: string): Format | null {
   const extension = fileName.toLowerCase().split('.').pop() ?? ''

@@ -14,6 +14,7 @@ import {
   assertCan,
   blockedByAuthors,
   can,
+  canNameStoryOnRecord,
   canReadRevisionAt,
   canReadSuggestionSentAt,
   isAuthor,
@@ -73,13 +74,13 @@ function resourceForCell(action: MatrixAction): StoryboardResource {
 
 describe('permission matrix (SRS 3.2)', () => {
   it('covers every capability in the SRS table', () => {
-    expect(MATRIX_ACTIONS).toHaveLength(16)
+    expect(MATRIX_ACTIONS).toHaveLength(17)
     for (const action of MATRIX_ACTIONS) {
       expect(Object.keys(MATRIX[action]).sort()).toEqual([...ROLES].sort())
     }
   })
 
-  // 16 capabilities x 4 roles = 64 cells, one test each.
+  // 17 capabilities x 4 roles = 68 cells, one test each.
   for (const action of MATRIX_ACTIONS) {
     describe(ACTION_LABELS[action], () => {
       for (const role of ROLES) {
@@ -318,6 +319,7 @@ describe('permissionsFor', () => {
       canPostIdea: true,
       canSpinOff: true,
       canExport: true,
+      canPublish: true,
     })
   })
 
@@ -495,6 +497,78 @@ describe('hidden after a report (phase 14, item 2.7; decision 0045)', () => {
     expect(JSON.stringify(visibleStoryboardsWhere(null))).toContain('"hiddenAt":null')
     expect(JSON.stringify(visibleStoryboardsWhere(actorFor('reader')))).toContain('"hiddenAt":null')
     expect(JSON.stringify(visibleStoryboardsWhere(moderator))).not.toContain('hiddenAt')
+  })
+})
+
+/**
+ * Phase 14, item 8.12 (FR-13.6, D-11) — a version's public record is open to
+ * anyone; the story it was written in is named only to someone who may read
+ * that version. One cell per role and kind of story.
+ */
+describe('the public record of a version names its story (item 8.12)', () => {
+  const wentPublic = new Date('2026-09-14T12:00:00Z')
+  const written = new Date('2026-09-20T09:00:00Z')
+  const writtenBefore = new Date('2026-09-02T09:00:00Z')
+  const moderator: Actor = { id: 'user_moderator', status: 'ACTIVE', moderator: true }
+
+  const cases: Array<[string, StoryboardResource & { publicFrom: Date | null }, Date]> = [
+    ['a public story', { ...storyboard(), publicFrom: wentPublic }, written],
+    ['a private story', { ...storyboard({ visibility: 'PRIVATE' }), publicFrom: null }, written],
+    [
+      'a version written before a story went public',
+      { ...storyboard(), publicFrom: wentPublic },
+      writtenBefore,
+    ],
+    [
+      'a story hidden after a report',
+      { ...storyboard({ hiddenAt: new Date('2026-10-01T00:00:00Z') }), publicFrom: wentPublic },
+      written,
+    ],
+    [
+      'a deleted story',
+      { ...storyboard({ deletedAt: new Date('2026-10-01T00:00:00Z') }), publicFrom: wentPublic },
+      written,
+    ],
+  ]
+  const expected: Record<string, Record<Role, boolean>> = {
+    'a public story': { owner: true, coauthor: true, reader: true, guest: true },
+    'a private story': { owner: true, coauthor: true, reader: false, guest: false },
+    'a version written before a story went public': {
+      owner: true,
+      coauthor: true,
+      reader: false,
+      guest: false,
+    },
+    'a story hidden after a report': { owner: true, coauthor: true, reader: false, guest: false },
+    'a deleted story': { owner: true, coauthor: true, reader: false, guest: false },
+  }
+
+  for (const [label, resource, writtenAt] of cases) {
+    describe(label, () => {
+      for (const role of ROLES) {
+        const answer = expected[label]?.[role]
+        it(`${role} ${answer ? 'sees' : 'does not see'} the story's name`, () => {
+          expect(canNameStoryOnRecord(actorFor(role), resource, writtenAt)).toBe(answer)
+          // The same answer the history gives for that version (decision 0007).
+          expect(canNameStoryOnRecord(actorFor(role), resource, writtenAt)).toBe(
+            canReadRevisionAt(actorFor(role), resource, writtenAt),
+          )
+        })
+      }
+    })
+  }
+
+  it('names a hidden story to a moderator, who may read it to judge it', () => {
+    const [, hidden, writtenAt] = cases[3] ?? []
+    if (!hidden || !writtenAt) throw new Error('missing case')
+    expect(canNameStoryOnRecord(moderator, hidden, writtenAt)).toBe(true)
+  })
+
+  it('names nothing to a deleted account', () => {
+    const gone: Actor = { id: OWNER, status: 'DELETED' }
+    expect(canNameStoryOnRecord(gone, { ...storyboard(), publicFrom: wentPublic }, written)).toBe(
+      false,
+    )
   })
 })
 

@@ -10,8 +10,11 @@
 # Without APP_URL every run is skipped, so a fork or an undeployed copy does nothing.
 #
 # GitHub starts scheduled runs late when it is busy — minutes, sometimes more —
-# and stops scheduling them in a repository with no commit for 60 days. Any job
-# can be run by hand from the Actions tab: Scheduled jobs → Run workflow.
+# and stops scheduling them in a public repository after 60 days without
+# activity. keepalive.yml enables them again twice a month, and fails while
+# there is still time to push once nothing has been committed for 40 days
+# (phase 14, item 10.3). Any job can be run by hand from the Actions tab:
+# Scheduled jobs → Run workflow.
 name: Scheduled jobs
 
 on:

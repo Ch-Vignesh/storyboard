@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'node:crypto'
 
 import { logger } from '@/lib/logger'
 import { CRON_JOBS, type CronJob } from '@/server/mail/digests'
+import { recordServerError } from '@/server/server-errors'
 
 /**
  * The scheduler's entry point (decision 0012).
@@ -51,6 +52,9 @@ export async function POST(request: Request, context: { params: Promise<{ job: s
     return NextResponse.json({ job, ...(result as object) })
   } catch (error) {
     log.error({ event: 'cron.failed', job, error: String(error) }, 'cron job failed')
+    // Phase 14, item 10.1 — a job that throws is a server fault like any
+    // other, kept and announced. `job` is known by now: an unknown one is a 404.
+    await recordServerError(prisma, { source: 'cron', location: job }, error)
     return new NextResponse('Failed', { status: 500 })
   }
 }

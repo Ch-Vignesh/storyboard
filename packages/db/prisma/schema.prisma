@@ -140,6 +140,8 @@ enum NotificationType {
   SUGGESTION_WITHDRAWN
   /// Item 6.15 (D-8) — a request of yours closed by itself after REQUEST_OPEN_DAYS.
   REQUEST_AUTO_CLOSED
+  /// Item 7b.4 (decision 0044) — a spin-off of your story published an edition.
+  SPIN_OFF_PUBLISHED
   WEEKLY_DIGEST
 }
 
@@ -245,6 +247,11 @@ model User {
   /// plain SQL so `updatedAt` keeps meaning a change to the account. Null for
   /// an account not seen since this landed.
   lastSeenAt           DateTime?
+  /// FR-12.3 (phase 14, item 10.6) — when the weekly digest was last sent to
+  /// this account. The run skips anyone sent one within
+  /// WEEKLY_DIGEST_MIN_GAP_DAYS, so a run repeated by hand sends nothing
+  /// twice. Written by plain SQL, as `lastSeenAt` is.
+  weeklyDigestSentAt   DateTime?
   /// FR-9.4 — whether suggestions this person wrote that were passed on are
   /// shown to anyone but them. False by default: defaulting to public would
   /// make being passed on feel punitive, which FR-6.10 is at pains to avoid.
@@ -266,6 +273,8 @@ model User {
   collaborations      Collaborator[]           @relation("CollaboratorUser")
   invitationsSent     Collaborator[]           @relation("CollaboratorInviter")
   versionsCreated     Version[]
+  versionEvents       VersionEvent[]
+  publications        Publication[]
   revisionsAuthored   Revision[]               @relation("RevisionAuthor")
   revisionsAccepted   Revision[]               @relation("RevisionAcceptor")
   drafts              SectionDraft[]
@@ -373,34 +382,38 @@ model UserGenre {
 // ---------------------------------------------------------------- the work
 
 model Storyboard {
-  id           String          @id @default(cuid())
+  id            String          @id @default(cuid())
   /// nanoid; appears in URLs and as the slug suffix.
-  publicId     String          @unique
+  publicId      String          @unique
   /// title slug + publicId suffix, e.g. `the-ship-never-lands-k3x9q2`.
-  slug         String          @unique
-  title        String          @db.VarChar(200)
-  logline      String?         @db.VarChar(300)
-  type         StoryType
-  visibility   Visibility      @default(PUBLIC)
-  state        StoryState      @default(ACTIVE)
+  slug          String          @unique
+  title         String          @db.VarChar(200)
+  logline       String?         @db.VarChar(300)
+  type          StoryType
+  visibility    Visibility      @default(PUBLIC)
+  state         StoryState      @default(ACTIVE)
   /// FR-14.5 — free text, displayed verbatim, never verified.
-  rightsNote   String?         @db.VarChar(500)
+  rightsNote    String?         @db.VarChar(500)
   /// FR-15.3 — seeded example content, labelled as such in the UI.
-  isSeed       Boolean         @default(false)
+  isSeed        Boolean         @default(false)
   /// FR-2.7 — revisions created before this instant stay private to authors.
-  publicFrom   DateTime?
+  publicFrom    DateTime?
   /// FR-14.1
-  finishedAt   DateTime?
+  finishedAt    DateTime?
+  /// Phase 14, item 7.6 (FR-11.1, prototype) — when its newest revision was
+  /// written, in any version. Kept by a trigger on every revision insert
+  /// (migration `20261024010000_last_written`); a spin-off stamps its own.
+  lastWrittenAt DateTime?
   /// FR-2.6 — soft delete; a job hard-deletes 30 days later.
-  deletedAt    DateTime?
+  deletedAt     DateTime?
   /// FR-13.5, FR-13.7 (phase 14, item 2.7; decision 0045) — hidden after an
   /// upheld report: not found for anyone but its authors and the moderators.
   /// Nothing is deleted, and "Show it again" undoes it.
-  hiddenAt     DateTime?
-  hiddenById   String?
-  hiddenReason ReportCategory?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  hiddenAt      DateTime?
+  hiddenById    String?
+  hiddenReason  ReportCategory?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
   ownerId String
   owner   User   @relation("StoryboardOwner", fields: [ownerId], references: [id])
@@ -417,6 +430,8 @@ model Storyboard {
   forkedRevisionMap   Json?
 
   versions      Version[]
+  versionEvents VersionEvent[]
+  publications  Publication[]
   collaborators Collaborator[]
   genres        StoryboardGenre[]
   credits       Credit[]
@@ -544,11 +559,71 @@ model Version {
   /// are tombstoned too, and the row stays so nothing that points at it
   /// dangles. Never set on the main draft.
   deletedAt     DateTime?
+  /// Decision 0044 (phase 14, item 7b.1) — set on a published edition: a
+  /// copy of the main draft that never changes. Every write refuses it in
+  /// `lib/authz/guard.ts`; it is not listed with the alternates.
+  frozenAt      DateTime?
 
-  chapters Chapter[]
-  spinOffs Storyboard[] @relation("SpinOffSourceVersion")
+  chapters    Chapter[]
+  spinOffs    Storyboard[]   @relation("SpinOffSourceVersion")
+  /// Phase 14, item 7.10 — promotions this version was made the main draft by,
+  /// and the ones it stepped down in.
+  events      VersionEvent[] @relation("VersionEventVersion")
+  demotions   VersionEvent[] @relation("VersionEventPrevious")
+  /// Decision 0044 — the edition this frozen version is, if it is one.
+  publication Publication?
 
   @@index([storyboardId])
+}
+
+/// Phase 14, item 7.10 (FR-10.2) — what happened to a story's versions.
+enum VersionEventKind {
+  PROMOTED
+}
+
+/// Phase 14, item 7.10 (FR-10.2) — "promotion swaps is_main and records the
+/// swap in storyboard history". Written in the promotion's transaction, read
+/// by the Versions page. Promotion wrote only a log line before this.
+model VersionEvent {
+  id                String           @id @default(cuid())
+  storyboardId      String
+  storyboard        Storyboard       @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  kind              VersionEventKind
+  /// The version that became the main draft.
+  versionId         String
+  version           Version          @relation("VersionEventVersion", fields: [versionId], references: [id], onDelete: Cascade)
+  /// The one it took over from, kept as an alternate (FR-10.2).
+  previousVersionId String?
+  previousVersion   Version?         @relation("VersionEventPrevious", fields: [previousVersionId], references: [id], onDelete: SetNull)
+  /// What each was called at that moment, so the history reads as it was even
+  /// after a rename.
+  versionName       String           @db.VarChar(120)
+  previousName      String?          @db.VarChar(120)
+  actorId           String?
+  actor             User?            @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt         DateTime         @default(now())
+
+  @@index([storyboardId, createdAt])
+}
+
+/// Decision 0044 (phase 14, item 7b.1) — a published edition of a story: a
+/// frozen copy of its main draft, numbered 1, 2, 3 within the story. The
+/// newest is the current edition. There is no unpublishing, so that is derived
+/// rather than kept in a `Storyboard.currentPublicationId` that could drift.
+model Publication {
+  id            String     @id @default(cuid())
+  storyboardId  String
+  storyboard    Storyboard @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
+  number        Int
+  versionId     String     @unique
+  version       Version    @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  publishedById String?
+  publishedBy   User?      @relation(fields: [publishedById], references: [id], onDelete: SetNull)
+  publishedAt   DateTime   @default(now())
+  /// What changed, in the author's words; shown with the edition.
+  note          String?    @db.VarChar(280)
+
+  @@unique([storyboardId, number])
 }
 
 model Chapter {
@@ -633,6 +708,9 @@ model Revision {
   restoredFromId String?
   restoredFrom   Revision?      @relation("RevisionRestore", fields: [restoredFromId], references: [id])
   restoredTo     Revision[]     @relation("RevisionRestore")
+  /// FR-8.6 (phase 14, item 8.14) — why, when the person restoring said: one
+  /// of FR-6.10's chips. Written with the revision and, like it, never after.
+  restoreReason  PassChip?
   createdAt      DateTime       @default(now())
 
   /// Every section whose head this is — one per version that shares it.
@@ -881,6 +959,70 @@ model RateLimitHit {
   at  DateTime @default(now())
 
   @@index([key, at])
+}
+
+/// Phase 14, item 10.1 (NFR-7, D-10) — a fault of the server's own that no
+/// code handled, kept so it outlives the host's brief logs and somebody hears
+/// about it. Where it happened, what kind of error it was, its message cut
+/// short and the top of its stack: never a request body, never what anybody
+/// wrote, never who was asking. Bounds in `SERVER_ERRORS`; pruned daily.
+model ServerError {
+  id          String    @id @default(cuid())
+  /// The same fault however often it happens: a hash of where, the error's
+  /// name and its message with every value taken out.
+  fingerprint String    @db.VarChar(32)
+  /// `trpc`, `cron`, or Next's own: `render`, `route`, `action`, `proxy`.
+  source      String    @db.VarChar(16)
+  /// The procedure (`suggestion.accept`), the job, or the route as written
+  /// (`/s/[slug]`): never an address with its values in it.
+  location    String    @db.VarChar(200)
+  name        String    @db.VarChar(100)
+  message     String    @db.VarChar(500)
+  /// The top frames of the stack, one to a line.
+  stack       String?   @db.VarChar(2000)
+  /// Set on a kind's rows when the hourly job emails the administrators
+  /// about it, so that each kind is announced once.
+  alertedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([fingerprint, createdAt])
+  @@index([createdAt])
+}
+
+/// Phase 14, item 10.2 (NFR-7) — the socially significant moments, kept: a
+/// suggestion accepted or passed, a revision restored, a spin-off, a report, a
+/// promotion, an administrator's decision, an account deletion asked for,
+/// cancelled or done. Written after the work it records is saved, beside its
+/// log line, and never able to fail that work. Plain ids, no relations: a row
+/// outlives the story it names, and an erased account keeps its id
+/// (decision 0024). Never anybody's words. Pruned daily after
+/// AUDIT_LOG.retentionDays.
+model AuditEvent {
+  id           String   @id @default(cuid())
+  /// The log line's `event`, e.g. `suggestion.accepted`.
+  event        String   @db.VarChar(64)
+  /// Who did it; null when the place did it (the purge).
+  actorId      String?
+  /// Whom it was about, when that is somebody: the contributor whose
+  /// suggestion was decided, the account suspended, the author whose story
+  /// was spun off or reported. The Events screen's person filter reads this
+  /// and `actorId`.
+  subjectId    String?
+  /// The story it happened on, when there is one.
+  storyboardId String?
+  /// What it was done to: `SUGGESTION`, `STORYBOARD`, `USER`, `SECTION`,
+  /// `VERSION`, `IDEA`, `NAME` or `FLAG`, and its id (or the name, or the key).
+  targetType   String?  @db.VarChar(32)
+  targetId     String?
+  /// A little more, in ids and settled values: a pass's chip, a report's
+  /// category, a decision. Never free text anybody wrote.
+  detail       Json?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([subjectId, createdAt])
+  @@index([storyboardId, createdAt])
 }
 
 /// FR-15.5 — a switch an owner can throw without a deploy.

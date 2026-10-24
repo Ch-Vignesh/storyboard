@@ -29,22 +29,56 @@
  * not the helpers — a helper with nothing to answer leaves and does not come
  * back, an author waiting for an answer is a normal Tuesday. So the asks are the
  * part that had to be real, and they are the part that took the time.
+ *
+ * **Phase 14, item 9.5.** The library first left no rewrite open: every rewrite
+ * was answered, on an opening far under FR-5.7's floor for one. The open
+ * rewrites since then each stand on a section added for them, the edition's
+ * next passage, long enough to be rewritten. A section may hold more than one
+ * paragraph; a blank line separates two. Each open request stands on the
+ * section it names, never moved to another (`requests.ts`), and each open
+ * continuation on the last section of its chapter, where the next words go.
+ * `scripts/seed-library.test.ts` holds the library to all of that, and to the
+ * bounds a person opening the same request would meet.
+ *
+ * **On the help.** D-14 added a little help from the example helpers on a
+ * handful of requests — a suggestion waiting, an idea or two — so a newcomer
+ * sees what helping looks like before anyone else has helped. It is short on
+ * purpose, written in the voice of the text, and it goes when its story goes.
  */
+
+/** D-14 (item 9.5) — a suggestion an example helper sent, waiting on an author. */
+export type SeedSuggestion = {
+  by: SeedHelperName
+  /** FR-6.2 — the note above the prose. */
+  note: string
+  /** The section as the helper would have it; a blank line between paragraphs. */
+  prose: string
+}
+
+/** D-14 — a top-level idea an example helper posted on a request for ideas (FR-6.9). */
+export type SeedIdea = { by: SeedHelperName; body: string }
 
 export type SeedRequest = {
   kind: 'REWRITE' | 'CONTINUE' | 'UNBLOCK'
+  /** Unique within its work: a seeded database finds the request by it. */
   title: string
   ask: string
   /** FR-5.4 — needed for the two kinds that return prose. */
   preContext?: string
-  /** Which section of the work it hangs on, by index. */
+  /** Which chapter it hangs on, by index. The library's works have one. */
+  chapter?: number
+  /** Which section of the chapter it hangs on, by index. */
   section: number
   /** When set, the request is already answered and this was accepted (FR-15.4). */
   accepted?: {
-    by: string
+    by: SeedHelperName
     note: string
     prose: string
   }
+  /** D-14 — prose already sent to a rewrite or a continuation, and not yet decided. */
+  suggestions?: SeedSuggestion[]
+  /** D-14 — ideas already posted on a request for them. */
+  ideas?: SeedIdea[]
 }
 
 export type SeedWork = {
@@ -61,7 +95,8 @@ export type SeedWork = {
 }
 
 /**
- * The people who wrote the accepted suggestions.
+ * The people who wrote the accepted suggestions, and since item 9.5 the
+ * suggestions waiting and the ideas.
  *
  * Seeded accounts, and labelled as such on their profiles: FR-15.3 forbids
  * making seeded content look like a real community, and a credit line pointing
@@ -72,14 +107,16 @@ export const SEED_HELPERS = [
   {
     username: 'example-helper-1',
     displayName: 'An example contributor',
-    bio: 'A seeded account. The suggestions credited here were written to show how the product works, not by a member of the community.',
+    bio: 'A seeded account. Its suggestions and ideas were written to show how the product works, not by a member of the community.',
   },
   {
     username: 'example-helper-2',
     displayName: 'Another example contributor',
-    bio: 'A seeded account. The suggestions credited here were written to show how the product works, not by a member of the community.',
+    bio: 'A seeded account. Its suggestions and ideas were written to show how the product works, not by a member of the community.',
   },
 ] as const
+
+export type SeedHelperName = (typeof SEED_HELPERS)[number]['username']
 
 export const LIBRARY: SeedWork[] = [
   {
@@ -99,6 +136,7 @@ export const LIBRARY: SeedWork[] = [
       sections: [
         'You will rejoice to hear that no disaster has accompanied the commencement of an enterprise which you have regarded with such evil forebodings. I arrived here yesterday, and my first task is to assure my dear sister of my welfare and increasing confidence in the success of my undertaking.',
         'I am already far north of London, and as I walk in the streets of Petersburgh, I feel a cold northern breeze play upon my cheeks, which braces my nerves and fills me with delight. Do you understand this feeling? This breeze, which has travelled from the regions towards which I am advancing, gives me a foretaste of those icy climes.',
+        'Inspirited by this wind of promise, my daydreams become more fervent and vivid. I try in vain to be persuaded that the pole is the seat of frost and desolation; it ever presents itself to my imagination as the region of beauty and delight. There, Margaret, the sun is for ever visible, its broad disk just skirting the horizon and diffusing a perpetual splendour. There—for with your leave, my sister, I will put some trust in preceding navigators—there snow and frost are banished; and, sailing over a calm sea, we may be wafted to a land surpassing in wonders and in beauty every region hitherto discovered on the habitable globe. Its productions and features may be without example, as the phenomena of the heavenly bodies undoubtedly are in those undiscovered solitudes. What may not be expected in a country of eternal light? I may there discover the wondrous power which attracts the needle and may regulate a thousand celestial observations that require only this voyage to render their seeming eccentricities consistent for ever. I shall satiate my ardent curiosity with the sight of a part of the world never before visited, and may tread a land never before imprinted by the foot of man.',
       ],
     },
     requests: [
@@ -107,6 +145,12 @@ export const LIBRARY: SeedWork[] = [
         title: 'How do I get Walton from delight to dread?',
         section: 1,
         ask: 'Walton is happy here, and he has to stop being happy without anything happening to him yet. I do not want a storm and I do not want a bad omen, because both are cheap. What is the smallest thing that could turn this, and can it be something he notices about himself rather than about the ice?',
+        ideas: [
+          {
+            by: 'example-helper-2',
+            body: 'Let him notice that he has nobody to tell. He is writing to his sister because there is nobody near him he can talk to, and in the next letter he says so outright: he has no friend. Give him one sentence where the delight needs a witness and there is none. He describes the breeze, and then admits that the only person who will ever hear about it is in London and wishes he had not gone. Nothing happens to him. He just hears his own voice in an empty room.',
+          },
+        ],
       },
       {
         kind: 'REWRITE',
@@ -127,6 +171,14 @@ export const LIBRARY: SeedWork[] = [
         title: 'Epistolary for four letters and then a different book — is that a bait and switch?',
         section: 0,
         ask: 'The letters are doing real work but a reader who settles into them is going to be moved twice: once into Victor’s narration and once into the creature’s. I can feel the first handover being a problem and I cannot tell whether that is a flaw or the shape of the thing.',
+      },
+      {
+        kind: 'REWRITE',
+        title: 'Walton describes a place nobody has seen as if he had been there',
+        section: 2,
+        ask: 'He admits in passing that all of this is trust in “preceding navigators”, and then forgets he said it. I want the borrowed certainty to show: a man repeating what he has read, believing it a little more each time he says it, without taking any of it back and without sounding like a fool. Same claims, same order. The change is in how sure he is allowed to sound.',
+        preContext:
+          'Robert Walton is writing to his married sister Margaret from St. Petersburgh, before his voyage north has properly begun. He has spent six years preparing for it: sailing with the whalers in the North Sea, studying mathematics, medicine and navigation, and reading every account of polar exploration in his uncle’s library. Margaret begged him not to go. He has no ship yet and no crew, and nobody he can talk to. The pole he describes here is the one the old theorists described, an open sea and a country of eternal light that may hold the secret of the magnet, and nobody has seen any of it. He knows that, the way a man knows the risks of something he has already decided to do. This paragraph is the height of his confidence. Within a few letters the ice will close round his ship, and a sledge will cross it carrying something he cannot explain.',
       },
     ],
   },
@@ -175,7 +227,8 @@ export const LIBRARY: SeedWork[] = [
       {
         kind: 'UNBLOCK',
         title: 'Whose book is this, in chapter one?',
-        section: 2,
+        // The continuation has the last section; this one always landed here.
+        section: 0,
         ask: 'The dialogue is between the parents and the novel belongs to their daughter, who is not in the room. I can introduce her next chapter or I can get her into this one somehow. Does delaying her cost me anything I will not be able to recover?',
       },
     ],
@@ -247,6 +300,7 @@ export const LIBRARY: SeedWork[] = [
       sections: [
         'In my younger and more vulnerable years my father gave me some advice that I’ve been turning over in my mind ever since. “Whenever you feel like criticizing anyone,” he told me, “just remember that all the people in this world haven’t had the advantages that you’ve had.”',
         'He didn’t say any more, but we’ve always been unusually communicative in a reserved way, and I understood that he meant a great deal more than that. In consequence, I’m inclined to reserve all judgements, a habit that has opened up many curious natures to me and also made me the victim of not a few veteran bores.',
+        'The abnormal mind is quick to detect and attach itself to this quality when it appears in a normal person, and so it came about that in college I was unjustly accused of being a politician, because I was privy to the secret griefs of wild, unknown men. Most of the confidences were unsought—frequently I have feigned sleep, preoccupation, or a hostile levity when I realized by some unmistakable sign that an intimate revelation was quivering on the horizon; for the intimate revelations of young men, or at least the terms in which they express them, are usually plagiaristic and marred by obvious suppressions. Reserving judgements is a matter of infinite hope. I am still a little afraid of missing something if I forget that, as my father snobbishly suggested, and I snobbishly repeat, a sense of the fundamental decencies is parcelled out unequally at birth.\n\nAnd, after boasting this way of my tolerance, I come to the admission that it has a limit. Conduct may be founded on the hard rock or the wet marshes, but after a certain point I don’t care what it’s founded on.',
       ],
     },
     requests: [
@@ -275,6 +329,14 @@ export const LIBRARY: SeedWork[] = [
         title: 'How much money should I actually name?',
         section: 0,
         ask: 'The book is about wealth and I keep flinching from figures — the shirts, the car, the house all described without a price. Naming one number would be vulgar in a way I think the narrator would avoid. But avoiding all of them might be its own kind of flinch.',
+      },
+      {
+        kind: 'REWRITE',
+        title: 'The feigned sleep is the best joke here and it is buried',
+        section: 2,
+        ask: 'Feigned sleep, preoccupation, a hostile levity: three ways a young man gets out of hearing a confession, and the best joke in the paragraph is lost in the middle of a long sentence. I want the three escapes to land as things Nick actually did, and “plagiaristic” to sting a little more than it does. Keep the father, keep “infinite hope”, and keep the admission of a limit for the end.',
+        preContext:
+          'Nick Carraway is writing this after the events of the novel, back home in the Middle West, about the summer he spent on Long Island. His family are prosperous, established, and quietly proud of it. He went to Yale, served in the war, and went east to learn the bond business. He presents himself as the one tolerant, honest man in the story, and these opening pages are his credentials: his father’s advice about not criticising people, and his claim to reserve all judgements. Everything he says about himself is half true. He has been a confidant all his life because he listens, and he is a little vain about it. In a page or two he will mention Gatsby, the man who gives his name to the book, and admit that Gatsby alone was exempt from his scorn.',
       },
     ],
   },
@@ -354,7 +416,7 @@ export const LIBRARY: SeedWork[] = [
         section: 1,
         ask: 'Utterson has a cousin he walks with on Sundays and they famously say nothing to each other the whole way. I need that established in three or four sentences, in the same long-breathed register, and it has to sound like a friendship rather than an affliction.',
         preContext:
-          'Mr. Utterson the lawyer is austere, tolerant, and loyal past reason. His one indulgence is a Sunday walk with Richard Enfield, a distant kinsman and well-known man about town who is his opposite in every respect. The walks are famous among their acquaintance for being entirely silent and for being the fixed point of both men’s week — they will refuse other engagements to keep them. On one of these walks Enfield will point out a door and tell a story about a man who trampled a child and paid to keep it quiet, and the novella will begin.',
+          'Mr. Utterson the lawyer is austere, tolerant, and loyal past reason. His one indulgence is a Sunday walk with Richard Enfield, a distant kinsman and well-known man about town who is his opposite in every respect. The walks are famous among their acquaintance for being entirely silent and for being the fixed point of both men’s week — they will refuse other engagements to keep them. Neither could say what he gets out of them, and neither would give them up. On one of these walks Enfield will point out a door and tell a story about a man who trampled a child and paid to keep it quiet, and the novella will begin.',
       },
       {
         kind: 'UNBLOCK',
@@ -380,6 +442,7 @@ export const LIBRARY: SeedWork[] = [
       sections: [
         'I have just returned from a visit to my landlord—the solitary neighbour that I shall be troubled with. This is certainly a beautiful country! In all England, I do not believe that I could have fixed on a situation so completely removed from the stir of society.',
         'A perfect misanthropist’s Heaven—and Mr. Heathcliff and I are such a suitable pair to divide the desolation between us. A capital fellow! He little imagined how my heart warmed towards him when I beheld his black eyes withdraw so suspiciously under their brows, as I rode up',
+        '“Mr. Heathcliff?” I said.\n\nA nod was the answer.\n\n“Mr. Lockwood, your new tenant, sir. I do myself the honour of calling as soon as possible after my arrival, to express the hope that I have not inconvenienced you by my perseverance in soliciting the occupation of Thrushcross Grange: I heard yesterday you had had some thoughts—”\n\n“Thrushcross Grange is my own, sir,” he interrupted, wincing. “I should not allow any one to inconvenience me, if I could hinder it—walk in!”\n\nThe “walk in” was uttered with closed teeth, and expressed the sentiment, “Go to the Deuce!” even the gate over which he leant manifested no sympathising movement to the words; and I think that circumstance determined me to accept the invitation: I felt interested in a man who seemed more exaggeratedly reserved than myself.\n\nWhen he saw my horse’s breast fairly pushing the barrier, he did put out his hand to unchain it, and then sullenly preceded me up the causeway, calling, as we entered the court,—“Joseph, take Mr. Lockwood’s horse; and bring up some wine.”',
       ],
     },
     requests: [
@@ -402,6 +465,22 @@ export const LIBRARY: SeedWork[] = [
           prose:
             'A perfect misanthropist’s Heaven—and Mr. Heathcliff and I are such a suitable pair to divide the desolation between us. A capital fellow! He little imagined how my heart warmed towards him when I beheld his black eyes withdraw so suspiciously under their brows, as I rode up, and his fingers shelter themselves, with a jealous resolution, still further in his waistcoat, as I announced my name. I have not been so well received anywhere this twelvemonth.',
         },
+      },
+      {
+        kind: 'REWRITE',
+        title: 'Heathcliff’s “walk in!” lands, and then I explain it',
+        section: 2,
+        ask: '“Walk in!” is the funniest line in the chapter, and the narration stops at once to translate it: it “expressed the sentiment, Go to the Deuce”. I want the reader to get there before Lockwood does, so that his accepting the invitation is the joke. Keep his speech as long and as pompous as it is, the longest thing anybody says in the scene, and keep the gate.',
+        preContext:
+          'Mr. Lockwood, a young gentleman from the south, has taken Thrushcross Grange on the Yorkshire moors for the winter, partly to get away from a seaside flirtation he ended by turning cold the moment the lady returned his interest. He thinks of himself as a natural solitary. His landlord, Mr. Heathcliff, lives four miles off at Wuthering Heights, a farmhouse on the top of the moor, and Lockwood has ridden over to introduce himself, which Heathcliff did not ask for and does not want. Heathcliff is dark, ungracious and in no hurry to be liked. Lockwood takes every sign of hostility as a mark of kindred reserve and is delighted with him. Neither man knows anything about the other yet. Lockwood will tell the first chapters in this voice, pleased with himself, slightly ridiculous and wrong about nearly everything, until the housekeeper at the Grange takes the story over.',
+        suggestions: [
+          {
+            by: 'example-helper-1',
+            note: 'Cut the line that translates “walk in”. The gate does the work now, and Lockwood accepting is funnier when the reader has already understood what he has not.',
+            prose:
+              '“Mr. Heathcliff?” I said.\n\nA nod was the answer.\n\n“Mr. Lockwood, your new tenant, sir. I do myself the honour of calling as soon as possible after my arrival, to express the hope that I have not inconvenienced you by my perseverance in soliciting the occupation of Thrushcross Grange: I heard yesterday you had had some thoughts—”\n\n“Thrushcross Grange is my own, sir,” he interrupted, wincing. “I should not allow any one to inconvenience me, if I could hinder it—walk in!”\n\nHe said it through closed teeth, and the gate over which he leant did not move an inch. I took this for an invitation, and accepted it: I felt interested in a man who seemed more exaggeratedly reserved than myself.\n\nWhen he saw my horse’s breast fairly pushing the barrier, he did put out his hand to unchain it, and then sullenly preceded me up the causeway, calling, as we entered the court,—“Joseph, take Mr. Lockwood’s horse; and bring up some wine.”',
+          },
+        ],
       },
     ],
   },
@@ -456,6 +535,7 @@ export const LIBRARY: SeedWork[] = [
       title: 'Economy',
       sections: [
         'When I wrote the following pages, or rather the bulk of them, I lived alone, in the woods, a mile from any neighbor, in a house which I had built myself, on the shore of Walden Pond, in Concord, Massachusetts, and earned my living by the labor of my hands only. I lived there two years and two months. At present I am a sojourner in civilized life again.',
+        'I should not obtrude my affairs so much on the notice of my readers if very particular inquiries had not been made by my townsmen concerning my mode of life, which some would call impertinent, though they do not appear to me at all impertinent, but, considering the circumstances, very natural and pertinent. Some have asked what I got to eat; if I did not feel lonesome; if I was not afraid; and the like.',
       ],
     },
     requests: [
@@ -468,7 +548,10 @@ export const LIBRARY: SeedWork[] = [
       {
         kind: 'CONTINUE',
         title: 'The accounts should come next, and they should be funny',
-        section: 0,
+        // Item 9.5 — it asked for the one section the question above already
+        // had, so no database ever got it. The townsmen's questions are what
+        // the accounts answer.
+        section: 1,
         ask: 'He is about to itemise what the house cost, to the half-cent. That list is either insufferable or the best joke in the book depending on how it is introduced. Give me the sentence before the list.',
         preContext:
           'Thoreau is writing for the people of Concord, who have asked him — sometimes politely, often not — what he thought he was doing living in a hut by a pond for two years. He has decided to answer them literally: he will tell them what it cost. The list that follows includes boards at eight dollars and three-and-a-half cents, refuse shingles, two second-hand windows, and a thousand old brick. He is entirely serious and entirely aware that the seriousness is the joke, and he is arguing that most of his neighbours could not produce the same list for their own houses.',
@@ -492,6 +575,7 @@ export const LIBRARY: SeedWork[] = [
       sections: [
         'The Time Traveller (for so it will be convenient to speak of him) was expounding a recondite matter to us. His grey eyes shone and twinkled, and his usually pale face was flushed and animated. The fire burnt brightly, and the soft radiance of the incandescent lights in the lilies of silver caught the bubbles that flashed and passed in our glasses.',
         '“You must follow me carefully. I shall have to controvert one or two ideas that are almost universally accepted. The geometry, for instance, they taught you at school is founded on a misconception.” “Is not that rather a large thing to expect us to begin upon?” said Filby, an argumentative person with red hair.',
+        '“I do not mean to ask you to accept anything without reasonable ground for it. You will soon admit as much as I need from you. You know of course that a mathematical line, a line of thickness nil, has no real existence. They taught you that? Neither has a mathematical plane. These things are mere abstractions.”\n\n“That is all right,” said the Psychologist.\n\n“Nor, having only length, breadth, and thickness, can a cube have a real existence.”\n\n“There I object,” said Filby. “Of course a solid body may exist. All real things—”\n\n“So most people think. But wait a moment. Can an instantaneous cube exist?”\n\n“Don’t follow you,” said Filby.\n\n“Can a cube that does not last for any time at all, have a real existence?”\n\nFilby became pensive. “Clearly,” the Time Traveller proceeded, “any real body must have extension in four directions: it must have Length, Breadth, Thickness, and—Duration. But through a natural infirmity of the flesh, which I will explain to you in a moment, we incline to overlook this fact. There are really four dimensions, three which we call the three planes of Space, and a fourth, Time. There is, however, a tendency to draw an unreal distinction between the former three dimensions and the latter, because it happens that our consciousness moves intermittently in one direction along the latter from the beginning to the end of our lives.”',
       ],
     },
     requests: [
@@ -521,6 +605,14 @@ export const LIBRARY: SeedWork[] = [
         section: 0,
         ask: 'The Psychologist, the Medical Man, the Very Young Man. It gives the evening the feel of a fable, and it means my narrator is a job title too. Does the anonymity buy enough to be worth a narrator the reader cannot picture?',
       },
+      {
+        kind: 'REWRITE',
+        title: 'The guests are only there to say “that is all right”',
+        section: 2,
+        ask: 'This is the Time Traveller’s whole case, and the men listening to it are there to say “that is all right” and “don’t follow you”. I want the exchange to feel like a game he is winning against people who are enjoying losing it: quicker, lighter, with Filby walking into the trap rather than being led to it. Keep every step of the argument, and keep “Duration” as the word the paragraph turns on.',
+        preContext:
+          'A Thursday evening in Richmond, in the Time Traveller’s smoking room after dinner. His regular guests are a Psychologist, a Medical Man, a Provincial Mayor, a Very Young Man, Filby, who has red hair and argues with everything, and the narrator. They are comfortable, well fed and expecting to be entertained. Their host is about to tell them that time is a fourth dimension like the three of space, that we move along it only because our consciousness does, and that a machine might move along it on purpose. In a few minutes he will put a small model of such a machine on the table and make it vanish. None of them believe him, and the story depends on their disbelief being reasonable: they are intelligent men and he is asking a great deal. The argument has to be clear enough to follow and playful enough that nobody would mistake it for a lecture.',
+      },
     ],
   },
   {
@@ -539,6 +631,7 @@ export const LIBRARY: SeedWork[] = [
       sections: [
         'To Sherlock Holmes she is always the woman. I have seldom heard him mention her under any other name. In his eyes she eclipses and predominates the whole of her sex. It was not that he felt any emotion akin to love for Irene Adler.',
         'All emotions, and that one particularly, were abhorrent to his cold, precise but admirably balanced mind. He was, I take it, the most perfect reasoning and observing machine that the world has seen, but as a lover he would have placed himself in a false position.',
+        'He never spoke of the softer passions, save with a gibe and a sneer. They were admirable things for the observer—excellent for drawing the veil from men’s motives and actions. But for the trained reasoner to admit such intrusions into his own delicate and finely adjusted temperament was to introduce a distracting factor which might throw a doubt upon all his mental results. Grit in a sensitive instrument, or a crack in one of his own high-power lenses, would not be more disturbing than a strong emotion in a nature such as his. And yet there was but one woman to him, and that woman was the late Irene Adler, of dubious and questionable memory.\n\nI had seen little of Holmes lately. My marriage had drifted us away from each other. My own complete happiness, and the home-centred interests which rise up around the man who first finds himself master of his own establishment, were sufficient to absorb all my attention, while Holmes, who loathed every form of society with his whole Bohemian soul, remained in our lodgings in Baker Street, buried among his old books, and alternating from week to week between cocaine and ambition, the drowsiness of the drug, and the fierce energy of his own keen nature.',
       ],
     },
     requests: [
@@ -567,6 +660,20 @@ export const LIBRARY: SeedWork[] = [
         title: 'Holmes has to lose and stay Holmes',
         section: 0,
         ask: 'Irene Adler beats him, which is the point. But if she beats him by being cleverer, he stops being the cleverest man in the room for good and the other stories suffer. Is there a way for him to lose that is about character rather than intellect?',
+        ideas: [
+          {
+            by: 'example-helper-1',
+            body: 'Let him lose to her nerve rather than her mind. He works out where the photograph is, correctly, and the deduction is as good as any he makes. She simply leaves before he can use it. She does not out-think him; she declines to stay in the room where his thinking happens. He is still the cleverest man there. She is just not there.',
+          },
+        ],
+      },
+      {
+        kind: 'REWRITE',
+        title: 'The turn to Irene Adler should cost Watson something',
+        section: 2,
+        ask: 'Watson spends a paragraph proving that Holmes could not love anyone, with two good images, the grit and the cracked lens, and then: “And yet there was but one woman to him.” The turn is right and it comes too cheaply. I want it to cost him something, and I want the news about his own marriage, straight after, to read as a man changing the subject. Same facts, same images.',
+        preContext:
+          'Dr. Watson is writing up a case from some years back, from the time after his marriage when he had moved out of Baker Street and was seeing little of Holmes. The woman is Irene Adler, an opera singer and adventuress who outwitted Holmes over a compromising photograph that the King of Bohemia wanted back, and who has since died. Holmes asked to be paid with her portrait, and for nothing else. Watson is fond of Holmes and protective of him, and in these stories he is the one who supplies the feeling that Holmes declines to show. This opening is his account of what Holmes thought of love. It is also the nearest Watson comes to saying what he thinks Holmes felt, and immediately after it he turns to his own happy marriage, as if the two subjects had nothing to do with each other.',
       },
     ],
   },
@@ -601,7 +708,8 @@ export const LIBRARY: SeedWork[] = [
       {
         kind: 'UNBLOCK',
         title: 'First person from a child, written by the adult she became',
-        section: 1,
+        // The continuation has the last section; this one always landed here.
+        section: 0,
         ask: 'The voice knows words the ten-year-old did not have. I cannot decide whether to let the grown woman’s vocabulary sit openly on the child’s experience or to keep the diction younger. One is honest about the telling, the other is immediate.',
       },
     ],
@@ -628,7 +736,10 @@ export const LIBRARY: SeedWork[] = [
       {
         kind: 'UNBLOCK',
         title: 'The voice is right and I cannot get a plot started in it',
-        section: 1,
+        // Item 9.5 — on the opening, so the continuation below can have the
+        // last section, where what comes next goes. Both asked for the last,
+        // and the continuation used to be pushed onto the opening instead.
+        section: 0,
         ask: 'Huck can talk forever and every time I try to make something happen the sentences go flat and start sounding like me. How do you begin an event in a voice this digressive without the voice noticing it has been put to work?',
       },
       {
@@ -656,6 +767,10 @@ export const LIBRARY: SeedWork[] = [
       title: 'Book one',
       sections: [
         'Tell me, O Muse, of that ingenious hero who travelled far and wide after he had sacked the famous town of Troy. Many cities did he visit, and many were the nations with whose manners and customs he was acquainted; moreover he suffered much by sea while trying to save his own life and bring his men safely home',
+        // The sentence above runs on with "; but do what he might". The section
+        // above now ends on a full stop, the accepted rewrite's, so this one
+        // starts on a capital; `check-excerpts` reads letters, not case.
+        'But do what he might he could not save his men, for they perished through their own sheer folly in eating the cattle of the Sun-god Hyperion; so the god prevented them from ever reaching home. Tell me, too, about all these things, oh daughter of Jove, from whatsoever source you may know them.\n\nSo now all who escaped death in battle or by shipwreck had got safely home except Ulysses, and he, though he was longing to return to his wife and country, was detained by the goddess Calypso, who had got him into a large cave and wanted to marry him. But as years went by, there came a time when the gods settled that he should go back to Ithaca; even then, however, when he was among his own people, his troubles were not yet over; nevertheless all the gods had now begun to pity him except Neptune, who still persecuted him without ceasing and would not let him get home.',
       ],
     },
     requests: [
@@ -678,6 +793,14 @@ export const LIBRARY: SeedWork[] = [
         title: 'Do I name the man in the first line or not?',
         section: 0,
         ask: 'The Greek withholds Odysseus for a long while and calls him “the man” — which is either a magnificent delay or an obstacle for a reader who does not know the poem. Everyone in the original audience knew. Nobody in mine does.',
+      },
+      {
+        kind: 'REWRITE',
+        title: 'The singer asks the Muse twice, and I cannot find the seam',
+        section: 1,
+        ask: 'The invocation asks the Muse for the story, and then, once the men are lost, it asks again: “Tell me, too, about all these things.” Then the story starts anyway. I want the handover to happen once, cleanly: the singer stops asking and starts telling, and Calypso’s cave is the first thing the room can see. Keep the folly of the men and the cattle of the Sun, because they matter later.',
+        preContext:
+          'The poem opens by asking the Muse to sing of a man who travelled far after the fall of Troy, saw many cities, and suffered at sea while trying to bring his men home. The audience in the hall knows the story already: Ulysses, ten years at the war and ten more getting back, his wife Penelope holding off the suitors who want his house, his son Telemachus grown up without him. The pleasure is in the telling, not the news. The singer presents himself as the Muse’s instrument, and the invocation is a formal courtesy. This section is where the courtesy ends and the story begins: the other heroes are home, Ulysses is held on an island by the goddess Calypso, and the gods are about to argue over him while Neptune, his enemy, is away. The translation is plain prose and should stay that way.',
       },
     ],
   },
@@ -747,7 +870,9 @@ export const LIBRARY: SeedWork[] = [
       {
         kind: 'UNBLOCK',
         title: 'Is the simile too clever to open a novel with?',
-        section: 1,
+        // Item 9.5 — on the opening, so the continuation can have the last
+        // section; the question is about how the novel opens either way.
+        section: 0,
         ask: 'The fine quotation in a newspaper paragraph is the best sentence I have and I am not sure the reader has earned it yet — it asks them to admire the narrator before they care about the girl. Do I cut it, move it, or trust it?',
       },
       {
@@ -756,7 +881,7 @@ export const LIBRARY: SeedWork[] = [
         section: 1,
         ask: 'Celia is next and she is the ordinary one, which is much harder to write than the remarkable one. Introduce her so that the reader likes her immediately and understands, without being told, why she will never be the subject of this book.',
         preContext:
-          'Dorothea Brooke is nineteen, orphaned, wealthy, and painfully in earnest: she gives up riding because she enjoys it, plans cottages for her uncle’s tenants, and wants a life of consequence in a county that has no use for one. Her younger sister Celia is pretty, sensible and kind, and finds Dorothea’s intensity tiring in the affectionate way of a sister who has lived with it always. They share a house with their uncle and are both, by the standards of Middlemarch, extremely eligible. The novel will be cruel to Dorothea’s ambitions and gentle with Celia’s smaller ones.',
+          'Dorothea Brooke is nineteen, orphaned, wealthy, and painfully in earnest: she gives up riding because she enjoys it, plans cottages for her uncle’s tenants, and wants a life of consequence in a county that has no use for one. Her younger sister Celia is pretty, sensible and kind, and finds Dorothea’s intensity tiring in the affectionate way of a sister who has lived with it always. They share a house with their uncle and are both, by the standards of Middlemarch, extremely eligible. Celia sees through her sister more often than her sister sees through anyone. The novel will be cruel to Dorothea’s ambitions and gentle with Celia’s smaller ones.',
       },
     ],
   },
@@ -776,6 +901,8 @@ export const LIBRARY: SeedWork[] = [
       sections: [
         'The Nellie, a cruising yawl, swung to her anchor without a flutter of the sails, and was at rest. The flood had made, the wind was nearly calm, and being bound down the river, the only thing for it was to come to and wait for the turn of the tide.',
         'The sea-reach of the Thames stretched before us like the beginning of an interminable waterway. In the offing the sea and the sky were welded together without a joint, and in the luminous space the tanned sails of the barges drifting up with the tide seemed to stand still in red clusters of canvas sharply peaked, with gleams of varnished sprits.',
+        'A haze rested on the low shores that ran out to sea in vanishing flatness. The air was dark above Gravesend, and farther back still seemed condensed into a mournful gloom, brooding motionless over the biggest, and the greatest, town on earth.\n\nThe Director of Companies was our captain and our host. We four affectionately watched his back as he stood in the bows looking to seaward. On the whole river there was nothing that looked half so nautical. He resembled a pilot, which to a seaman is trustworthiness personified. It was difficult to realize his work was not out there in the luminous estuary, but behind him, within the brooding gloom.\n\nBetween us there was, as I have already said somewhere, the bond of the sea. Besides holding our hearts together through long periods of separation, it had the effect of making us tolerant of each other’s yarns—and even convictions. The Lawyer—the best of old fellows—had, because of his many years and many virtues, the only cushion on deck, and was lying on the only rug.',
+        'The Accountant had brought out already a box of dominoes, and was toying architecturally with the bones. Marlow sat cross-legged right aft, leaning against the mizzen-mast. He had sunken cheeks, a yellow complexion, a straight back, an ascetic aspect, and, with his arms dropped, the palms of hands outwards, resembled an idol. The director, satisfied the anchor had good hold, made his way aft and sat down amongst us. We exchanged a few words lazily. Afterwards there was silence on board the yacht. For some reason or other we did not begin that game of dominoes. We felt meditative, and fit for nothing but placid staring. The day was ending in a serenity of still and exquisite brilliance. The water shone pacifically; the sky, without a speck, was a benign immensity of unstained light; the very mist on the Essex marsh was like a gauzy and radiant fabric, hung from the wooded rises inland, and draping the low shores in diaphanous folds.',
       ],
     },
     requests: [
@@ -798,6 +925,22 @@ export const LIBRARY: SeedWork[] = [
         title: 'Marlow has not spoken yet and I am five paragraphs in',
         section: 1,
         ask: 'The frame is beautiful and it is stalling. I could bring him in now or hold him until the light has fully gone, which is better but longer. How long can a first chapter reasonably withhold the man who is going to tell the story?',
+      },
+      {
+        kind: 'REWRITE',
+        title: 'The best sentence in the chapter is hidden in the seating plan',
+        section: 2,
+        ask: '“It was difficult to realize his work was not out there in the luminous estuary, but behind him, within the brooding gloom.” That is the whole book in a sentence, and it sits in the middle of a passage about who has the cushion. I want it to land without being underlined. The narrator admires the Director and should go on admiring him; the reader should be the one who flinches.',
+        preContext:
+          'Five men are aboard the Nellie, a cruising yawl at anchor in the Thames estuary, waiting for the tide to turn at the end of a still afternoon: the Director of Companies, who is their host; a Lawyer; an Accountant; the unnamed narrator; and Marlow, the only one of them who still follows the sea. They are old friends from their seagoing years and easy in each other’s silences. The narrator is a calm, admiring observer of his companions and of London, which he calls the greatest town on earth without any irony at all. Very soon Marlow will remark that this, too, has been one of the dark places of the earth, and begin the long story of his journey up an African river in the service of a trading company, to find a man named Kurtz. Nothing in this passage may announce that story. The gloom over London should read as weather, and only later as a judgement.',
+      },
+      {
+        kind: 'REWRITE',
+        title: 'Marlow arrives between the dominoes and the Director sitting down',
+        section: 3,
+        ask: 'He is the man who will tell the whole story, and he is introduced in the middle of a list, after a box of dominoes and before the Director finds his seat. The idol is right; the placing is not. I want him to be the one thing in the paragraph the eye goes back to, without anybody in the boat looking at him, and the silence afterwards to feel as if it is waiting for him.',
+        preContext:
+          'The five men on the Nellie are settling into an evening on the water while the tide turns. The Lawyer has the only cushion, the Accountant has brought dominoes, the Director has seen to the anchor, and the narrator is describing all of it with an admiring calm. Marlow is the odd one: a seaman who still follows the sea, a wanderer among men who settled long ago, and a teller of stories whose meaning lies around them rather than inside. He has said nothing yet. In a page he will speak for the first time, and he will go on speaking, with one or two interruptions, to the end of the book, so this is the reader’s only look at him before he becomes a voice. The light is going and the river is very still.',
       },
     ],
   },
@@ -860,6 +1003,7 @@ export const LIBRARY: SeedWork[] = [
       title: 'The old sea-dog at the Admiral Benbow',
       sections: [
         'Squire Trelawney, Dr. Livesey, and the rest of these gentlemen having asked me to write down the whole particulars about Treasure Island, from the beginning to the end, keeping nothing back but the bearings of the island, and that only because there is still treasure not yet lifted, I take up my pen in the year of grace 17—, and go back to the time when my father kept the Admiral Benbow inn',
+        'and the brown old seaman with the sabre cut first took up his lodging under our roof.',
       ],
     },
     requests: [
@@ -872,10 +1016,13 @@ export const LIBRARY: SeedWork[] = [
       {
         kind: 'CONTINUE',
         title: 'The captain arrives at the inn',
-        section: 0,
+        // Item 9.5 — it asked for the one section the question above already
+        // had, so no database ever got it. The rest of the sentence is its own
+        // short section now, and he arrives after it.
+        section: 1,
         ask: 'Next: the brown old seaman with the sabre cut turns up at the door with his sea-chest on a handbarrow. Physical, specific, seen by a boy. He should be frightening before he does anything frightening.',
         preContext:
-          'The Admiral Benbow is a small inn on a west-country coast road, kept by Jim Hawkins’s parents; Jim is about twelve and helps. Business is poor and the family is struggling since his father fell ill. The man who arrives will pay four pence a week to stay, drink rum, sing, terrify the customers, and post Jim to watch for a seafaring man with one leg. He will die in the parlour within a few months and leave behind a sea-chest with a map in it. Jim is narrating as an adult but the seeing is the boy’s.',
+          'The Admiral Benbow is a small inn on a west-country coast road, kept by Jim Hawkins’s parents; Jim is about twelve and helps. Business is poor and the family is struggling since his father fell ill. The man who arrives will pay four pence a week to stay, drink rum, sing, terrify the customers, and post Jim to watch for a seafaring man with one leg. He will die in the parlour within a few months and leave behind a sea-chest with a map in it. He tells them to call him captain, and that is all the name they will have for him. Jim is narrating as an adult but the seeing is the boy’s.',
       },
     ],
   },
@@ -894,6 +1041,7 @@ export const LIBRARY: SeedWork[] = [
       title: 'A voyage to Lilliput',
       sections: [
         'My father had a small estate in Nottinghamshire; I was the third of five sons. He sent me to Emanuel College in Cambridge at fourteen years old, where I resided three years, and applied myself close to my studies; but the charge of maintaining me, although I had a very scanty allowance, being too great for a narrow fortune, I was bound apprentice to Mr. James Bates, an eminent surgeon in London',
+        'My father now and then sending me small sums of money, I laid them out in learning navigation, and other parts of the mathematics, useful to those who intend to travel, as I always believed it would be, some time or other, my fortune to do. When I left Mr. Bates, I went down to my father: where, by the assistance of him and my uncle John, and some other relations, I got forty pounds, and a promise of thirty pounds a year to maintain me at Leyden: there I studied physic two years and seven months, knowing it would be useful in long voyages.\n\nSoon after my return from Leyden, I was recommended by my good master, Mr. Bates, to be surgeon to the Swallow, Captain Abraham Pannel, commander; with whom I continued three years and a half, making a voyage or two into the Levant, and some other parts. When I came back I resolved to settle in London; to which Mr. Bates, my master, encouraged me, and by him I was recommended to several patients. I took part of a small house in the Old Jewry; and being advised to alter my condition, I married Mrs. Mary Burton, second daughter to Mr. Edmund Burton, hosier, in Newgate-street, with whom I received four hundred pounds for a portion.',
       ],
     },
     requests: [
@@ -916,6 +1064,14 @@ export const LIBRARY: SeedWork[] = [
         title: 'How long can I spend on his credentials?',
         section: 0,
         ask: 'The flatness is the joke, and a joke that goes on too long stops being one. Two paragraphs of apprenticeships and marriage settlements, or four? I cannot tell from inside it where the reader’s patience actually runs out.',
+      },
+      {
+        kind: 'REWRITE',
+        title: 'His marriage should arrive as one more entry in the accounts',
+        section: 1,
+        ask: 'Forty pounds, thirty a year, two years and seven months, three years and a half, four hundred pounds: Gulliver reports his marriage in exactly the voice he uses for his fees, and that is the joke. At the moment the money is louder than the marriage, and “being advised to alter my condition”, the best phrase here, is lost in the middle. Keep every figure, and let the wife arrive as one more entry in the accounts.',
+        preContext:
+          'Lemuel Gulliver is a ship’s surgeon setting out the facts of his life before he describes his voyages: a small estate in Nottinghamshire, Emanuel College at fourteen, an apprenticeship to Mr. James Bates, a surgeon in London. He is sober, exact and literal, and the satire depends on it. He will describe a nation six inches high in the same voice he uses here for his fees, and the reader has to trust him as a witness because he seems too dull to invent anything. Nothing has happened to him yet. His studies, his marriage and his voyages to the Levant are reported as items, each with its sum. In a few pages his ship will be wrecked and he will wake on a beach with his arms, his legs and his hair tied to the ground, and he will report that, too, in exactly this voice.',
       },
     ],
   },
@@ -986,7 +1142,9 @@ export const LIBRARY: SeedWork[] = [
       {
         kind: 'UNBLOCK',
         title: 'How far inside the dog am I allowed to go?',
-        section: 1,
+        // Item 9.5 — beside the joke it is about, the opening, so the
+        // continuation can have the last section, where what comes next goes.
+        section: 0,
         ask: 'The opening joke depends on Buck being a dog who obviously cannot read. But the book needs his interior life to carry three hundred pages. Where is the line between a dog who thinks and a man in a dog suit, and how do I know when I have crossed it?',
       },
       {
@@ -1016,6 +1174,7 @@ export const LIBRARY: SeedWork[] = [
       sections: [
         'A green and yellow parrot, which hung in a cage outside the door, kept repeating over and over: “Allez vous-en! Allez vous-en! Sapristi! That’s all right!” He could speak a little Spanish, and also a language which nobody understood, unless it was the mocking-bird that hung on the other side of the door, whistling his fluty notes out upon the breeze with maddening persistence.',
         'Mr. Pontellier, unable to read his newspaper with any degree of comfort, arose with an expression and an exclamation of disgust. He walked down the gallery and across the narrow “bridges” which connected the Lebrun cottages one with the other.',
+        'He had been seated before the door of the main house. The parrot and the mocking-bird were the property of Madame Lebrun, and they had the right to make all the noise they wished. Mr. Pontellier had the privilege of quitting their society when they ceased to be entertaining.\n\nHe stopped before the door of his own cottage, which was the fourth one from the main building and next to the last. Seating himself in a wicker rocker which was there, he once more applied himself to the task of reading the newspaper. The day was Sunday; the paper was a day old. The Sunday papers had not yet reached Grand Isle. He was already acquainted with the market reports, and he glanced restlessly over the editorials and bits of news which he had not had time to read before quitting New Orleans the day before.\n\nMr. Pontellier wore eye-glasses. He was a man of forty, of medium height and rather slender build; he stooped a little. His hair was brown and straight, parted on one side. His beard was neatly and closely trimmed.',
       ],
     },
     requests: [
@@ -1044,6 +1203,14 @@ export const LIBRARY: SeedWork[] = [
         title: 'Léonce is not a villain and I need the reader to resent him anyway',
         section: 0,
         ask: 'He is attentive, generous, and entirely conventional, and he is the weather Edna cannot get out of. Every time I make him unkind the book gets smaller. How do I make a decent man unbearable without making him a bad one?',
+      },
+      {
+        kind: 'REWRITE',
+        title: 'His restlessness should be in the rhythm, not the adverb',
+        section: 2,
+        ask: '“Mr. Pontellier had the privilege of quitting their society when they ceased to be entertaining” is the whole marriage in a sentence about birds, and I want it to stay that quiet. What is not working comes after: he sits, reads, knows the market reports already, and it is all one temperature, with “restlessly” doing the work. I want a man who has read everything and keeps looking up. Keep him decent; nothing he does here is unkind.',
+        preContext:
+          'Grand Isle, a summer resort for well-to-do Creole families off the coast of Louisiana, on a Sunday morning in the 1890s. The Pontelliers have taken one of the cottages kept by Madame Lebrun. Léonce Pontellier, a New Orleans businessman of forty, comes over at the weekends, while his wife Edna and their two small boys stay for the summer. He is conscientious, generous with money, fond of his wife in the way he is fond of his possessions, and quite unaware that anything is wrong. Edna, who is twenty-eight, is down on the beach with the landlady’s son, Robert, and has not yet appeared in the book. The parrot outside the main house has been shouting “Allez vous-en!”, go away, all morning, and Mr. Pontellier has just walked off in disgust. Over the summer his wife will stop being what he takes her to be, and he will be the last to notice.',
       },
     ],
   },
@@ -1113,6 +1280,7 @@ export const LIBRARY: SeedWork[] = [
       title: 'Prologue',
       sections: [
         'The story had held us, round the fire, sufficiently breathless, but except the obvious remark that it was gruesome, as, on Christmas Eve in an old house, a strange tale should essentially be, I remember no comment uttered till somebody happened to say that it was the only case he had met in which such a visitation had fallen on a child.',
+        'The case, I may mention, was that of an apparition in just such an old house as had gathered us for the occasion—an appearance, of a dreadful kind, to a little boy sleeping in the room with his mother and waking her up in the terror of it; waking her not to dissipate his dread and soothe him to sleep again, but to encounter also, herself, before she had succeeded in doing so, the same sight that had shaken him.',
       ],
     },
     requests: [
@@ -1125,10 +1293,12 @@ export const LIBRARY: SeedWork[] = [
       {
         kind: 'CONTINUE',
         title: 'Somebody has to ask the obvious question',
-        section: 0,
-        ask: 'After “such a visitation had fallen on a child”, the room needs to respond. Someone should say the thing everyone is thinking — if one child is terrible, what about two — and it should be said lightly, by a person enjoying themselves.',
+        // Item 9.5 — it asked for the one section the question above already
+        // had, so no database ever got it. It follows the case itself now.
+        section: 1,
+        ask: 'After the mother wakes and sees it too, the room needs to respond. Someone should say the thing everyone is thinking — if one child is terrible, what about two — and it should be said lightly, by a person enjoying themselves.',
         preContext:
-          'Christmas Eve in an old house; a party sitting up late round the fire after a ghost story. The company is comfortable, well fed and pleasantly frightened, the way people are when they are safe. Douglas, who has said nothing so far, is about to mention a manuscript locked in a drawer at home — written by his sister’s governess, who has been dead twenty years — and to make everyone wait three days while it is sent for. The talk before that has to be light enough that nobody notices the story is being framed, and framed, and framed again.',
+          'Christmas Eve in an old house; a party sitting up late round the fire after a ghost story. The company is comfortable, well fed and pleasantly frightened, the way people are when they are safe. Douglas, who has said nothing so far, is about to mention a manuscript locked in a drawer at home — written by his sister’s governess, who has been dead twenty years — and to make everyone wait three days while it is sent for. The talk before that has to be light enough that nobody notices the story is being framed, and framed, and framed again. The narrator remembers the evening long afterwards, and the manuscript is his now.',
       },
     ],
   },

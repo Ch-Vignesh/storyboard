@@ -1,10 +1,11 @@
 import { TRPCError } from '@trpc/server'
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 
+import { orNotFound, storyMetadata } from '@/lib/metadata'
 import { caller } from '@/trpc/server'
 
-import { Reader, readerMetadata } from './reader'
+import { Reader } from './reader'
 
 type Params = {
   params: Promise<{ slug: string }>
@@ -22,18 +23,16 @@ async function load(slug: string, versionId?: string) {
   }
 }
 
-export async function generateMetadata({ params }: Params): Promise<Metadata> {
+// Item 9.6 — through the same `storyboard.get`, as the same person, as the page.
+export async function generateMetadata({ params, searchParams }: Params): Promise<Metadata> {
   const { slug } = await params
-  const { storyboard } = await load(slug)
-  return readerMetadata(storyboard)
+  const { version } = (await searchParams) ?? {}
+  return orNotFound(storyMetadata(caller, { slug, versionId: version }))
 }
 
 /**
- * The reader (screen 5). Contents rail, manuscript at reading measure.
- *
- * The margin of request cards arrives in phase 2 with requests themselves; the
- * measure, the rail and the leader-rule gutter are laid out now so that adding
- * them is a component, not a rewrite.
+ * The reader (screen 5): contents rail, manuscript at reading measure, and
+ * the margin of request cards tied to their sections (FR-11.5, `reader.tsx`).
  */
 export default async function StoryboardPage({ params, searchParams }: Params) {
   const { slug } = await params
@@ -41,6 +40,11 @@ export default async function StoryboardPage({ params, searchParams }: Params) {
   // from another storyboard is a 404: `storyboard.get` checks that it belongs.
   const { version } = (await searchParams) ?? {}
   const data = await load(slug, version)
+  // Decision 0044 (item 7b.2) — an edition has its own address, where it is
+  // read as an edition rather than as an alternate draft.
+  if (data.version.edition !== null) {
+    redirect(`/s/${slug}/published/${String(data.version.edition)}`)
+  }
 
   return <Reader data={data} />
 }

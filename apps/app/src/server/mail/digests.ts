@@ -14,17 +14,21 @@ import {
   DIGEST_RUN_BUDGET_SECONDS,
   QUIET_REQUEST_NUDGE_DAYS,
   WEEKLY_DIGEST_DAYS,
+  WEEKLY_DIGEST_MIN_GAP_DAYS,
 } from '@/lib/schemas/constants'
 import { PUBLICLY_LISTED } from '@/lib/authz/guard'
 import { closeStaleRequests } from '@/server/close-requests'
 import { REQUEST_KINDS } from '@/lib/schemas/help'
 import { ANSWERS } from '@/server/answers'
+import { pruneAuditEvents } from '@/server/audit'
 import { pruneRateLimits } from '@/server/limits'
 import { targetsFor, type Target } from '@/server/notification-targets'
 import { pruneDeadTokens, pruneUnconfirmedAccounts } from '@/server/prune'
 import { purgeDeletedAccounts } from '@/server/purge/accounts'
 import { purgeAbandonedImports } from '@/server/purge/imports'
 import { purgeDeletedStoryboards } from '@/server/purge'
+import { alertNewServerErrors } from '@/server/server-error-alerts'
+import { pruneServerErrors } from '@/server/server-errors'
 
 import { getMailer, type Mail, type Mailer } from './mailer'
 import {
@@ -320,7 +324,11 @@ export async function runHourlyDigest(db: Db, options: RunOptions = {}): Promise
  *
  * Built from the requests themselves rather than from notification rows: this
  * is a standing summary of what is open, not a record of things that happened
- * to you, so there is nothing to mark as emailed.
+ * to you. What is recorded is whom it went to (phase 14, item 10.6):
+ * `User.weeklyDigestSentAt`, set as each one goes, and anyone sent one within
+ * `WEEKLY_DIGEST_MIN_GAP_DAYS` is left out. Until then a run repeated by hand
+ * emailed everybody twice (the phase 12 audit's H6b); now it reaches only the
+ * people a run cut short never got to.
  */
 export async function runWeeklyDigest(
   db: Db,
@@ -329,7 +337,9 @@ export async function runWeeklyDigest(
 ): Promise<RunResult> {
   const appUrl = env.NEXT_PUBLIC_APP_URL
   const run = deliveryRun(options.mailer ?? getMailer())
-  const since = new Date(now.getTime() - WEEKLY_DIGEST_DAYS * 24 * 60 * 60 * 1000)
+  const DAY_MS = 24 * 60 * 60 * 1000
+  const since = new Date(now.getTime() - WEEKLY_DIGEST_DAYS * DAY_MS)
+  const sentBefore = new Date(now.getTime() - WEEKLY_DIGEST_MIN_GAP_DAYS * DAY_MS)
 
   const readers = await db.user.findMany({
     where: {
@@ -339,6 +349,7 @@ export async function runWeeklyDigest(
       emailVerifiedAt: { not: null },
       email: { not: { endsWith: '.invalid' } },
       pinnedGenres: { some: {} },
+      OR: [{ weeklyDigestSentAt: null }, { weeklyDigestSentAt: { lt: sentBefore } }],
     },
     select: {
       id: true,
@@ -404,7 +415,12 @@ export async function runWeeklyDigest(
       }),
       { userId: reader.id },
     )
-    if (went) sent += 1
+    if (went) {
+      // Recorded the moment it went, as `markEmailed` does, and by plain SQL
+      // so that `updatedAt` keeps meaning a change to the account.
+      await db.$executeRaw`UPDATE "User" SET "weeklyDigestSentAt" = ${now} WHERE "id" = ${reader.id}`
+      sent += 1
+    }
   }
 
   log.info({ event: 'digest.weekly', considered: readers.length, sent, skipped }, 'weekly run')
@@ -510,7 +526,13 @@ export async function runQuietNudge(
 
 export const CRON_JOBS = {
   immediate: runImmediate,
-  hourly: runHourlyDigest,
+  hourly: async (db: Db) => ({
+    ...(await runHourlyDigest(db)),
+    // Phase 14, item 10.1 (D-10) — and the administrators hear of any new
+    // kind of server error, after the digest so a fault here costs nobody
+    // their email.
+    errors: await alertNewServerErrors(db as PrismaClient),
+  }),
   weekly: (db: Db) => runWeeklyDigest(db),
   nudge: (db: Db) => runQuietNudge(db),
   // Not mail, but the same runner: one scheduler is easier to reason about
@@ -520,6 +542,10 @@ export const CRON_JOBS = {
     // Item 3.12 — dead sign-in links, then sign-ups nobody finished.
     links: await pruneDeadTokens(db as PrismaClient),
     unconfirmed: await pruneUnconfirmedAccounts(db as PrismaClient),
+    // Item 10.1 — server errors past their month.
+    serverErrors: await pruneServerErrors(db as PrismaClient),
+    // Item 10.2 — stored events past their year.
+    events: await pruneAuditEvents(db as PrismaClient),
   }),
   /*
    * FR-2.6 and OD-3's second half. Storyboards whose thirty days are up, then

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { passage, signIn, signUpAndOnboard, writeInEditor } from './helpers'
+import { passage, signIn, signUpAndOnboard, writeInEditor, storyPath } from './helpers'
 
 /**
  * Critical flows 3, 4 and 5 (architecture section 8), which together are the
@@ -47,10 +47,9 @@ test('flow 3 — a guest reads, signs in, and sends a suggestion', async ({ brow
   await authorPage.getByRole('button', { name: 'Literary fiction', exact: true }).click()
   await authorPage.getByRole('button', { name: /create and start writing/i }).click()
   await expect(authorPage).toHaveURL(/\/s\/the-logbook-/)
-  storyboardUrl = new URL(authorPage.url()).pathname
+  storyboardUrl = storyPath(authorPage)
 
   // Put enough words in the section that a rewrite request is allowed (FR-5.7).
-  await authorPage.getByRole('link', { name: 'Edit' }).first().click()
   const editor = authorPage.getByRole('textbox', { name: /section text/i })
   await editor.click()
   await editor.pressSequentially(passage('The ship had been arriving for eleven years.').join(' '))

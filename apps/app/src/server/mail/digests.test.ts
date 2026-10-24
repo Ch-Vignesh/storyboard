@@ -89,9 +89,10 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     // undeliverable. It went from twelve to thirteen when REQUEST_CLOSED
     // arrived with FR-2.7, to fourteen with REQUEST_REOPENED (FR-5.9), to
     // fifteen with IDEA_REPLY (FR-6.9, phase 14 item 1.9), to sixteen with
-    // SUGGESTION_WITHDRAWN (FR-6.5, item 1.10) and to seventeen with
-    // REQUEST_AUTO_CLOSED (FR-11.3 with D-8, item 6.15).
-    expect(NOTIFICATION_TYPES).toHaveLength(17)
+    // SUGGESTION_WITHDRAWN (FR-6.5, item 1.10), to seventeen with
+    // REQUEST_AUTO_CLOSED (FR-11.3 with D-8, item 6.15) and to eighteen with
+    // SPIN_OFF_PUBLISHED (decision 0044, item 7b.4).
+    expect(NOTIFICATION_TYPES).toHaveLength(18)
     for (const type of NOTIFICATION_TYPES) {
       const definition = NOTIFICATIONS[type]
       expect(definition.label.length, `${type} needs a label`).toBeGreaterThan(0)
@@ -371,6 +372,113 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     const mailer = recordingMailer()
     await runWeeklyDigest(db, new Date(), { mailer })
     expect(mineIn(mailer)).toHaveLength(0)
+  })
+
+  /**
+   * Phase 14, item 10.6 (the phase 12 audit's H6b) — nothing recorded whom the
+   * weekly digest had gone to, so a run repeated by hand, or a late run
+   * followed by the next one, sent it to everybody again.
+   */
+  it('sends the weekly digest once, however often the run is repeated', async () => {
+    const genre = await db.genre.findFirstOrThrow({ select: { id: true } })
+    const readerEmail = `weekly-${run}@example.test`
+    const reader = await db.user.create({
+      data: {
+        email: readerEmail,
+        username: `wk_${run}`,
+        emailVerifiedAt: new Date(),
+        onboardedAt: new Date(),
+        pinnedGenres: { create: { genreId: genre.id, order: 0 } },
+      },
+      select: { id: true },
+    })
+    // Something open this week in the genre the reader pinned, by somebody else.
+    const storyboard = await db.storyboard.create({
+      data: {
+        publicId: `wk${run}`,
+        slug: `weekly-digest-${run}`,
+        title: 'Weekly digest',
+        type: 'NOVEL',
+        visibility: 'PUBLIC',
+        publicFrom: new Date(Date.now() - 60_000),
+        ownerId: userId,
+        genres: { create: { genreId: genre.id } },
+      },
+      select: { id: true },
+    })
+    const toReader = (mailer: { sent: Mail[] }) =>
+      mailer.sent.filter((mail) => mail.to === readerEmail)
+    try {
+      const version = await db.version.create({
+        data: {
+          storyboardId: storyboard.id,
+          name: 'Main draft',
+          isMain: true,
+          createdById: userId,
+        },
+        select: { id: true },
+      })
+      const chapter = await db.chapter.create({
+        data: { versionId: version.id, lineageId: randomUUID(), order: 0, title: 'One' },
+        select: { id: true },
+      })
+      const section = await db.section.create({
+        data: { chapterId: chapter.id, lineageId: randomUUID(), order: 0 },
+        select: { id: true },
+      })
+      await db.contributionRequest.create({
+        data: {
+          publicId: `wq${run}`,
+          storyboardId: storyboard.id,
+          sectionId: section.id,
+          openedById: userId,
+          kind: 'UNBLOCK',
+          title: 'The pier at night',
+          ask: 'Where does she go next?',
+          minWords: 1,
+          maxWords: 100,
+        },
+      })
+
+      const before = await db.user.findUniqueOrThrow({
+        where: { id: reader.id },
+        select: { updatedAt: true },
+      })
+      const first = recordingMailer()
+      await runWeeklyDigest(db, new Date(), { mailer: first })
+      expect(toReader(first)).toHaveLength(1)
+      const stamped = await db.user.findUniqueOrThrow({
+        where: { id: reader.id },
+        select: { weeklyDigestSentAt: true, updatedAt: true },
+      })
+      expect(stamped.weeklyDigestSentAt).not.toBeNull()
+      // Plain SQL, as `lastSeenAt` is: the account itself did not change.
+      expect(stamped.updatedAt).toEqual(before.updatedAt)
+
+      // The same run again a minute later, as a run by hand would be: nothing.
+      const again = recordingMailer()
+      await runWeeklyDigest(db, new Date(Date.now() + 60_000), { mailer: again })
+      expect(toReader(again)).toHaveLength(0)
+
+      // Once the gap has passed, next week's goes as usual.
+      const { WEEKLY_DIGEST_MIN_GAP_DAYS } = await import('@/lib/schemas/constants')
+      const longAgo = new Date(Date.now() - (WEEKLY_DIGEST_MIN_GAP_DAYS * 24 + 1) * 60 * 60 * 1000)
+      await db.$executeRaw`UPDATE "User" SET "weeklyDigestSentAt" = ${longAgo} WHERE "id" = ${reader.id}`
+      const nextWeek = recordingMailer()
+      await runWeeklyDigest(db, new Date(), { mailer: nextWeek })
+      expect(toReader(nextWeek)).toHaveLength(1)
+    } finally {
+      await db.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`select set_config('storyboard.hard_delete', 'on', true)`)
+        const where = { chapter: { version: { storyboardId: storyboard.id } } }
+        await tx.contributionRequest.deleteMany({ where: { storyboardId: storyboard.id } })
+        await tx.section.deleteMany({ where })
+        await tx.chapter.deleteMany({ where: { version: { storyboardId: storyboard.id } } })
+        await tx.version.deleteMany({ where: { storyboardId: storyboard.id } })
+        await tx.storyboard.delete({ where: { id: storyboard.id } })
+        await tx.user.delete({ where: { id: reader.id } })
+      })
+    }
   })
 
   it('the quiet nudge never says the request failed, nor offers what does not exist (FR-12.4)', async () => {

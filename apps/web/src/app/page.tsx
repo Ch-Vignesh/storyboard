@@ -1,4 +1,5 @@
 import { Button } from '@storyboard/ui/components/button'
+import type { Metadata } from 'next'
 
 import { ContentsRail } from './contents-rail'
 import { EXAMPLES, EXAMPLE_STORYBOARDS } from './example'
@@ -18,6 +19,9 @@ import {
 } from './marks'
 import { Motion } from './motion'
 import { Specimen } from './specimen'
+
+/** Phase 14, item 9.6 — the front page's one address, whatever query a link added. */
+export const metadata: Metadata = { alternates: { canonical: '/' } }
 
 /**
  * FR-1.1 — the marketing home, and the sixty-second target.
@@ -375,7 +379,7 @@ export default function HomePage() {
             {/* ── Read one, then close */}
             <Section id="read" number="" eyebrow="read one without signing up">
               <h2 className="font-manuscript text-[clamp(1.55rem,3.4vw,2.05rem)] leading-tight font-medium text-balance text-ink">
-                Two real stories, open to anyone
+                Two example stories, open to anyone
               </h2>
               <ul className="mt-2 divide-y divide-rule border-y border-rule">
                 {EXAMPLE_STORYBOARDS.map((storyboard) => (
@@ -484,7 +488,7 @@ export default function HomePage() {
  */
 // prettier-ignore
 // vocabulary-ok
-const REFUSED_WORDS = 'No “merge”, “commit” or “pull request” anywhere. A storyboard has chapters and sections, a request is somebody stuck, a version is a draft.'
+const REFUSED_WORDS = 'No “merge”, “commit” or “pull request” anywhere. A story has chapters and sections, a request is somebody stuck, a version is a draft.'
 
 /** One numbered section, with the rhythm set once so nothing fights it later. */
 function Section({

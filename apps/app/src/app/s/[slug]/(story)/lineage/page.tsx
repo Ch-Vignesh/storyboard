@@ -6,6 +6,8 @@ import { notFound } from 'next/navigation'
 import { auth } from '@/auth'
 import { nameOf } from '@/lib/people'
 import { readTimeZone } from '@/lib/dates'
+import { LINEAGE } from '@/lib/schemas/constants'
+import { NOT_INDEXED } from '@/lib/metadata'
 import { formatInZone } from '@/lib/time-zone'
 import { caller } from '@/trpc/server'
 
@@ -14,7 +16,8 @@ import { SpinOffButton } from './spin-off-button'
 type Params = { params: Promise<{ slug: string }> }
 
 export const dynamic = 'force-dynamic'
-export const metadata: Metadata = { title: 'Where this story came from' }
+// Item 9.8 — a family tree of stories, each indexed at its own address instead.
+export const metadata: Metadata = { title: 'Where this story came from', robots: NOT_INDEXED }
 
 // Dates are written in the reader's own zone (item 1.18): `lib/time-zone.ts`.
 
@@ -34,7 +37,8 @@ export default async function LineagePage({ params }: Params) {
   const session = await auth()
 
   const [lineage, spinOffs] = await Promise.all([
-    caller.spinOff.lineage({ storyboardId: storyboard.id }),
+    // Item 7.11 — the whole chain, back to the first story.
+    caller.spinOff.lineage({ storyboardId: storyboard.id, full: true }),
     caller.spinOff.listFor({ storyboardId: storyboard.id }),
   ])
 
@@ -91,13 +95,17 @@ export default async function LineagePage({ params }: Params) {
                 </li>
               ))}
             </ol>
-            {lineage.truncated ? (
+            {/* Item 7.11 — where the walk stopped, said rather than hidden. */}
+            {lineage.reachedCap ? (
               <p className="mt-3 text-[12.5px] text-ink-faint">
-                {lineage.total - lineage.ancestors.length} older{' '}
-                {lineage.total - lineage.ancestors.length === 1 ? 'story' : 'stories'} in the chain
-                are not shown. Open the one above to keep walking back.
+                The chain goes back further than {LINEAGE.walkMax} stories, and this page stops
+                there. Open the last one above to keep walking back.
               </p>
-            ) : null}
+            ) : (
+              <p className="mt-3 text-[12.5px] text-ink-faint">
+                That is the whole chain: the last one above started it.
+              </p>
+            )}
           </>
         )}
       </section>

@@ -5,6 +5,7 @@ import type { Prisma, PrismaClient } from '@storyboard/db'
 import {
   formatOf,
   IMPORT_LIMITS,
+  TOO_LARGE,
   type Block,
   type Format,
   type Proposal,
@@ -20,6 +21,7 @@ import {
   type DocFlavour,
   type StoryboardDoc,
 } from '@/lib/doc/schema'
+import { isOn, PAUSED } from '@/lib/flags'
 import { publicId, slugify } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import { confirmedOutlineSchema } from '@/lib/schemas/import'
@@ -66,12 +68,18 @@ export const importRouter = createTRPCRouter({
   createUpload: activeProcedure
     .input(
       z.object({
-        fileName: z.string().trim().min(1).max(255),
+        fileName: z.string().trim().min(1).max(IMPORT_LIMITS.fileNameChars),
         byteSize: z.number().int().positive(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id
+
+      // Item 9.4 (D-18) — paused by an administrator: refused before anything
+      // is counted or uploaded, so nothing is lost by trying.
+      if (await isOn('pause-imports', ctx.db)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: PAUSED['pause-imports'] })
+      }
 
       const format = formatOf(input.fileName)
       if (!format) {
@@ -82,7 +90,7 @@ export const importRouter = createTRPCRouter({
         })
       }
       if (input.byteSize > IMPORT_LIMITS.bytes) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That file is larger than 5 MB.' })
+        throw new TRPCError({ code: 'BAD_REQUEST', message: TOO_LARGE })
       }
 
       // A day's stories already started: an import would be refused at the
@@ -148,9 +156,9 @@ export const importRouter = createTRPCRouter({
         })
       }
       if (size > IMPORT_LIMITS.bytes) {
-        await fail(ctx.db, job.id, 'That file is larger than 5 MB.')
+        await fail(ctx.db, job.id, TOO_LARGE)
         await deleteObject(job.fileKey)
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That file is larger than 5 MB.' })
+        throw new TRPCError({ code: 'BAD_REQUEST', message: TOO_LARGE })
       }
 
       let file: Buffer
@@ -165,8 +173,8 @@ export const importRouter = createTRPCRouter({
       }
 
       if (file.byteLength > IMPORT_LIMITS.bytes) {
-        await fail(ctx.db, job.id, 'That file is larger than 5 MB.')
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'That file is larger than 5 MB.' })
+        await fail(ctx.db, job.id, TOO_LARGE)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: TOO_LARGE })
       }
 
       let proposal: Proposal
@@ -268,8 +276,7 @@ export const importRouter = createTRPCRouter({
       // and so held to FR-3.1's limits again: the upload URL is still good for
       // a while after `analyse`, and another file can be put under the same key
       // (phase 12 audit).
-      const tooLarge = () =>
-        new TRPCError({ code: 'BAD_REQUEST', message: 'That file is larger than 5 MB.' })
+      const tooLarge = () => new TRPCError({ code: 'BAD_REQUEST', message: TOO_LARGE })
       const size = await objectSize(job.fileKey)
       if (size === null) {
         throw new TRPCError({

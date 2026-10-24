@@ -11,6 +11,8 @@ import { ideaRouter } from './idea'
 import { importRouter } from './import'
 import { notificationRouter } from './notification'
 import { profileRouter } from './profile'
+import { publicationRouter } from './publication'
+import { proofRouter } from './proof'
 import { reportRouter } from './report'
 import { requestRouter } from './request'
 import { sectionRouter } from './section'
@@ -35,10 +37,12 @@ export const appRouter = createTRPCRouter({
   import: importRouter,
   compare: compareRouter,
   credit: creditRouter,
+  proof: proofRouter,
   browse: browseRouter,
   profile: profileRouter,
   settings: settingsRouter,
   version: versionRouter,
+  publication: publicationRouter,
   spinOff: spinOffRouter,
   notification: notificationRouter,
   coauthor: coauthorRouter,

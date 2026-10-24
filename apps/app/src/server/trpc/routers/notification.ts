@@ -49,6 +49,7 @@ export const notificationRouter = createTRPCRouter({
             createdAt: row.createdAt,
             path: target?.path ?? null,
             title: target?.title ?? null,
+            example: target?.example ?? false,
             sentence: sentenceFor(row.type, target ?? {}),
           }
         }),

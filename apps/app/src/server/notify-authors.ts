@@ -15,7 +15,7 @@ import { withoutThoseWhoBlocked } from '@/server/blocks'
 export async function notifyAuthors(
   db: PrismaClient,
   storyboardId: string,
-  type: 'SUGGESTION_RECEIVED' | 'SUGGESTION_WITHDRAWN' | 'IDEA_RECEIVED',
+  type: 'SUGGESTION_RECEIVED' | 'SUGGESTION_WITHDRAWN' | 'IDEA_RECEIVED' | 'SPIN_OFF_PUBLISHED',
   payload: Record<string, string>,
   sentBy: string,
   /** Authors already told another way, such as the writer of the idea replied to (item 1.9). */

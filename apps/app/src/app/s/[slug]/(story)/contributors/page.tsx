@@ -10,6 +10,7 @@ import { env } from '@/env'
 import { UserAvatar } from '@/components/user-avatar'
 import { hasProfile, nameOf } from '@/lib/people'
 import { readTimeZone } from '@/lib/dates'
+import { contributorsMetadata, orNotFound } from '@/lib/metadata'
 import { formatInZone } from '@/lib/time-zone'
 import { caller } from '@/trpc/server'
 
@@ -18,7 +19,12 @@ import { CreditLines, type CreditLine } from './credit-lines'
 type Params = { params: Promise<{ slug: string }> }
 
 export const dynamic = 'force-dynamic'
-export const metadata: Metadata = { title: 'Contributors' }
+
+// Item 9.6 — named for its story, read as this person reads the page.
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
+  const { slug } = await params
+  return orNotFound(contributorsMetadata(caller, slug))
+}
 
 const TYPE_LABELS = {
   PROSE: 'wrote a passage',

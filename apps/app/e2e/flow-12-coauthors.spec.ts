@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { signUpAndOnboard } from './helpers'
+import { signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * Co-authorship (SRS 3.1 and 3.2, FR-9.1, FR-12.2), in the browser: an owner
@@ -26,12 +26,13 @@ test('an owner invites a co-author, who accepts and writes in the story', async 
   await ownerPage.getByRole('radio', { name: /^private/i }).check()
   await ownerPage.getByRole('button', { name: /create and start writing/i }).click()
   await expect(ownerPage).toHaveURL(/\/s\/written-by-two-/)
-  const storyPath = new URL(ownerPage.url()).pathname
+  const story = storyPath(ownerPage)
 
   // The writer cannot read it yet.
-  expect((await writerPage.goto(storyPath))?.status()).toBe(404)
+  expect((await writerPage.goto(story))?.status()).toBe(404)
 
-  // SRS 2.2 — "invite a co-author".
+  // SRS 2.2 — "invite a co-author". Creating it opened the editor (item 8.2).
+  await ownerPage.goto(story)
   await ownerPage.getByRole('link', { name: 'Co-authors' }).click()
   await ownerPage.getByLabel(/invite a co-author/i).fill(`@${writer.username}`)
   await ownerPage.getByRole('button', { name: 'Invite', exact: true }).click()
@@ -43,7 +44,7 @@ test('an owner invites a co-author, who accepts and writes in the story', async 
   await expect(writerPage.getByText(/asked you to co-author “written by two”/i)).toBeVisible()
   await writerPage.getByRole('link', { name: 'Answer' }).click()
   await writerPage.getByRole('button', { name: /become a co-author/i }).click()
-  await expect(writerPage).toHaveURL(new RegExp(`${storyPath}$`))
+  await expect(writerPage).toHaveURL(new RegExp(`${story}$`))
 
   // And writes in the main draft directly (SRS 3.2).
   await writerPage.getByRole('link', { name: 'Edit' }).first().click()
@@ -54,7 +55,7 @@ test('an owner invites a co-author, who accepts and writes in the story', async 
   await expect(writerPage.getByText('Saved', { exact: true })).toBeVisible()
 
   // FR-9.1 — credited as a co-author; FR-12.2 — the owner hears of it.
-  await ownerPage.goto(`${storyPath}/contributors`)
+  await ownerPage.goto(`${story}/contributors`)
   await expect(ownerPage.getByText(writer.username).first()).toBeVisible()
   await expect(ownerPage.getByText(/co-author/i).first()).toBeVisible()
   await ownerPage.goto('/notifications')

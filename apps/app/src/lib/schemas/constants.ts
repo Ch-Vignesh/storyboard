@@ -174,11 +174,42 @@ export const DIGEST_FAILURES_BEFORE_STOPPING = 3
  */
 export const GENRE_SELECTION_MAX = 50
 
-/** FR-11.3, FR-11.6 — the browse surfaces' search and page sizes. */
-export const BROWSE_LIMITS = { queryMaxChars: 100, pageMax: 50, pageDefault: 24 } as const
+/**
+ * FR-11.3, FR-11.6 — the browse surfaces' search and page sizes. Stories come
+ * a half page at a time (item 9.1): on browse they sit below the requests,
+ * which are what the page is for.
+ */
+export const BROWSE_LIMITS = {
+  queryMaxChars: 100,
+  pageMax: 50,
+  pageDefault: 24,
+  storiesPage: 12,
+} as const
+
+/**
+ * Phase 14, item 9.6 — the most a link preview's description says: a story's
+ * logline, or the opening of its text cut at a word. About what search results
+ * and chat previews show before they cut it themselves.
+ */
+export const PREVIEW_DESCRIPTION_CHARS = 160
 
 /** A story's, chapter's or section's title. The columns hold 200 (`VarChar(200)`). */
 export const TITLE_MAX_CHARS = 200
+/**
+ * Phase 14, item 10.5 — a story's logline and rights note (`updateStoryboardSchema`),
+ * and a version's name (`Version.name` is VARCHAR(120)).
+ */
+export const STORY_DETAIL_CHARS = { logline: 300, rightsNote: 500 } as const
+export const VERSION_NAME_MAX_CHARS = 120
+/** FR-13.5 — the optional note with a report. */
+export const REPORT_NOTE_MAX_CHARS = 1000
+/**
+ * FR-3.2 — the most chapters an import's outline may have, and sections in
+ * one chapter: a section is a unit somebody writes in and asks for help on,
+ * and thousands of them would be a way to make one request write a great
+ * many rows rather than a manuscript.
+ */
+export const IMPORT_OUTLINE_MAX = { chapters: 500, sectionsPerChapter: 500 } as const
 
 /** FR-1.3 — usernames: 3 to 30 characters. Passwords: 10 to 128. */
 export const USERNAME_CHARS = { min: 3, max: 30 } as const
@@ -209,6 +240,12 @@ export const AVATAR = {
  */
 export const DRAFT_IDLE_SECONDS = 3
 export const REVISION_INTERVAL_MINUTES = 5
+/**
+ * Phase 14, item 8.5 — a save that could not reach the server is tried again
+ * after `firstMs`, doubling each time to at most `maxMs`, and at once when the
+ * browser says it is back online. The words wait on the device meanwhile.
+ */
+export const SAVE_RETRY = { firstMs: 2_000, maxMs: 30_000 } as const
 
 /**
  * FR-8.3 — the history panel's page of revisions, and the longest chain it
@@ -223,12 +260,17 @@ export const NOTIFICATION_PAGE = 30
 /** FR-11.1 (item 6.14) — how many of each kind the dashboard's "Needs you" lists. */
 export const NEEDS_YOU = { suggestions: 20, requests: 10 } as const
 
-/** FR-15.4 — what the seeded library should hold at launch. */
+/**
+ * FR-15.4 — what the seeded library should hold at launch. `openRewrites` is
+ * phase 14's item 9.5: rewrites still open, across genres, where the library
+ * had left every one answered.
+ */
 export const SEED_TARGETS = {
   storyboards: 25,
   genres: 6,
   openRequests: 40,
   answeredRequests: 15,
+  openRewrites: 10,
 } as const
 
 /** FR-9.3, FR-9.4 — how many credits, and passed suggestions, a profile lists at a time; "Show older" pages on (item 6.10). */
@@ -236,6 +278,15 @@ export const PROFILE_LISTS = { credits: 100, passed: 50 } as const
 
 /** FR-12.3 — how far back the weekly digest looks. */
 export const WEEKLY_DIGEST_DAYS = 7
+
+/**
+ * FR-12.3 (phase 14, item 10.6; the phase 12 audit's H6b) — a reader sent the
+ * weekly digest within this many days is skipped by the run: one repeated by
+ * hand, or a late Sunday run followed by an on-time one, sends nobody a second
+ * copy. Less than a week, so next Sunday's run still goes to everyone when
+ * GitHub starts it earlier in the day than it started this one.
+ */
+export const WEEKLY_DIGEST_MIN_GAP_DAYS = 6
 
 /** FR-1.4 — how long a confirmation link works. */
 export const VERIFICATION_TOKEN_TTL_HOURS = 24
@@ -260,6 +311,9 @@ export const RECENT_SIGN_IN_MINUTES = 10
 
 /** FR-13.5 */
 export const REPORTS_TO_SUSPEND = 10
+
+/** FR-13.7 (phase 14, item 9.3) — reports per page of the queue; "Show more" fetches the next. */
+export const REPORT_QUEUE_PAGE = 50
 
 /** SRS 3.1 */
 export const COAUTHORS_MAX = 3
@@ -321,6 +375,8 @@ export const IMPORT_JOB_RETENTION_HOURS = 24
  */
 export const READING_TYPE_SCALE = { min: 85, max: 150, default: 100, step: 5 } as const
 export const READING_LINE_HEIGHT = { min: 140, max: 210, default: 168, step: 7 } as const
+/** Phase 14, item 7.5 — how long this device keeps the setting, as a necessary cookie. */
+export const READING_COOKIE_DAYS = 365
 
 /** FR-12.4 */
 export const QUIET_REQUEST_NUDGE_DAYS = 7
@@ -330,6 +386,31 @@ export const QUIET_REQUEST_NUDGE_DAYS = 7
  * this many days after it was opened, or last opened again.
  */
 export const REQUEST_OPEN_DAYS = 30
+
+/**
+ * Phase 14, items 7.1 and 7.3 (FR-11.5, FR-9.2) — the reader's margin. A card
+ * carries the start of its request's ask, cut at a word, and the contributors
+ * strip names this many people before its "All contributors" link.
+ */
+export const MARGIN_ASK_CHARS = 220
+export const CONTRIBUTORS_STRIP_MAX = 5
+
+/**
+ * FR-10.5 (phase 14, item 7.11) — a spin-off's banner names this many
+ * ancestors before "See the full lineage"; the lineage page walks back as far
+ * as `walkMax` and says so when the chain goes further. Each step is a few
+ * queries, which is what the cap is for.
+ */
+export const LINEAGE = { shown: 3, walkMax: 25 } as const
+
+/**
+ * Decision 0044 (phase 14, item 7b.1) — what an author may say about an
+ * edition when they publish it. `Publication.note` is VARCHAR(280).
+ */
+export const PUBLICATION_NOTE_MAX_CHARS = 280
+
+/** Phase 14, item 7.10 (FR-10.2) — how many promotions the Versions page lists. */
+export const VERSION_EVENTS_SHOWN = 20
 
 /**
  * FR-12 over SMTP (decision 0029). A sign-up waits on its verification email,
@@ -364,3 +445,68 @@ export const OVERVIEW_WINDOW_DAYS = { recent: 7, month: 30 } as const
  * a suspension, a ban or a deletion. `User.standingNote` is VARCHAR(500).
  */
 export const STANDING_NOTE_MAX_CHARS = 500
+
+/**
+ * Phase 14, item 10.1 (NFR-7, D-10) — the server's own record of its faults.
+ *
+ * A row is kept `retentionDays` and dropped by the daily prune. What it keeps
+ * is cut to fit its columns: `ServerError.message` is VARCHAR(500),
+ * `.stack` VARCHAR(2000) (the top `stackFrames` frames), `.location`
+ * VARCHAR(200), `.name` VARCHAR(100) and `.fingerprint` VARCHAR(32). One
+ * instance writes a fault that repeats in a loop at most `perKindPerMinute`
+ * times a minute, and keeps count of at most `kindsCounted` kinds while doing
+ * so; the rest are in the host's logs. The hourly job emails the
+ * administrators at most once in each `alertEveryMinutes`, and the Errors
+ * screen lists `pageKinds` kinds at a time, as one email does.
+ */
+export const SERVER_ERRORS = {
+  retentionDays: 30,
+  messageMaxChars: 500,
+  stackFrames: 8,
+  stackMaxChars: 2000,
+  locationMaxChars: 200,
+  nameMaxChars: 100,
+  fingerprintChars: 32,
+  perKindPerMinute: 10,
+  kindsCounted: 500,
+  alertEveryMinutes: 60,
+  pageKinds: 50,
+} as const
+
+/**
+ * Phase 14, item 10.2 (NFR-7) — the stored record of socially significant
+ * events (`AuditEvent`). Kept a year, long enough to see a pattern across
+ * months and to answer an appeal, then dropped by the daily prune; the privacy
+ * policy says so. The Events screen reads `page` at a time, and its story and
+ * person filters take at most `filterMaxChars` (an address, or an email).
+ */
+export const AUDIT_LOG = { retentionDays: 365, page: 50, filterMaxChars: 320 } as const
+
+/**
+ * FR-15.5 with D-18 (phase 14, item 9.4) — the feature flags there are: three
+ * kill switches, each pausing one way in that a wave of spam or a fault would
+ * come through. On means paused. The admin screen switches these and nothing
+ * else; the seed creates them, off (`packages/db/prisma/seed/flags.ts` keeps
+ * the same list, and `lib/flags.test.ts` holds the two together);
+ * `lib/flags.ts` reads them.
+ */
+export const FEATURE_FLAG_KEYS = ['pause-sign-ups', 'pause-imports', 'pause-spin-offs'] as const
+
+export type FeatureFlagKey = (typeof FEATURE_FLAG_KEYS)[number]
+
+/** What each switch does, in the admin screen's words. `FeatureFlag.description` holds 300. */
+export const FEATURE_FLAG_DESCRIPTIONS: Record<FeatureFlagKey, string> = {
+  'pause-sign-ups':
+    'Stops new accounts: signing up, and signing in with a Google account that has not been here before. Everyone who has an account signs in as usual.',
+  'pause-imports':
+    'Stops bringing a manuscript in from a file. Stories already brought in are untouched, and writing one from scratch still works.',
+  'pause-spin-offs':
+    'Stops anyone writing their own version of a story. Spin-offs already made are untouched.',
+}
+
+/**
+ * Item 9.4 — how long one server instance keeps a switch's position before
+ * reading it again. A switch thrown in the admin screen takes hold at once on
+ * the instance that served it, and everywhere else within this.
+ */
+export const FLAG_CACHE_SECONDS = 30

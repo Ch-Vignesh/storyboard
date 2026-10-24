@@ -55,6 +55,22 @@ describe('which routes need a session', () => {
     ['/verify', 'the verification link'],
     ['/settings/email', 'confirming a new address from its link, signed out (item 3.2)'],
     ['/@someone', 'a profile'],
+    ['/proof/cm2x0k1ab0000qz8f3d9e7h1t', 'the public record of a version (item 8.12)'],
+  ])('%s does not — %s', (path) => {
+    expect(needsAnAccount(path)).toBe(false)
+  })
+
+  /**
+   * Phase 14, items 9.6 and 9.7 — the files a browser, a phone or a link
+   * preview fetches without a session. The proxy runs on them (its matcher
+   * covers every path but a few), so a gate here would turn a guest's tab
+   * icon, or a chat app's preview, into a redirect to the sign-in page.
+   */
+  it.each([
+    ['/icon.svg', 'the tab icon'],
+    ['/apple-icon', 'the home-screen icon'],
+    ['/manifest.webmanifest', 'the manifest'],
+    ['/opengraph-image', 'the default link preview picture'],
   ])('%s does not — %s', (path) => {
     expect(needsAnAccount(path)).toBe(false)
   })

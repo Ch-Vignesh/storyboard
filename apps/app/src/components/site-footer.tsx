@@ -14,7 +14,7 @@ export function SiteFooter() {
   if (pathname.endsWith('/edit')) return null
 
   return (
-    <footer className="mt-16 border-t border-rule">
+    <footer className="mt-16 border-t border-rule print:hidden">
       <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-6 gap-y-2 px-6 py-8 text-[13px] text-ink-faint">
         <span className="font-manuscript text-[15px] font-medium text-ink">Draftboard</span>
         <Link href="/rules" className="hover:text-ink hover:underline">

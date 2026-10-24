@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { createPrismaClient, Prisma, type PrismaClient } from '@storyboard/db'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { ACCOUNT_DELETION_GRACE_DAYS } from '@/lib/schemas/constants'
+import { ACCOUNT_DELETION_GRACE_DAYS, SEED_TARGETS } from '@/lib/schemas/constants'
 import type { Mail } from '@/server/mail/mailer'
 import { retiredUsernameHash } from '@/server/retired-usernames'
 
@@ -571,5 +571,24 @@ describe.skipIf(!databaseUrl)('sub-admins (decision 0043)', () => {
       available: true,
     })
     await db.retiredUsername.delete({ where: { hash: retiredUsernameHash(retired) } })
+  })
+
+  /**
+   * FR-15.4 with phase 14's item 9.5 — the Seeds screen counts the rewrites
+   * still open on seeded stories against their target, beside the rest.
+   */
+  it('counts the open rewrites on the Seeds screen against their target', async () => {
+    const admin = await person('seeds')
+    const { progress } = await (await asTheAdmin(admin)).admin.seeded()
+    expect(progress.openRewrites).toEqual({
+      have: await db.contributionRequest.count({
+        where: {
+          kind: 'REWRITE',
+          state: { in: ['OPEN', 'ANSWERED'] },
+          storyboard: { isSeed: true },
+        },
+      }),
+      want: SEED_TARGETS.openRewrites,
+    })
   })
 })

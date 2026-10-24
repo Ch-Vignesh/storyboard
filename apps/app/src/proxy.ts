@@ -51,6 +51,10 @@ export const proxy = auth((request) => {
   const headers = new Headers(request.headers)
   headers.set('x-nonce', nonce)
   headers.set('content-security-policy', policy)
+  // Phase 14, item 8.7 — the address asked for, path and query, so a story
+  // page at an address from before a retitling can move to the current one
+  // keeping the rest. Always set here, so a request cannot supply its own.
+  headers.set('x-requested-path', `${pathname}${search}`)
 
   const withPolicy = (response: NextResponse): NextResponse => {
     response.headers.set('content-security-policy', policy)

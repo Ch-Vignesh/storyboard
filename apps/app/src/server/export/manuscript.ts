@@ -22,11 +22,19 @@ const CREDIT_ROLES = {
   COAUTHOR: 'co-author',
 } as const
 
+/**
+ * What to take (item 8.8): an alternate version rather than the main draft,
+ * and one chapter rather than the whole story, numbered as the reader
+ * numbers them.
+ */
+export type ManuscriptScope = { versionId?: string; chapter?: number }
+
 export async function assembleManuscript(
   db: PrismaClient,
   storyboardId: string,
-  versionId?: string,
-): Promise<Manuscript> {
+  scope: ManuscriptScope = {},
+): Promise<Manuscript & { version: { name: string; isMain: boolean } }> {
+  const { versionId, chapter } = scope
   const storyboard = await db.storyboard.findUniqueOrThrow({
     where: { id: storyboardId },
     select: {
@@ -65,7 +73,7 @@ export async function assembleManuscript(
     where: versionId
       ? { id: versionId, storyboardId, deletedAt: null }
       : { storyboardId, isMain: true },
-    select: { id: true },
+    select: { id: true, name: true, isMain: true },
   })
   if (!version) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'That version does not exist.' })
@@ -74,6 +82,8 @@ export async function assembleManuscript(
   const chapters = await db.chapter.findMany({
     where: { versionId: version.id, deletedAt: null },
     orderBy: { order: 'asc' },
+    // Item 8.8 — one chapter: the nth of the live ones, as the reader counts.
+    ...(chapter === undefined ? {} : { skip: chapter - 1, take: 1 }),
     select: {
       title: true,
       sections: {
@@ -86,6 +96,9 @@ export async function assembleManuscript(
       },
     },
   })
+  if (chapter !== undefined && chapters.length === 0) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'That chapter does not exist.' })
+  }
 
   const flavour = flavourForStoryType(storyboard.type)
 
@@ -98,24 +111,30 @@ export async function assembleManuscript(
     orderBy: { createdAt: 'asc' },
     select: {
       type: true,
-      contributor: { select: { username: true, displayName: true } },
+      contributor: { select: { id: true, username: true, displayName: true } },
     },
   })
 
+  // One line per person and role, and each person known by their account, so
+  // the footer counts people rather than lines and two writers who share a
+  // name stay two (item 8.13). Everyone erased (decision 0013) counts as
+  // one, as the contributors page counts them.
   const seen = new Set<string>()
   const contributors = credits
     .map((credit) => ({
       name: nameOf(credit.contributor),
       role: CREDIT_ROLES[credit.type],
+      person: credit.contributor?.id ?? 'erased',
     }))
     .filter((contributor) => {
-      const key = `${contributor.name}|${contributor.role}`
+      const key = `${contributor.person}|${contributor.role}`
       if (seen.has(key)) return false
       seen.add(key)
       return true
     })
 
   return {
+    version: { name: version.name, isMain: version.isMain },
     title: storyboard.title,
     author: nameOf(storyboard.owner),
     sourceUrl: `${env.NEXT_PUBLIC_APP_URL}/s/${storyboard.slug}`,

@@ -87,6 +87,8 @@ function labelFor(name: string): string {
       return 'Open requests'
     case 'answeredRequests':
       return 'With a suggestion accepted'
+    case 'openRewrites':
+      return 'Rewrites open'
     default:
       return name
   }

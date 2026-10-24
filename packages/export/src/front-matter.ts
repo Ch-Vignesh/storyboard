@@ -57,20 +57,26 @@ export function originLine(manuscript: Manuscript): string | null {
   return `Spun off from “${origin.title}”${by}${at}`
 }
 
-/** The footer line. Every page of the PDF carries it; other formats carry it once. */
+/** Where it came from, in the front matter of the formats that print it there. */
 export function sourceLine(manuscript: Manuscript): string {
   return `Written on Draftboard — ${manuscript.sourceUrl}`
 }
 
-/** A file name a writer will recognise in their downloads folder. */
-export function fileNameFor(title: string, extension: string): string {
-  const stem =
-    title
-      .normalize('NFKD')
-      .replaceAll(/[^\w\s-]+/gu, '')
-      .trim()
-      .replaceAll(/\s+/gu, '-')
-      .slice(0, 80)
-      .toLowerCase() || 'manuscript'
-  return `${stem}.${extension}`
+/**
+ * Phase 14, item 8.13 (FR-13.6, FR-14.3) — the footer names the people: who
+ * wrote it, how many helped, and where it lives. Every page of the PDF and
+ * of the .docx carries it; Markdown and Fountain end with it. It said only
+ * "Written on Draftboard" and the address until item 8.13. The names
+ * themselves stay in the front matter, where there is room for them.
+ *
+ * Counted by person, not by line: someone credited for a passage and for an
+ * idea is one contributor.
+ */
+export function footerLine(manuscript: Manuscript): string {
+  const people = new Set(
+    manuscript.contributors.map((contributor) => contributor.person ?? contributor.name),
+  ).size
+  const helped =
+    people === 0 ? '' : ` with ${String(people)} ${people === 1 ? 'contributor' : 'contributors'}`
+  return `Written by ${manuscript.author}${helped} · ${manuscript.sourceUrl}`
 }

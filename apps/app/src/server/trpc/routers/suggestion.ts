@@ -11,6 +11,7 @@ import {
 import { recordActivity } from '@/server/activity'
 import { timeZoneFromHeaders } from '@/lib/time-zone'
 import { afterCommit } from '@/server/after-commit'
+import { recordEvent } from '@/server/audit'
 import { notifyAuthors } from '@/server/notify-authors'
 import { canReadSuggestionSentAt, quotaFor } from '@/lib/authz'
 import { redactSuggestionText } from '@/server/hidden'
@@ -555,8 +556,12 @@ export const suggestionRouter = createTRPCRouter({
           // Item 6.7 — whether it may still be changed, and whether it was.
           openedAt: true,
           editedAt: true,
+          // Item 8.5 — when the draft was last saved, against a copy kept on the device.
+          updatedAt: true,
           contributor: { select: { id: true, username: true, displayName: true } },
           decidedBy: { select: { id: true, username: true, displayName: true } },
+          // Item 8.12 — the version accepting it wrote, for its writer's proof.
+          revision: { select: { id: true, authorId: true } },
           request: {
             select: {
               id: true,
@@ -609,9 +614,23 @@ export const suggestionRouter = createTRPCRouter({
         suggestion.state === 'SUBMITTED' &&
         suggestion.request.section.currentRevisionId !== suggestion.baseRevisionId
 
+      // Item 8.12 (FR-13.6) — its writer's way to the public record of the
+      // version it became, while that version still names them (an erased
+      // record names nobody, decision 0013). Nobody else is handed the id.
+      const { revision, ...shown } = suggestion
+      const proofRevisionId =
+        suggestion.state === 'ACCEPTED' && actor !== null && revision?.authorId === actor.id
+          ? revision.id
+          : null
+
       // Hidden after a report (item 2.7): its text reads as removed to
       // everyone but its writer and a moderator.
-      return { suggestion: redactSuggestionText(suggestion, actor), permissions, isStale }
+      return {
+        suggestion: redactSuggestionText(shown, actor),
+        permissions,
+        isStale,
+        proofRevisionId,
+      }
     }),
 
   /**
@@ -851,6 +870,15 @@ export const suggestionRouter = createTRPCRouter({
         },
         'suggestion accepted',
       )
+      // Item 10.2 (NFR-7) — stored as well as logged.
+      await recordEvent(ctx.db, {
+        event: 'suggestion.accepted',
+        actorId: deciderId,
+        subjectId: suggestion.contributorId,
+        storyboardId: suggestion.request.storyboardId,
+        target: { type: 'SUGGESTION', id: suggestion.id },
+        detail: { requestId, revisionId: accepted.revisionId },
+      })
       return accepted
     }),
 
@@ -926,6 +954,15 @@ export const suggestionRouter = createTRPCRouter({
         { event: 'suggestion.passed', suggestionId: suggestion.id, reason: input.reason ?? null },
         'suggestion passed',
       )
+      // Item 10.2 (NFR-7) — stored as well as logged.
+      await recordEvent(ctx.db, {
+        event: 'suggestion.passed',
+        actorId: ctx.session.user.id,
+        subjectId: suggestion.contributorId,
+        storyboardId: suggestion.request.storyboardId,
+        target: { type: 'SUGGESTION', id: suggestion.id },
+        detail: { requestId: suggestion.request.id, reason: input.reason ?? null },
+      })
       return updated
     }),
 

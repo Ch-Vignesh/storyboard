@@ -6,10 +6,12 @@
  * within the product" means each format has to carry them without being asked.
  * So every format gets the same question put to it.
  */
+import { inflateSync } from 'node:zlib'
+
 import { strFromU8, unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 
-import { exportManuscript, formatsFor } from './index'
+import { contentDisposition, exportManuscript, fileNamesFor, footerLine, formatsFor } from './index'
 import { toFountain } from './fountain'
 import { toMarkdown } from './markdown'
 import { exportAuthorshipProof } from './index'
@@ -95,13 +97,13 @@ describe('every format carries its contributors and its source (FR-14.3)', () =>
       .byteLength
     expect(withCredits).toBeGreaterThan(withoutCredits)
     expect(file.mediaType).toMatch(/wordprocessingml/u)
-    expect(file.fileName).toBe('the-ship-never-lands.docx')
+    expect(file.fileName).toBe('the-ship-never-lands-2026-09-15.docx')
   })
 
   it('the PDF holds the source line as readable text', async () => {
     const file = await exportManuscript(manuscript(), 'pdf')
     expect(file.body.subarray(0, 5).toString()).toBe('%PDF-')
-    expect(file.fileName).toBe('the-ship-never-lands.pdf')
+    expect(file.fileName).toBe('the-ship-never-lands-2026-09-15.pdf')
     // PDFKit writes its text uncompressed enough that the title survives as
     // bytes; this is a smoke test that the document was actually written.
     expect(file.body.byteLength).toBeGreaterThan(2000)
@@ -191,35 +193,185 @@ describe('what a writer is offered (FR-14.2)', () => {
   })
 })
 
+/**
+ * The lines of text a PDF prints, read back from its content streams: PDFKit
+ * deflates each page's stream and writes every line as one `TJ` array of hex
+ * strings, split wherever it kerns.
+ */
+function printedLines(pdf: Buffer): string[] {
+  const raw = pdf.toString('latin1')
+  const lines: string[] = []
+  for (const [, stream] of raw.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/gu)) {
+    const content = inflateSync(Buffer.from(stream ?? '', 'latin1')).toString('latin1')
+    for (const [, array] of content.matchAll(/\[(.*?)\] TJ/gu)) {
+      const hex = [...(array ?? '').matchAll(/<([0-9a-f]*)>/giu)].map((part) => part[1]).join('')
+      lines.push(Buffer.from(hex, 'hex').toString('latin1'))
+    }
+  }
+  return lines
+}
+
 describe('proof of authorship (FR-13.6)', () => {
+  const proof = {
+    storyboardTitle: 'The ship never lands',
+    author: 'J. Rivera',
+    chapterTitle: 'Chapter one',
+    sectionTitle: 'The harbour',
+    wordCount: 812,
+    contentHash: 'a'.repeat(64),
+    writtenAt: new Date('2026-03-04T09:12:00Z'),
+    url: 'https://storyboard.example/proof/cm2x0k1ab0000qz8f3d9e7h1t',
+    exportedAt: new Date('2026-09-15T10:00:00Z'),
+  }
+
   it('is a PDF naming the work, the hash and the time', async () => {
-    const file = await exportAuthorshipProof({
-      storyboardTitle: 'The ship never lands',
-      author: 'J. Rivera',
-      chapterTitle: 'Chapter one',
-      sectionTitle: 'The harbour',
-      wordCount: 812,
-      contentHash: 'a'.repeat(64),
-      writtenAt: new Date('2026-03-04T09:12:00Z'),
-      url: 'https://storyboard.example/s/x/c/1/1',
-      exportedAt: new Date('2026-09-15T10:00:00Z'),
-    })
+    const file = await exportAuthorshipProof(proof)
 
     expect(file.body.subarray(0, 5).toString()).toBe('%PDF-')
     expect(file.fileName).toBe('the-ship-never-lands-the-harbour-proof.pdf')
     expect(file.mediaType).toBe('application/pdf')
+    const lines = printedLines(file.body)
+    expect(lines).toContain('The ship never lands')
+    expect(lines).toContain('a'.repeat(64))
+  })
+
+  it('prints where anyone can check it, and what it cannot show (item 8.12, D-11)', async () => {
+    const lines = printedLines((await exportAuthorshipProof(proof)).body)
+    const label = lines.indexOf('CHECK IT AT')
+    expect(label).toBeGreaterThan(-1)
+    expect(lines[label + 1]).toBe(proof.url)
+    expect(lines.join(' ')).toContain('cannot show that they were original to that person')
   })
 })
 
-describe('file names', () => {
+describe('the footer names the people (FR-14.3, item 8.13)', () => {
+  const footer =
+    'Written by J. Rivera with 2 contributors · https://storyboard.example/s/the-ship-never-lands-abc123'
+
+  it('counts people, not lines, and says one in the singular', () => {
+    expect(footerLine(manuscript())).toBe(footer)
+    expect(
+      footerLine(
+        manuscript({
+          contributors: [
+            { name: 'Margaret Okonjo', role: 'wrote a passage', person: 'user_1' },
+            { name: 'Margaret Okonjo', role: 'an idea that helped', person: 'user_1' },
+          ],
+        }),
+      ),
+    ).toBe(
+      'Written by J. Rivera with 1 contributor · https://storyboard.example/s/the-ship-never-lands-abc123',
+    )
+    // Two people with one name are two.
+    expect(
+      footerLine(
+        manuscript({
+          contributors: [
+            { name: 'Sam', role: 'wrote a passage', person: 'user_1' },
+            { name: 'Sam', role: 'wrote a passage', person: 'user_2' },
+          ],
+        }),
+      ),
+    ).toContain('with 2 contributors')
+  })
+
+  it('says nothing of contributors when there are none', () => {
+    expect(footerLine(manuscript({ contributors: [] }))).toBe(
+      'Written by J. Rivera · https://storyboard.example/s/the-ship-never-lands-abc123',
+    )
+  })
+
+  it('ends the Markdown and the Fountain with it', () => {
+    expect(toMarkdown(manuscript()).trimEnd().endsWith(`*${footer}*`)).toBe(true)
+    expect(
+      toFountain(manuscript({ isScreenplay: true }))
+        .trimEnd()
+        .endsWith(footer),
+    ).toBe(true)
+  })
+
+  it('is the .docx page footer', async () => {
+    const { body } = await exportManuscript(manuscript(), 'docx')
+    const files = unzipSync(new Uint8Array(body))
+    const footers = Object.entries(files)
+      .filter(([name]) => /^word\/footer\d*\.xml$/u.test(name))
+      .map(([, bytes]) => strFromU8(bytes))
+    expect(footers.some((xml) => xml.includes(footer))).toBe(true)
+  })
+
+  it('is on every page of the PDF, and the names stay in the front matter', async () => {
+    const lines = printedLines((await exportManuscript(manuscript(), 'pdf')).body)
+    // A title page and two chapters: three pages, three footers.
+    expect(lines.filter((line) => line === footer)).toHaveLength(3)
+    // The dash between is WinAnsi in the file, so only the name is compared.
+    expect(lines.some((line) => line.startsWith('Margaret Okonjo '))).toBe(true)
+  })
+})
+
+describe('file names (FR-14.2, item 8.8)', () => {
+  const at = new Date('2026-09-15T10:00:00Z')
+
   it('are something a writer will recognise in a downloads folder', async () => {
     const file = await exportManuscript(manuscript({ title: 'Ångström & Sons: A Novel!' }), 'md')
-    expect(file.fileName).toBe('angstrom-sons-a-novel.md')
+    expect(file.fileName).toBe('angstrom-sons-a-novel-2026-09-15.md')
+    expect(file.realFileName).toBe('Ångström & Sons A Novel! 2026-09-15.md')
   })
 
   it('never come out empty', async () => {
     const file = await exportManuscript(manuscript({ title: '???' }), 'md')
-    expect(file.fileName).toBe('manuscript.md')
+    expect(file.fileName).toBe('story-2026-09-15.md')
+    expect(file.realFileName).toBe('Story 2026-09-15.md')
+  })
+
+  it('carry a title in any script in the real name, and "story" in the plain one', () => {
+    // A Hindi title came out as `manuscript.docx` until item 8.8.
+    expect(fileNamesFor('दिल्ली की रातें', 'docx', { at })).toEqual({
+      fileName: 'story-2026-09-15.docx',
+      realFileName: 'दिल्ली की रातें 2026-09-15.docx',
+    })
+    expect(fileNamesFor('港の灯り', 'pdf', { at, version: '別の結末' })).toEqual({
+      fileName: 'story-2026-09-15-version.pdf',
+      realFileName: '港の灯り 2026-09-15 (別の結末).pdf',
+    })
+  })
+
+  it('name the chapter and the version when the file is not the whole main draft', () => {
+    expect(
+      fileNamesFor('The ship never lands', 'docx', { at, chapter: 3, version: 'The other ending' }),
+    ).toEqual({
+      fileName: 'the-ship-never-lands-2026-09-15-chapter-3-the-other-ending.docx',
+      realFileName: 'The ship never lands 2026-09-15 chapter 3 (The other ending).docx',
+    })
+  })
+
+  it('take one more part at the end, in words, without touching the rest (item 7b.3)', () => {
+    expect(fileNamesFor('The ship never lands', 'epub', { at, extra: 'edition 3' })).toEqual({
+      fileName: 'the-ship-never-lands-2026-09-15-edition-3.epub',
+      realFileName: 'The ship never lands 2026-09-15 edition 3.epub',
+    })
+  })
+
+  it('carry the day where the writer is, not where the server is (item 1.18)', () => {
+    const evening = new Date('2026-10-23T20:00:00Z')
+    expect(fileNamesFor('Tide', 'md', { at: evening }).fileName).toBe('tide-2026-10-23.md')
+    expect(fileNamesFor('Tide', 'md', { at: evening, timeZone: 'Asia/Kolkata' }).fileName).toBe(
+      'tide-2026-10-24.md',
+    )
+  })
+
+  it('keep out what no file system takes', () => {
+    expect(fileNamesFor('Act 1: "Who?" / <the> end\u0007', 'md').realFileName).toBe(
+      'Act 1 Who the end.md',
+    )
+  })
+
+  it('travel in a header any browser reads, the real name per RFC 5987', () => {
+    const header = contentDisposition(fileNamesFor('दिल्ली (रात)', 'md', { at }))
+    expect(header).toBe(
+      `attachment; filename="story-2026-09-15.md"; filename*=UTF-8''${encodeURIComponent('दिल्ली')}%20%28${encodeURIComponent('रात')}%29%202026-09-15.md`,
+    )
+    // attr-chars only: no quote, bracket or star left unencoded.
+    expect(header.split("filename*=UTF-8''")[1]).not.toMatch(/['()* ]/u)
   })
 })
 
@@ -315,7 +467,7 @@ describe('epub (FR-14.2)', () => {
 
   it('names the file after the manuscript', async () => {
     const file = await exportManuscript(manuscript(), 'epub')
-    expect(file.fileName).toBe('the-ship-never-lands.epub')
+    expect(file.fileName).toBe('the-ship-never-lands-2026-09-15.epub')
     expect(file.mediaType).toBe('application/epub+zip')
   })
 })

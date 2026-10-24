@@ -243,6 +243,8 @@ export type StoryboardPermissions = {
   canPostIdea: boolean
   canSpinOff: boolean
   canExport: boolean
+  /** Decision 0044 (item 7b.1). */
+  canPublish: boolean
 }
 
 export function permissionsFor(actor: Actor, resource: StoryboardResource): StoryboardPermissions {
@@ -260,6 +262,7 @@ export function permissionsFor(actor: Actor, resource: StoryboardResource): Stor
     canPostIdea: can(actor, 'idea:post', resource),
     canSpinOff: can(actor, 'storyboard:spinOff', resource),
     canExport: can(actor, 'storyboard:export', resource),
+    canPublish: can(actor, 'storyboard:publish', resource),
   }
 }
 
@@ -279,6 +282,26 @@ export function canReadRevisionAt(
   if (!can(actor, 'storyboard:read', resource)) return false
   if (isAuthor(actor, resource)) return true
   return !writtenWhilePrivate(resource, revisionCreatedAt)
+}
+
+/**
+ * Phase 14, item 8.12 (FR-13.6, D-11) — whether a version's public record may
+ * name the story it was written in.
+ *
+ * The record itself is open to anyone with its address: a fingerprint, a
+ * time, a word count and a name tell nothing about the words to someone who
+ * does not already hold them. The story is the part that could leak, so it is
+ * named only to someone who may read that version: the story's own read right
+ * (visibility, deletion, hiding), then decision 0007's rule that what was
+ * written while it was private stays with its authors. Anyone else reads
+ * "a private story", which says no more than that they may not see it.
+ */
+export function canNameStoryOnRecord(
+  actor: Actor,
+  resource: StoryboardResource & { publicFrom: Date | null },
+  writtenAt: Date,
+): boolean {
+  return canReadRevisionAt(actor, resource, writtenAt)
 }
 
 /**

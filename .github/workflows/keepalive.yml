@@ -1,0 +1,102 @@
+# Keeps the scheduled workflows scheduled (NFR-8; phase 14, item 10.3).
+#
+# GitHub: "In a public repository, scheduled workflows are automatically
+# disabled when no repository activity has occurred in 60 days." Then no digest
+# is sent, no request closes, no account is erased and no backup is taken
+# (cron.yml, backup.yml), and nothing says so.
+#
+# What GitHub's documentation says, read on 2026-10-24 ("Disable and enable
+# workflows", "Events that trigger workflows", the REST reference for
+# workflows) before anything here was relied on:
+#   - "You can re-enable a workflow that was previously disabled", and
+#     PUT /repos/{owner}/{repo}/actions/workflows/{workflow_id}/enable
+#     "Enables a workflow and sets the state of the workflow to active."
+#     It needs the Actions repository permission (write), which this job's
+#     own token is given below, and accepts the file name as the id.
+#   - "Notifications for scheduled workflows are sent to the user who last
+#     modified the cron syntax in the workflow file."
+#   - It does not say what counts as repository activity, nor that enabling a
+#     workflow that is still active starts the 60 days again. Keepalive
+#     projects disagree: one says it does; another found that toggling the
+#     state "turned out not being able to bypass GitHub's deadline".
+#
+# So the enable is not relied on alone. On the 1st and the 15th this job
+#   1. enables every scheduled workflow through the API. One already stopped
+#      for inactivity comes back, which is documented; one still running may
+#      have its clock reset, which is not. One switched off by hand stays off.
+#   2. fails on purpose once the default branch has had no commit for
+#      WARN_AFTER_DAYS. A failed scheduled run is the documented alarm, and it
+#      reaches whoever last changed the cron line below, while there are still
+#      weeks to push something. A commit is what certainly counts.
+#
+# It makes no commit itself: a commit to main deploys production, and would
+# stand between the owner and their next push. And no third-party action: `gh`
+# is on the runner, and this run's token is enough.
+name: Keep scheduled jobs running
+
+on:
+  schedule:
+    # Off the hour: GitHub delays, and sometimes drops, scheduled runs when it
+    # is busy, and the top of the hour is when it is busiest.
+    - cron: '23 4 1,15 * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+env:
+  # Every workflow with a schedule, this one included. A new scheduled
+  # workflow belongs in this list.
+  SCHEDULED: cron.yml backup.yml excerpts.yml keepalive.yml
+  # Runs are at most 17 days apart, so a warning after 40 days comes by day 57
+  # at the latest, before GitHub's 60.
+  WARN_AFTER_DAYS: '40'
+
+jobs:
+  keepalive:
+    # Without either variable nothing scheduled here does any work: a fork, or
+    # a copy that was never deployed.
+    if: vars.APP_URL != '' || vars.BACKUP_BUCKET != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enable every scheduled workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          failed=0
+          for file in $SCHEDULED; do
+            if ! state=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$file" --jq .state); then
+              echo "::error::Could not read the state of $file."
+              failed=1
+              continue
+            fi
+            if [ "$state" = disabled_manually ]; then
+              echo "$file was switched off by hand, so it stays off."
+            elif gh api --silent -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/$file/enable"; then
+              echo "$file was $state, and is enabled."
+            else
+              echo "::error::Could not enable $file."
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      - name: Fail while there is still time to push
+        if: success() || failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)
+          committed=$(gh api "repos/$GITHUB_REPOSITORY/commits/$branch" --jq .commit.committer.date)
+          days=$(( ($(date -u +%s) - $(date -u -d "$committed" +%s)) / 86400 ))
+          echo "The newest commit on $branch is $days days old."
+          if [ "$days" -gt "$WARN_AFTER_DAYS" ]; then
+            echo "::error::No commit on $branch for $days days. GitHub stops the scheduled workflows of a public repository after 60 days without activity, and does not say that enabling them starts that clock again. Push a commit before then, or the digests, the purges and the backups stop."
+            exit 1
+          fi

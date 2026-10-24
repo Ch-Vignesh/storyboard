@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   GOOGLE_SIGN_IN_OFF,
+  SIGN_UPS_PAUSED,
   signInErrorMessage,
   SUSPENDED_SIGN_IN,
   TOO_MANY_SIGN_INS,
@@ -53,5 +54,13 @@ describe('signInErrorMessage (FR-1.6)', () => {
     expect(message).toMatch(/turned off/u)
     expect(message).toMatch(/settings/u)
     expect(message).not.toMatch(/cannot be used/u)
+  })
+
+  // Phase 14, item 9.4 (D-18) — a first Google sign-in while new accounts are paused.
+  it('tells a new Google account that new accounts are paused, not that it is refused', () => {
+    const message = signInErrorMessage('AccessDenied', SIGN_UPS_PAUSED)
+    expect(message).toMatch(/not taking new accounts/u)
+    expect(message).toMatch(/try again later/iu)
+    expect(message).not.toMatch(/cannot be used to sign in/u)
   })
 })

@@ -1,8 +1,10 @@
 'use client'
 
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
+import { ExampleLabel } from '@/components/example-label'
 import Link from '@/components/link'
 
+import { paramsFromFilters } from '@/lib/schemas/browse'
 import { REQUEST_KINDS, closesOn } from '@/lib/schemas/help'
 import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
@@ -20,12 +22,19 @@ export function OpenRequestsRegion({ timeZone }: { timeZone: string }) {
   const genreIds = pinned.map((entry) => entry.genre.id)
 
   const requests = useQuery(trpc.request.listOpen.queryOptions({ genreIds, take: 8 }))
+  // Item 9.2 — the region is a sample; browse, filtered to the same genres, is the rest.
+  const more = genreIds.length > 0 ? `?${paramsFromFilters({ genreIds }).toString()}` : ''
 
   return (
     <section className="mt-12">
-      <h2 className="text-[13px] font-medium tracking-wide text-ink-faint uppercase">
-        Stuck passages in your genres
-      </h2>
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 className="text-[13px] font-medium tracking-wide text-ink-faint uppercase">
+          Stuck passages in your genres
+        </h2>
+        <Link href={`/browse${more}`} className="shrink-0 text-[13px] text-pencil hover:underline">
+          See all<span className="sr-only"> stuck passages in your genres</span>
+        </Link>
+      </div>
       <p className="mt-1 text-[12.5px] text-ink-faint">
         {pinned.length > 0
           ? pinned.map((entry) => entry.genre.name).join(' · ')
@@ -56,11 +65,7 @@ export function OpenRequestsRegion({ timeZone }: { timeZone: string }) {
                     <span className="text-[11.5px] tracking-wide text-ochre uppercase">
                       {kind?.label}
                     </span>
-                    {request.storyboard.isSeed ? (
-                      <span className="border border-ochre/40 px-1 text-[10.5px] tracking-wide text-ochre uppercase">
-                        example
-                      </span>
-                    ) : null}
+                    {request.storyboard.isSeed ? <ExampleLabel /> : null}
                   </span>
                   <span className="mt-1 block font-manuscript text-[18px] leading-snug text-ink">
                     {request.title}

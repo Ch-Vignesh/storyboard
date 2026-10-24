@@ -1,4 +1,4 @@
-import { frontMatterLines, originLine, sourceLine } from './front-matter'
+import { footerLine, frontMatterLines, originLine } from './front-matter'
 import type { BlockNode, InlineNode, Manuscript } from './types'
 
 /** Escapes the characters Markdown would otherwise read as markup. */
@@ -87,9 +87,9 @@ export function toMarkdown(manuscript: Manuscript): string {
     }
   }
 
-  // FR-14.3 — and the source, after the last word.
+  // FR-14.3 — and the source, after the last word, naming the people (item 8.13).
   parts.push('---')
-  parts.push(`*${sourceLine(manuscript)}*`)
+  parts.push(`*${escape(footerLine(manuscript))}*`)
 
   return `${parts.filter((part) => part.length > 0).join('\n\n')}\n`
 }

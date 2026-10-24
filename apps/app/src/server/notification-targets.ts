@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@storyboard/db'
 
-import { visibleStoryboardsWhere } from '@/lib/authz/guard'
+import { publicIdOfSlug, visibleStoryboardsWhere } from '@/lib/authz/guard'
 import { nameOf } from '@/lib/people'
 import type { NotificationType, Standing } from '@/lib/schemas/notifications'
 
@@ -51,6 +51,8 @@ export type Target = {
   chapter: number | null
   /** REQUEST_REOPENED — where this person's own suggestion on it stands. */
   standing: Standing | null
+  /** FR-15.3 (phase 14, item 7.7) — the story it leads into is a seeded example. */
+  example?: boolean
 }
 
 export const NOWHERE: Target = {
@@ -192,14 +194,25 @@ export async function targetsFor(
     ...requests.map((request) => request.storyboardId),
     ...sections.map((section) => section.chapter.version.storyboardId),
   ])
+  const payloadPublicIds = all('slug')
+    .map(publicIdOfSlug)
+    .filter((id): id is string => id !== null)
   const storyboards = await db.storyboard.findMany({
     where: {
       AND: [
         visibleStoryboardsWhere({ id: userId }),
-        { OR: [{ id: { in: [...storyboardIds] } }, { slug: { in: all('slug') } }] },
+        {
+          OR: [
+            { id: { in: [...storyboardIds] } },
+            { slug: { in: all('slug') } },
+            // Item 8.7 — a slug written into a row before the story was
+            // retitled still finds it, by the `publicId` it ends with.
+            { publicId: { in: payloadPublicIds } },
+          ],
+        },
       ],
     },
-    select: { id: true, slug: true, title: true, ownerId: true },
+    select: { id: true, slug: true, publicId: true, title: true, ownerId: true },
   })
 
   // Everyone a row might name, read once. `nameOf` says how, and says "a
@@ -241,6 +254,13 @@ export async function targetsFor(
   const revisionById = new Map(revisions.map((revision) => [revision.id, revision]))
   const storyById = new Map(storyboards.map((storyboard) => [storyboard.id, storyboard]))
   const storyBySlug = new Map(storyboards.map((storyboard) => [storyboard.slug, storyboard]))
+  const storyByPublicId = new Map(storyboards.map((story) => [story.publicId, story]))
+  // An old slug in a payload answers for the story it ends in (item 8.7).
+  for (const slug of all('slug')) {
+    const id = publicIdOfSlug(slug)
+    const story = id ? storyByPublicId.get(id) : undefined
+    if (story && !storyBySlug.has(slug)) storyBySlug.set(slug, story)
+  }
   const get = <T>(map: Map<string, T>, key: string | null | undefined) =>
     key ? map.get(key) : undefined
 
@@ -347,6 +367,23 @@ export async function targetsFor(
         }
         break
       }
+      case 'SPIN_OFF_PUBLISHED': {
+        // Decision 0044 (item 7b.4) — the edition, if the spin-off can be
+        // read; otherwise nothing is said of it, as for any private story.
+        const spinOff = get(storyById, text(data, 'storyboardId'))
+        const number = text(data, 'number')
+        if (spinOff) {
+          target = {
+            ...NOWHERE,
+            path: number
+              ? `/s/${spinOff.slug}/published/${number}`
+              : `/s/${spinOff.slug}/published`,
+            title: spinOff.title,
+            actor: name(spinOff.ownerId),
+          }
+        }
+        break
+      }
       case 'SPIN_OFF_CREATED': {
         // The spin-off, if it can be read; otherwise the original's family
         // tree, which lists it once it is. Its writer is named only with it.
@@ -402,6 +439,28 @@ export async function targetsFor(
         break
     }
     targets.set(row.id, target)
+  }
+
+  // FR-15.3 (phase 14, item 7.7) — a row about a seeded story says so, as
+  // every other place that names one does. Decided once, after the rows,
+  // from the story each path leads into, rather than in every case above.
+  const slugOf = (path: string | null) => /^\/s\/([^/?#]+)/u.exec(path ?? '')?.[1]
+  const slugs = [...new Set([...targets.values()].map((target) => slugOf(target.path)))].filter(
+    (slug): slug is string => Boolean(slug),
+  )
+  if (slugs.length > 0) {
+    const seeded = new Set(
+      (
+        await db.storyboard.findMany({
+          where: { slug: { in: slugs }, isSeed: true },
+          select: { slug: true },
+        })
+      ).map((row) => row.slug),
+    )
+    for (const target of targets.values()) {
+      const slug = slugOf(target.path)
+      if (slug && seeded.has(slug)) target.example = true
+    }
   }
   return targets
 }

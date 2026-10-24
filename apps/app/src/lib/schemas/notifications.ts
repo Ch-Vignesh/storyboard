@@ -1,5 +1,5 @@
 /**
- * The sixteen notification types (FR-12.2), with the words the interface uses
+ * The notification types (FR-12.2), with the words the interface uses
  * for each and how each one is delivered (FR-12.3).
  *
  * One table, because a type that exists in the enum but not here would be
@@ -27,6 +27,7 @@ export const NOTIFICATION_TYPES = [
   'REQUEST_CLOSED',
   'REQUEST_REOPENED',
   'REQUEST_AUTO_CLOSED',
+  'SPIN_OFF_PUBLISHED',
   'WEEKLY_DIGEST',
 ] as const
 
@@ -164,6 +165,13 @@ export const NOTIFICATIONS: Record<NotificationType, Definition> = {
     delivery: 'hourly',
     canDisableEmail: true,
   },
+  SPIN_OFF_PUBLISHED: {
+    label: 'A spin-off of your story was published',
+    sentence: 'A writer published an edition of their own version of your story.',
+    // Decision 0044 (item 7b.4) — news, not a decision on your work.
+    delivery: 'hourly',
+    canDisableEmail: true,
+  },
   WEEKLY_DIGEST: {
     label: 'This week in your genres',
     sentence: 'Passages opened for help in the genres you pinned.',
@@ -263,6 +271,8 @@ export function sentenceFor(type: NotificationType, facts: Facts = {}): string {
       }
       return facts.standing ? `${again} ${yours[facts.standing]}` : again
     }
+    case 'SPIN_OFF_PUBLISHED':
+      return `${who('A writer')} published an edition of their own version of your story.`
     case 'WEEKLY_DIGEST':
       return NOTIFICATIONS.WEEKLY_DIGEST.sentence
   }

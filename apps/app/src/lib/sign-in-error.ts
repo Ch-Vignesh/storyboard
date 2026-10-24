@@ -17,6 +17,12 @@ export const SUSPENDED_SIGN_IN = 'suspended'
 export const GOOGLE_SIGN_IN_OFF = 'google_off'
 
 /**
+ * The `code` a first Google sign-in carries when new accounts are paused
+ * (phase 14, item 9.4, D-18). Plain, for the same reason as the one above.
+ */
+export const SIGN_UPS_PAUSED = 'sign_ups_paused'
+
+/**
  * FR-1.6 — what the sign-in page says when somebody is sent back to it.
  *
  * `?error=` carries the Auth.js error type and `?code=` a `CredentialsSignin`'s
@@ -47,6 +53,9 @@ export function signInErrorMessage(
     case 'AccessDenied':
       if (code === GOOGLE_SIGN_IN_OFF) {
         return 'Google sign-in is turned off for this account. Sign in with your password, and turn it back on in settings if you want it.'
+      }
+      if (code === SIGN_UPS_PAUSED) {
+        return 'Draftboard is not taking new accounts just now, so a Google account that has not been here before cannot sign in yet. Try again later.'
       }
       return 'That Google account cannot be used to sign in here.'
     default:

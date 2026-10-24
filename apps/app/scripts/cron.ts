@@ -16,7 +16,9 @@ import { loadRootEnv } from '@storyboard/config/env'
 
 loadRootEnv()
 
-const JOBS = ['immediate', 'hourly', 'weekly', 'nudge'] as const
+// Every job the cron route runs (`CRON_JOBS`); prune and purge were missing,
+// so neither could be run from here.
+const JOBS = ['immediate', 'hourly', 'weekly', 'nudge', 'prune', 'purge'] as const
 type Job = (typeof JOBS)[number]
 
 const job = process.argv[2] as Job | undefined
@@ -27,8 +29,8 @@ if (!job || !JOBS.includes(job)) {
 }
 
 // The root `.env` names the live database and the real mail account, so a
-// job run from a laptop would email real people: a weekly digest a second
-// time, since nothing records who had one (phase 12 audit). Seed-demo, the
+// job run from a laptop would email real people (phase 12 audit; the weekly
+// digest at least records whom it reached since item 10.6). Seed-demo, the
 // tests and the browser flows already refuse a hosted database; so does this,
 // unless the person running it says they mean it.
 const { isLocalDatabase } = await import('@storyboard/config/env')

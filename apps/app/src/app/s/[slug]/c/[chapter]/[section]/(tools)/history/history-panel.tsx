@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import { RevisionComparison } from '@/components/revision-comparison'
 import { listOf } from '@/lib/impact-words'
 import { nameOf } from '@/lib/people'
+import { PASS_CHIPS } from '@/lib/schemas/help'
 import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 import type { AppRouter } from '@/server/trpc/routers/_app'
@@ -16,6 +17,7 @@ import type { inferRouterOutputs } from '@trpc/server'
 
 type History = inferRouterOutputs<AppRouter>['section']['history']
 type Revision = History['revisions'][number]
+type Chip = (typeof PASS_CHIPS)[number]['value']
 
 /** FR-8.3 — the label says where a version came from, in plain words. */
 const SOURCE_LABELS: Record<Revision['source'], string> = {
@@ -77,6 +79,8 @@ export function HistoryPanel({
   // Item 5.3 (FR-8.4, FR-8.5) — restoring asks first, naming the people
   // whose accepted words would leave the main draft.
   const [restoring, setRestoring] = useState<string | null>(null)
+  // FR-8.6 (item 8.14) — an optional reason, one of FR-6.10's chips.
+  const [reason, setReason] = useState<Chip | null>(null)
   const restoreImpact = useQuery({
     ...trpc.section.restoreImpact.queryOptions({ sectionId, revisionId: restoring ?? '' }),
     enabled: restoring !== null,
@@ -85,6 +89,7 @@ export function HistoryPanel({
     trpc.section.restoreRevision.mutationOptions({
       onSuccess: async () => {
         setRestoring(null)
+        setReason(null)
         await queryClient.invalidateQueries({ queryKey: trpc.section.history.pathKey() })
         router.refresh()
       },
@@ -136,7 +141,9 @@ export function HistoryPanel({
       <ol className="divide-y divide-rule border-y border-rule">
         {revisions.map((revision) => {
           const isHead = revision.id === head
-          const mine = viewerId !== null && revision.author?.id === viewerId
+          // Item 8.12 — not a restore: its words are whoever wrote the version it copied.
+          const mine =
+            viewerId !== null && revision.author?.id === viewerId && revision.source !== 'RESTORED'
           return (
             <li key={revision.id} className="py-4">
               <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
@@ -158,6 +165,10 @@ export function HistoryPanel({
                     {revision.source === 'RESTORED' && revision.restoredFrom
                       ? `restored from ${formatInZone(revision.restoredFrom.createdAt, 'dayMonthShort', timeZone)}`
                       : SOURCE_LABELS[revision.source]}
+                    {/* FR-8.6 (item 8.14) — and why, when they said. */}
+                    {revision.restoreReason
+                      ? `, “${PASS_CHIPS.find((chip) => chip.value === revision.restoreReason)?.label ?? ''}”`
+                      : ''}
                     {revision.acceptedBy ? `, accepted by ${nameOf(revision.acceptedBy)}` : ''}
                     {' · '}
                     <span className="tabular-nums">
@@ -166,9 +177,9 @@ export function HistoryPanel({
                   </p>
                   {/* FR-13.6 — every version is fingerprinted when it is
                       written; the fingerprint is the record, so it is shown,
-                      and its writer can take it away as a signed document
-                      (which names the algorithm). Neither was anywhere on
-                      screen until the 2026-10-16 spec review. */}
+                      and its writer can point anyone at the public record of
+                      it, which offers the PDF (item 8.12). Neither was
+                      anywhere on screen until the 2026-10-16 spec review. */}
                   <p className="mt-1 text-[11.5px] text-ink-faint">
                     <span title={`The whole fingerprint: ${revision.contentHash}`}>
                       Fingerprint{' '}
@@ -177,11 +188,8 @@ export function HistoryPanel({
                     {mine ? (
                       <>
                         {' · '}
-                        <a
-                          href={`/api/export/proof/${revision.id}`}
-                          className="text-pencil hover:underline"
-                        >
-                          Proof that you wrote this (PDF)
+                        <a href={`/proof/${revision.id}`} className="text-pencil hover:underline">
+                          Proof that you wrote this
                         </a>
                       </>
                     ) : null}
@@ -271,9 +279,14 @@ export function HistoryPanel({
         title="Restore this version?"
         confirmLabel="Restore this version"
         busy={restore.isPending || restoreImpact.isLoading}
-        onCancel={() => setRestoring(null)}
+        onCancel={() => {
+          setRestoring(null)
+          setReason(null)
+        }}
         onConfirm={() => {
-          if (restoring) restore.mutate({ sectionId, revisionId: restoring })
+          if (restoring) {
+            restore.mutate({ sectionId, revisionId: restoring, reason: reason ?? undefined })
+          }
         }}
       >
         <p>
@@ -287,6 +300,28 @@ export function HistoryPanel({
               : `${listOf(restoreImpact.data.told.map(nameOf))} will be told: their accepted words leave the main draft, and their credit for them stops being live.`
             : 'Working out whose words this touches…'}
         </p>
+        {/* FR-8.6 (item 8.14) — no reason is owed; one click gives one, and
+            the history shows it beside the restore. */}
+        <p className="text-ink">
+          You do not owe anyone a reason. If you want to give one, pick the nearest.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {PASS_CHIPS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={reason === option.value}
+              onClick={() => setReason(reason === option.value ? null : option.value)}
+              className={
+                reason === option.value
+                  ? 'rounded-control border border-pencil bg-pencil-wash px-3 py-1.5 text-[13px] text-pencil'
+                  : 'rounded-control border border-rule bg-paper px-3 py-1.5 text-[13px] text-ink-soft hover:border-ink-faint'
+              }
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </ConfirmDialog>
 
       {restore.isError ? (

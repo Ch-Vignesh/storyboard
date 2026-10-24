@@ -20,6 +20,7 @@ import {
   assertCan,
   blockedByAuthors,
   can,
+  canNameStoryOnRecord,
   isAuthor,
   permissionsFor,
   STORY_NOT_FOUND,
@@ -89,7 +90,7 @@ export function assertNotFinished(
     code: 'BAD_REQUEST',
     message:
       asked === 'by the author'
-        ? 'This story is marked finished, so it is not asking for help. To ask, choose “Actually, there is more to do” on its Take it out page first.'
+        ? 'This story is marked finished, so it is not asking for help. To ask, choose “Actually, there is more to do” in its settings first.'
         : 'This story has been marked finished, so it is not taking suggestions any more. Yours stays on your profile.',
   })
 }
@@ -108,7 +109,14 @@ export async function loadStoryboard(
   where: { id: string } | { slug: string } | { publicId: string },
   action: Action = 'storyboard:read',
 ): Promise<StoryboardContext> {
-  const row = await db.storyboard.findUnique({ where, select: AUTHZ_SELECT })
+  let row = await db.storyboard.findUnique({ where, select: AUTHZ_SELECT })
+  // Phase 14, item 8.7 — a story keeps its address's last ten characters, its
+  // `publicId`, through every retitling, so an address from before one still
+  // finds it. The page at it then moves to the current one (`s/[slug]/layout.tsx`).
+  if (!row && 'slug' in where) {
+    const id = publicIdOfSlug(where.slug)
+    if (id) row = await db.storyboard.findUnique({ where: { publicId: id }, select: AUTHZ_SELECT })
+  }
   if (!row) throw notFound()
 
   const resource = toResource(row)
@@ -119,6 +127,14 @@ export async function loadStoryboard(
     resource,
     permissions: permissionsFor(actor, resource),
   }
+}
+
+/**
+ * Item 8.7 — the `publicId` a slug ends with: `{title}-{publicId}`, the shape
+ * `storyboard.create`, import, spin-offs and a retitling all write.
+ */
+export function publicIdOfSlug(slug: string): string | null {
+  return /-([0-9a-z]{10})$/u.exec(slug)?.[1] ?? null
 }
 
 /** `loadStoryboard` for the common "must be owner or co-author" case. */
@@ -136,6 +152,19 @@ export async function loadStoryboardAsAuthor(
  * directly by the editor and the history panel, so this is the hot path for
  * "does this person get to touch this tree at all".
  */
+/**
+ * Decision 0044 (phase 14, item 7b.1) — a published edition is a frozen
+ * version, and every write refuses it here, in the three loaders every write
+ * goes through. Reading it and taking it out as a file are what it is for.
+ */
+const EDITION_REFUSAL = 'This is a published edition. Change the working draft and publish again.'
+
+function refuseFrozen(frozenAt: Date | null, action: Action) {
+  if (frozenAt && action !== 'storyboard:read' && action !== 'storyboard:export') {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: EDITION_REFUSAL })
+  }
+}
+
 export async function loadVersion(
   db: Db,
   actor: Actor,
@@ -145,12 +174,19 @@ export async function loadVersion(
 ): Promise<StoryboardContext & { versionId: string; isMain: boolean; deletedAt: Date | null }> {
   const version = await db.version.findUnique({
     where: { id: versionId },
-    select: { id: true, isMain: true, deletedAt: true, storyboard: { select: AUTHZ_SELECT } },
+    select: {
+      id: true,
+      isMain: true,
+      deletedAt: true,
+      frozenAt: true,
+      storyboard: { select: AUTHZ_SELECT },
+    },
   })
   if (!version) throw notFound()
 
   const resource = toResource(version.storyboard)
   assertCan(actor, action, resource)
+  refuseFrozen(version.frozenAt, action)
 
   // FR-10.1 (phase 14, item 1.1) — a removed alternate is not there, for
   // reading, comparing, exporting and renaming alike. The one caller that
@@ -181,13 +217,14 @@ export async function loadChapter(
     select: {
       id: true,
       versionId: true,
-      version: { select: { storyboard: { select: AUTHZ_SELECT } } },
+      version: { select: { frozenAt: true, storyboard: { select: AUTHZ_SELECT } } },
     },
   })
   if (!chapter) throw notFound()
 
   const resource = toResource(chapter.version.storyboard)
   assertCan(actor, action, resource)
+  refuseFrozen(chapter.version.frozenAt, action)
 
   return {
     storyboardId: chapter.version.storyboard.id,
@@ -229,7 +266,7 @@ export async function loadSection(
       chapter: {
         select: {
           versionId: true,
-          version: { select: { storyboard: { select: AUTHZ_SELECT } } },
+          version: { select: { frozenAt: true, storyboard: { select: AUTHZ_SELECT } } },
         },
       },
     },
@@ -238,6 +275,7 @@ export async function loadSection(
 
   const resource = toResource(section.chapter.version.storyboard)
   assertCan(actor, action, resource)
+  refuseFrozen(section.chapter.version.frozenAt, action)
 
   // A section that was deleted, or joined into the one above, keeps its
   // history for reading (FR-2.4) and takes nothing new. Until the phase 12
@@ -339,6 +377,57 @@ export async function assertNotBlocked(
 ): Promise<void> {
   if (await blockedFromHelping(db, actor, resource)) {
     throw new TRPCError({ code: 'FORBIDDEN', message: BLOCKED_FROM_HELPING })
+  }
+}
+
+/**
+ * Phase 14, item 8.12 (FR-13.6, D-11) — one saved version's public record:
+ * its fingerprint, when it was saved, its word count and who wrote it.
+ *
+ * Unlike the loaders above, this does not refuse a story the actor cannot
+ * read, because the record is public. It names the story only where
+ * `canNameStoryOnRecord` says so, so no caller can name it by mistake. Null
+ * when there is no such version.
+ *
+ * `mayTakePdf` is who the PDF of the record is issued to: the person the
+ * record names as the writer, while they may read that version, and never for
+ * a restore, whose words were written by whoever wrote the version it copied.
+ */
+export async function loadRevisionRecord(db: Db, actor: Actor, revisionId: string) {
+  const row = await db.revision.findUnique({
+    where: { id: revisionId },
+    select: {
+      id: true,
+      createdAt: true,
+      wordCount: true,
+      contentHash: true,
+      source: true,
+      authorId: true,
+      author: { select: { username: true, displayName: true, status: true } },
+      acceptedBy: { select: { username: true, displayName: true, status: true } },
+      restoredFrom: { select: { id: true, createdAt: true } },
+      section: {
+        select: {
+          chapter: {
+            select: {
+              version: {
+                select: { storyboard: { select: { ...AUTHZ_SELECT, slug: true, title: true } } },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  if (!row) return null
+
+  const { section, authorId, ...revision } = row
+  const storyboard = section.chapter.version.storyboard
+  const named = canNameStoryOnRecord(actor, toResource(storyboard), row.createdAt)
+  return {
+    revision,
+    story: named ? { title: storyboard.title, slug: storyboard.slug } : null,
+    mayTakePdf: named && actor !== null && authorId === actor.id && row.source !== 'RESTORED',
   }
 }
 

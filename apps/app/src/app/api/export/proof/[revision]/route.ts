@@ -1,10 +1,10 @@
-import { exportAuthorshipProof } from '@storyboard/export'
+import { contentDisposition, exportAuthorshipProof } from '@storyboard/export'
 import { prisma } from '@storyboard/db'
 import { NextResponse } from 'next/server'
 
 import { auth } from '@/auth'
 import { env } from '@/env'
-import { loadStoryboard } from '@/lib/authz/guard'
+import { loadRevisionRecord } from '@/lib/authz/guard'
 import { actorFrom } from '@/server/trpc/init'
 import { nameOf } from '@/lib/people'
 import { logger } from '@/lib/logger'
@@ -18,9 +18,10 @@ type Params = { params: Promise<{ revision: string }> }
  * FR-13.6 — proof that you wrote this, when you say you did.
  *
  * Offered to the person the revision is attributed to and to nobody else. Not
- * because the facts are secret — a public storyboard's history shows them — but
- * because a document of this kind is issued *to* somebody, and one issued about
- * a stranger on request would be a strange thing for this product to make.
+ * because the facts are secret — since item 8.12 they are on a public record
+ * page — but because a document of this kind is issued *to* somebody, and one
+ * issued about a stranger on request would be a strange thing for this
+ * product to make.
  *
  * A contributor who has erased their record (decision 0013) no longer has a
  * revision attributed to them, and so can no longer draw a proof from it. That
@@ -35,76 +36,56 @@ export async function GET(_request: Request, { params }: Params): Promise<NextRe
     return NextResponse.json({ error: 'Sign in first.' }, { status: 401 })
   }
 
-  const revision = await prisma.revision.findUnique({
+  // Item 8.12 — the record page's rule decides who takes it away: the writer
+  // the record names, and only while they can still read that version. The
+  // document carries the story's current title, chapter and address, so a
+  // story that has since gone private, or been deleted, handed those to a
+  // former contributor until the phase 12 audit. Never for a restore either:
+  // its words were written by whoever wrote the version it copied, and the
+  // restorer was offered a proof of them until item 8.12.
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { status: true, deletionRequestedAt: true },
+  })
+  const record = await loadRevisionRecord(prisma, actorFrom(session, account), revisionId)
+  if (!record?.mayTakePdf || !record.story) {
+    return NextResponse.json({ error: 'Not found.' }, { status: 404 })
+  }
+
+  const revision = await prisma.revision.findUniqueOrThrow({
     where: { id: revisionId },
     select: {
-      id: true,
-      authorId: true,
-      contentHash: true,
-      wordCount: true,
-      createdAt: true,
-      author: { select: { username: true, displayName: true } },
       section: {
         select: {
           title: true,
           order: true,
           lineageId: true,
           chapter: {
-            select: {
-              title: true,
-              order: true,
-              version: {
-                select: { storyboard: { select: { id: true, slug: true, title: true } } },
-              },
-            },
+            select: { title: true, version: { select: { storyboardId: true } } },
           },
         },
       },
     },
   })
-
-  if (revision?.authorId !== userId) {
-    return NextResponse.json({ error: 'Not found.' }, { status: 404 })
-  }
-
   const { section } = revision
-  const storyboard = section.chapter.version.storyboard
 
-  // And only while they can still read the story. The document carries its
-  // current title, chapter and address, so a story that has since gone
-  // private, or been deleted, handed those to a former contributor (phase 12
-  // audit). The proof is of the words; a story they cannot see is not theirs
-  // to describe.
-  const account = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { status: true, deletionRequestedAt: true },
-  })
-  try {
-    await loadStoryboard(prisma, actorFrom(session, account), { id: storyboard.id })
-  } catch {
-    return NextResponse.json({ error: 'Not found.' }, { status: 404 })
-  }
-
-  // The section's history where readers find it now: its lineage's place in
-  // the main draft, counted as the reader counts (`server/places.ts`). Built
-  // from this row's stored order until the 2026-10-16 spec review, which was
-  // wrong for a revision written in an alternate version, or a section moved.
-  const place = (await mainDraftPlaces(prisma, storyboard.id, [section.lineageId])).get(
-    section.lineageId,
-  )
-  const url = place
-    ? `${env.NEXT_PUBLIC_APP_URL}${place.path}/history`
-    : `${env.NEXT_PUBLIC_APP_URL}/s/${storyboard.slug}`
+  // The chapter as readers find it now: its lineage's place in the main
+  // draft, counted as the reader counts (`server/places.ts`).
+  const place = (
+    await mainDraftPlaces(prisma, section.chapter.version.storyboardId, [section.lineageId])
+  ).get(section.lineageId)
 
   const file = await exportAuthorshipProof({
-    storyboardTitle: storyboard.title,
-    author: nameOf(revision.author),
+    storyboardTitle: record.story.title,
+    author: nameOf(record.revision.author),
     chapterTitle: place?.chapter ?? section.chapter.title,
     sectionTitle: section.title ?? `Section ${String(section.order + 1)}`,
-    wordCount: revision.wordCount,
-    contentHash: revision.contentHash,
-    writtenAt: revision.createdAt,
-    url,
+    wordCount: record.revision.wordCount,
+    contentHash: record.revision.contentHash,
+    writtenAt: record.revision.createdAt,
+    // Item 8.12 — the public record, which anyone can open, rather than the
+    // section's history, which is a 404 to a stranger on a private story.
+    url: `${env.NEXT_PUBLIC_APP_URL}/proof/${revisionId}`,
     exportedAt: new Date(),
   })
 
@@ -113,7 +94,8 @@ export async function GET(_request: Request, { params }: Params): Promise<NextRe
   return new NextResponse(new Uint8Array(file.body), {
     headers: {
       'content-type': file.mediaType,
-      'content-disposition': `attachment; filename="${file.fileName}"`,
+      // Item 8.8 — the story's title as written, where the browser takes it.
+      'content-disposition': contentDisposition(file),
       'content-length': String(file.body.byteLength),
       'cache-control': 'no-store',
     },

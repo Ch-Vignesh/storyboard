@@ -1,3 +1,4 @@
+import { ExampleNotice } from '@/components/example-notice'
 import { SiteHeader } from '@/components/site-header'
 
 /**
@@ -9,10 +10,16 @@ import { SiteHeader } from '@/components/site-header'
  * group on purpose: it has its own header, with the account end of this one
  * inside it.
  */
-export default function StoryPagesLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function StoryPagesLayout({
+  children,
+  params,
+}: Readonly<{ children: React.ReactNode; params: Promise<{ slug: string }> }>) {
+  const { slug } = await params
   return (
     <>
       <SiteHeader />
+      {/* FR-15.3 (item 7.7) — a seeded story says so on every page of it. */}
+      <ExampleNotice slug={slug} />
       {children}
     </>
   )

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { signUpAndOnboard } from './helpers'
+import { signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * Phase 14, item 1.18 — dates in the reader's own time zone. Server components
@@ -27,9 +27,8 @@ test('the server writes a time in the browser’s own zone', async ({ browser, b
   await page.getByRole('button', { name: 'Literary fiction', exact: true }).click()
   await page.getByRole('button', { name: /create and start writing/i }).click()
   await expect(page).toHaveURL(/\/s\/clocks-/)
-  const path = new URL(page.url()).pathname
+  const path = storyPath(page)
 
-  await page.getByRole('link', { name: 'Edit' }).first().click()
   const editor = page.getByRole('textbox', { name: /section text/i })
   await editor.click()
   await editor.pressSequentially('It was late, or early, depending on where you stood.')

@@ -6,6 +6,7 @@ import { canReadStoryboard } from '@/lib/authz/guard'
 import { logger } from '@/lib/logger'
 import { DAILY_LIMITS, REPORTS_TO_SUSPEND } from '@/lib/schemas/constants'
 import { createReportSchema, REPORT_COPY } from '@/lib/schemas/report'
+import { recordEvent } from '@/server/audit'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 
 import { activeProcedure, createTRPCRouter } from '../init'
@@ -99,6 +100,16 @@ export const reportRouter = createTRPCRouter({
       },
       'report filed',
     )
+    // Item 10.2 — stored as well as logged: who reported, whom it was about,
+    // and the category. The note stays on the report, for the queue alone.
+    await recordEvent(ctx.db, {
+      event: 'report.created',
+      actorId: reporterId,
+      subjectId: target.ownerId,
+      storyboardId: target.storyboardId,
+      target: { type: input.targetType, id: input.targetId },
+      detail: { category: input.category },
+    })
 
     return { status: 'filed' as const, message: REPORT_COPY.thanks }
   }),
@@ -145,13 +156,13 @@ async function resolveTarget(
   actorId: string,
   targetType: 'USER' | 'STORYBOARD' | 'SUGGESTION' | 'IDEA',
   targetId: string,
-): Promise<{ ownerId: string } | null> {
+): Promise<{ ownerId: string; storyboardId: string | null } | null> {
   const actor = { id: actorId }
 
   switch (targetType) {
     case 'USER': {
       const user = await db.user.findUnique({ where: { id: targetId }, select: { id: true } })
-      return user ? { ownerId: user.id } : null
+      return user ? { ownerId: user.id, storyboardId: null } : null
     }
     case 'STORYBOARD': {
       const storyboard = await db.storyboard.findUnique({
@@ -162,7 +173,7 @@ async function resolveTarget(
       // You cannot report what you cannot see. Otherwise reporting becomes a
       // way to ask whether a private storyboard exists.
       if (!(await canReadStoryboard(db, actor, { id: storyboard.id }))) return null
-      return { ownerId: storyboard.ownerId }
+      return { ownerId: storyboard.ownerId, storyboardId: storyboard.id }
     }
     case 'SUGGESTION': {
       const suggestion = await db.suggestion.findUnique({
@@ -181,7 +192,7 @@ async function resolveTarget(
       if (!suggestion) return null
       const storyboardId = suggestion.request.section.chapter.version.storyboardId
       if (!(await canReadStoryboard(db, actor, { id: storyboardId }))) return null
-      return { ownerId: suggestion.contributorId }
+      return { ownerId: suggestion.contributorId, storyboardId }
     }
     case 'IDEA': {
       const idea = await db.idea.findUnique({
@@ -200,7 +211,7 @@ async function resolveTarget(
       if (!idea) return null
       const storyboardId = idea.request.section.chapter.version.storyboardId
       if (!(await canReadStoryboard(db, actor, { id: storyboardId }))) return null
-      return { ownerId: idea.authorId }
+      return { ownerId: idea.authorId, storyboardId }
     }
   }
 }

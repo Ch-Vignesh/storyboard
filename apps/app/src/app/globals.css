@@ -4,14 +4,44 @@
  * The manuscript surface (NFR-5, architecture section 9).
  *
  * Measure is fixed at 62–68 characters, because that is typography rather than
- * preference. Type size and line height are the two things a reader may adjust;
- * `ReadingControls` writes these two custom properties onto :root and the
- * browser reflows. Defaults match the design tokens, so a signed-out guest gets
- * the intended setting with no JavaScript at all.
+ * preference. Type size and line height are the two things a reader may adjust:
+ * the root layout sets these two custom properties on <html> from the `reading`
+ * cookie (phase 14, item 7.5), so a page is drawn at the reader's setting with
+ * no JavaScript, and `ReadingControls` changes them in place. The defaults here
+ * match the design tokens, for a page drawn with no cookie.
  */
 :root {
   --reading-type-scale: 1;
   --reading-line-height: 1.68;
+}
+
+/*
+ * Phase 14, item 7.9 — printed, a story is its text. The chrome is hidden
+ * where it is drawn (`print:hidden`); here the page loses its background
+ * and the passage marks, the text runs the width of the paper, a heading
+ * stays with the text after it, and each chapter after the first starts a
+ * new page.
+ */
+@media print {
+  body {
+    background: none;
+  }
+  .manuscript {
+    max-width: none;
+  }
+  .manuscript section {
+    background: none !important;
+  }
+  [data-chapter-heading] {
+    break-after: avoid;
+  }
+  [data-chapter-heading] ~ [data-chapter-heading] {
+    break-before: page;
+  }
+  .manuscript p {
+    orphans: 3;
+    widows: 3;
+  }
 }
 
 .manuscript {

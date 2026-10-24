@@ -1,3 +1,4 @@
+import { ExampleLabel } from '@/components/example-label'
 import Link from '@/components/link'
 
 import { REQUEST_KINDS, closesOn } from '@/lib/schemas/help'
@@ -41,11 +42,7 @@ export function RequestCard({ request, timeZone }: { request: Request; timeZone:
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11.5px] tracking-wide text-ochre uppercase">{kind?.label}</span>
-        {request.storyboard.isSeed ? (
-          <span className="border border-ochre/40 px-1 text-[10.5px] tracking-wide text-ochre uppercase">
-            example
-          </span>
-        ) : null}
+        {request.storyboard.isSeed ? <ExampleLabel /> : null}
         {/* FR-12.4's threshold, shown as context rather than as a warning: a
             request with no answers is a normal state (FR-15.1). */}
         {request.quiet ? (
@@ -66,6 +63,12 @@ export function RequestCard({ request, timeZone }: { request: Request; timeZone:
           {request.kind === 'UNBLOCK'
             ? `${String(answers)} ${answers === 1 ? 'idea' : 'ideas'}`
             : `${String(answers)} ${answers === 1 ? 'suggestion' : 'suggestions'} · ${String(request.minWords)}–${String(request.maxWords)} words`}
+          {/* Item 9.1 (FR-11.3) — when it was opened, or opened again: the
+              date the list is in order of, in the reader's zone. */}
+          {' · Opened '}
+          <time dateTime={request.openedAt.toISOString()}>
+            {formatInZone(request.openedAt, 'dayMonth', timeZone)}
+          </time>
           {/* Item 6.15 (D-8) — said from the day it opens, in the reader's zone. */}
           {` · Closes on ${formatInZone(closesOn(request.openedAt), 'dayMonth', timeZone)}`}
         </p>

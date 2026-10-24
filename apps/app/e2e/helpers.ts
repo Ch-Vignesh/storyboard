@@ -95,6 +95,16 @@ export async function signUpAndOnboard(page: Page): Promise<{ email: string; use
   return { email, username }
 }
 
+/**
+ * A story's own address, from wherever its page is: creating a story opens
+ * its first section's editor (phase 14, item 8.2), at `/s/{slug}/c/1/1/edit`.
+ */
+export function storyPath(page: Page): string {
+  const match = /^\/s\/[^/]+/u.exec(new URL(page.url()).pathname)
+  if (!match) throw new Error(`Not on a story's page: ${page.url()}`)
+  return match[0]
+}
+
 /** Signs an existing account in through the real form. */
 export async function signIn(page: Page, email: string, password = PASSWORD): Promise<void> {
   await page.goto('/signin')
@@ -130,9 +140,8 @@ export async function openRequest(
   await page.getByRole('button', { name: 'Literary fiction', exact: true }).click()
   await page.getByRole('button', { name: /create and start writing/i }).click()
   await expect(page).toHaveURL(/\/s\//)
-  const path = new URL(page.url()).pathname
+  const path = storyPath(page)
 
-  await page.getByRole('link', { name: 'Edit' }).first().click()
   const editor = page.getByRole('textbox', { name: /section text/i })
   await editor.click()
   await editor.pressSequentially(

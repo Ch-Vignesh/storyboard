@@ -3,6 +3,7 @@ import Link from '@/components/link'
 
 import { auth } from '@/auth'
 import { readTimeZone } from '@/lib/dates'
+import { NOT_INDEXED } from '@/lib/metadata'
 import { formatInZone } from '@/lib/time-zone'
 import { caller } from '@/trpc/server'
 
@@ -14,7 +15,8 @@ type Params = {
   searchParams?: Promise<{ version?: string }>
 }
 
-export const metadata: Metadata = { title: 'History' }
+// Item 9.8 — every earlier wording of a passage the reader already shows: not for an index.
+export const metadata: Metadata = { title: 'History', robots: NOT_INDEXED }
 
 /**
  * Screen 11 — FR-8.3. Every revision, with who wrote it, when, and where it
@@ -75,7 +77,8 @@ export default async function SectionHistoryPage({ params, searchParams }: Param
         initial={history}
         canRestore={located.permissions.canRestore}
         viewerId={session?.user.id ?? null}
-        backHref={`/s/${slug}${suffix}`}
+        // Item 8.1 — back to this section, not to chapter one.
+        backHref={`/s/${slug}/c/${chapterNo}/${sectionNo}${suffix}`}
         // Item 1.18 — the same zone on the server and in the browser, so the
         // hours do not change on load.
         timeZone={timeZone}

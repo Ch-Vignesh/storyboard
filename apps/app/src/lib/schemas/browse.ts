@@ -24,7 +24,9 @@ export const BROWSE_SORTS = [
   {
     value: 'CLOSING_SOON',
     label: 'Waiting longest',
-    blurb: 'Approaching the point where the author gets nudged.',
+    // Decision 0050 (item 6.15) — a request closes by itself after its
+    // thirty days; the oldest are the nearest to that.
+    blurb: 'Open the longest, and so the nearest to closing by themselves.',
   },
   {
     value: 'NO_ANSWERS',
@@ -61,6 +63,18 @@ export const browseFiltersSchema = z.object({
 })
 
 export type BrowseFilters = z.infer<typeof browseFiltersSchema>
+
+/**
+ * FR-11.3 (phase 14, item 9.1) — where "Show more" carries on from: the last
+ * card's sort date and its id, which breaks a tie. Values, not a row to look
+ * up, so a request answered or closed since the page was read still marks its
+ * place, and the database is asked nothing about any row to find it.
+ */
+export const browseCursorSchema = z
+  .object({ at: z.date(), id: z.string().min(1).max(64) })
+  .nullish()
+
+export type BrowseCursor = z.infer<typeof browseCursorSchema>
 
 /**
  * Reads the filters out of a URL, so browse is linkable and back works.

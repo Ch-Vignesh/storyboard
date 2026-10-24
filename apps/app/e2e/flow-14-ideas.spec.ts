@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { signUpAndOnboard } from './helpers'
+import { signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * Ideas, through the interface (FR-5.2, FR-6.9). No flow posted one until
@@ -28,7 +28,7 @@ test('a reader answers a "help me think" request, and a closed one takes no more
   await authorPage.getByRole('button', { name: 'Literary fiction', exact: true }).click()
   await authorPage.getByRole('button', { name: /create and start writing/i }).click()
   await expect(authorPage).toHaveURL(/\/s\/the-logbook-/)
-  const storyboardUrl = new URL(authorPage.url()).pathname
+  const storyboardUrl = storyPath(authorPage)
 
   // FR-5.2 — the kind that wants ideas, not prose. No pre-context (FR-5.4).
   await authorPage.goto(`${storyboardUrl}/help/new`)

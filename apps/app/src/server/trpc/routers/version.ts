@@ -4,6 +4,9 @@ import { z } from 'zod'
 
 import { loadStoryboard, loadVersion } from '@/lib/authz/guard'
 import { logger } from '@/lib/logger'
+import { VERSION_EVENTS_SHOWN, VERSION_NAME_MAX_CHARS } from '@/lib/schemas/constants'
+import { formatInZone, timeZoneFromHeaders } from '@/lib/time-zone'
+import { recordEvent } from '@/server/audit'
 import { closeRequest, closeRequestsOnSections } from '@/server/close-requests'
 
 import { copyTree } from '@/server/tree'
@@ -12,11 +15,14 @@ import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '.
 
 const log = logger.child({ router: 'version' })
 
+/** What every story's first version is called (storyboard.create, import, spin-off). */
+const MAIN_DRAFT_NAME = 'Main draft'
+
 const nameSchema = z
   .string()
   .trim()
   .min(1, 'Give the version a name.')
-  .max(120, 'That name is too long.')
+  .max(VERSION_NAME_MAX_CHARS, 'That name is too long.')
 
 /**
  * Alternate versions (FR-10.1, FR-10.2).
@@ -37,8 +43,9 @@ export const versionRouter = createTRPCRouter({
       })
 
       const versions = await ctx.db.version.findMany({
-        // A removed alternate stays out of the list (FR-10.1, phase 14 item 1.1).
-        where: { storyboardId, deletedAt: null },
+        // A removed alternate stays out of the list (FR-10.1, phase 14 item 1.1),
+        // and so does a published edition, which is listed as one (item 7b.1).
+        where: { storyboardId, deletedAt: null, frozenAt: null },
         orderBy: [{ isMain: 'desc' }, { createdAt: 'asc' }],
         select: {
           id: true,
@@ -60,8 +67,24 @@ export const versionRouter = createTRPCRouter({
         },
       })
 
+      // Item 7.10 (FR-10.2) — the promotions, newest first, as they were named then.
+      const events = await ctx.db.versionEvent.findMany({
+        where: { storyboardId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: VERSION_EVENTS_SHOWN,
+        select: {
+          id: true,
+          kind: true,
+          versionName: true,
+          previousName: true,
+          createdAt: true,
+          actor: { select: { username: true, displayName: true, status: true } },
+        },
+      })
+
       return {
         permissions,
+        events,
         versions: versions.map((version) => ({
           id: version.id,
           name: version.name,
@@ -181,9 +204,20 @@ export const versionRouter = createTRPCRouter({
           select: { id: true, name: true },
         })
 
+        // Item 7.10 — a demoted draft still called "Main draft" would be
+        // called the main draft's name forever after; it is dated instead,
+        // in the promoter's own zone (item 1.18).
+        const previousName =
+          previous?.name === MAIN_DRAFT_NAME
+            ? `Main draft until ${formatInZone(new Date(), 'short', timeZoneFromHeaders(ctx.headers))}`
+            : (previous?.name ?? null)
+
         // Demote first: the index permits exactly one main at a time.
         if (previous) {
-          await tx.version.update({ where: { id: previous.id }, data: { isMain: false } })
+          await tx.version.update({
+            where: { id: previous.id },
+            data: { isMain: false, name: previousName ?? previous.name },
+          })
         }
         // Conditional on what was checked above still holding at the moment
         // of writing: a delete landing between the check and here would
@@ -205,10 +239,27 @@ export const versionRouter = createTRPCRouter({
           })
         }
 
+        // FR-10.2 — "records the swap in storyboard history" (item 7.10).
+        const now = await tx.version.findUniqueOrThrow({
+          where: { id: versionId },
+          select: { name: true },
+        })
+        await tx.versionEvent.create({
+          data: {
+            storyboardId,
+            kind: 'PROMOTED',
+            versionId,
+            versionName: now.name,
+            previousVersionId: previous?.id ?? null,
+            previousName,
+            actorId: ctx.session.user.id,
+          },
+        })
+
         const stranded = previous ? await carryRequestsOver(tx, previous.id, versionId) : []
         return {
           previousId: previous?.id ?? null,
-          previousName: previous?.name ?? null,
+          previousName,
           stranded,
         }
       })
@@ -229,6 +280,15 @@ export const versionRouter = createTRPCRouter({
         },
         'version promoted to main draft',
       )
+      // Item 10.2 — stored as well as logged.
+      await recordEvent(ctx.db, {
+        event: 'version.promoted',
+        actorId: ctx.session.user.id,
+        subjectId: null,
+        storyboardId,
+        target: { type: 'VERSION', id: versionId },
+        detail: { previousMainId: result.previousId, requestsClosed: result.stranded.length },
+      })
       return { versionId, previousId: result.previousId, previousName: result.previousName }
     }),
 

@@ -11,7 +11,15 @@
  * seeded storyboard to be owned by the platform account and labelled an example
  * in the interface. Both are load-bearing: a platform whose pitch is trust
  * cannot be caught passing someone else's work off as its community.
+ *
+ * Phase 14, item 9.5: it is the first story the marketing page's "Read it"
+ * opens, so it carries one open request of each kind (FR-1.1's sixty seconds
+ * end on a stuck passage), two of them in the first chapter a visitor sees.
+ * The continuation needs a section that does not exist yet (FR-5.2, FR-5.7),
+ * so the story has a fourth chapter with nothing in it but that.
  */
+
+import type { SeedRequest } from './library'
 
 export const EXAMPLE_STORYBOARD = {
   title: 'The Yellow Wallpaper',
@@ -330,5 +338,106 @@ export const EXAMPLE_STORYBOARD = {
         ],
       ],
     },
+    {
+      // Item 9.5 — not Gilman's: an empty section where the continuation
+      // request below asks for what comes next.
+      title: 'Afterwards',
+      sections: [[]],
+    },
   ],
 } as const
+
+/**
+ * A rewrite that keeps the section and changes the paragraphs named, the way a
+ * helper edits the text the composer starts them with (FR-6.1), so that the
+ * comparison marks only what changed. A paragraph that is not there is a
+ * mistake in this file, and stops the seed rather than seeding nonsense.
+ */
+function rewriting(
+  paragraphs: readonly string[],
+  changes: ReadonlyArray<readonly [from: string, to: string]>,
+): string {
+  for (const [from] of changes) {
+    if (!paragraphs.includes(from)) throw new Error(`No such paragraph to rewrite: ${from}`)
+  }
+  return paragraphs.map((text) => changes.find(([from]) => from === text)?.[1] ?? text).join('\n\n')
+}
+
+/**
+ * Item 9.5 (FR-15.4, D-14) — the story's stuck points, one of each kind, with
+ * the help the example helpers have already offered on each. Addressed by
+ * chapter and section, by index.
+ */
+export const EXAMPLE_REQUESTS: SeedRequest[] = [
+  {
+    kind: 'UNBLOCK',
+    title: 'She says the whole story on the first page. Is that too much?',
+    chapter: 0,
+    section: 0,
+    ask: 'On the first page she says, in brackets, that her husband being a physician is perhaps one reason she does not get well faster. That is the story, and she says it before anything has happened. If she sees it this clearly now, the reader watches her lose the ability to see it, which is terrible in the right way. If she sees it less clearly, the reader gets there first and spends the story waiting for her to catch up. Which story am I writing, and does the bracket have to go either way?',
+    ideas: [
+      {
+        by: 'example-helper-1',
+        body: 'Keep the bracket. What makes it bearable is that she says it and then talks herself out of it in the next breath: “You see, he does not believe I am sick! And what can one do?” She is not lucid; she is lucid for one clause and then obedient. The reader is not ahead of her but beside her, watching her decide not to know what she knows. That is the whole descent in miniature, and it is already on page one.',
+      },
+      {
+        by: 'example-helper-2',
+        body: 'I would keep it, and notice how the story protects it: she would not say it “to a living soul”, only to “dead paper”. The one place she can be honest is the journal, and the journal is the thing John forbids. So the clear sight on page one is not the ending given away. It is the first thing the room is going to take from her, and without it the reader has nothing to measure the later pages against.',
+      },
+    ],
+  },
+  {
+    kind: 'REWRITE',
+    title: 'The first sight of the paper uses up every strong word I have',
+    chapter: 0,
+    section: 1,
+    ask: 'Her first description of the wallpaper is already at full volume: repellant, revolting, smouldering, unclean, sickly, guilty of every artistic sin. She has to look at it for three months, and I have left myself nowhere to go. I want this first sight to be cooler, a woman with taste being rude about a bad paper, so that the horror has room to grow later. Keep the rest of the section as it is: John, the nursery, the barred windows, the two weeks.',
+    preContext:
+      'A woman in her twenties, recently a mother, is spending the summer in a rented colonial mansion with her husband John, a physician, who has diagnosed temporary nervous depression and prescribed complete rest. She is forbidden to work, and especially to write, and keeps this journal in secret. John has chosen their bedroom: a large room at the top of the house that was once a nursery, with barred windows, rings in the walls, a heavy bed, and a yellow wallpaper torn off in great strips. She wanted a room downstairs with roses at the window. On the page she is lively, sharp and funny, and loyal to John even when she disagrees with him, which is more often than she lets him see. Over the summer she will come to believe that a woman is trapped behind the pattern of the paper, and in the last scene she will be creeping round the room, having torn most of it down. This section is the reader’s first sight of the paper.',
+    suggestions: [
+      {
+        by: 'example-helper-2',
+        note: 'Turned her down to irritated and amused, so the horror has somewhere to go later. Every fact is still there. The strong words are saved, and the last line is a promise she will not keep.',
+        prose: rewriting(EXAMPLE_STORYBOARD.chapters[0].sections[1], [
+          [
+            'One of those sprawling flamboyant patterns committing every artistic sin.',
+            'One of those sprawling flamboyant patterns that somebody must once have paid for.',
+          ],
+          [
+            'It is dull enough to confuse the eye in following, pronounced enough to constantly irritate, and provoke study, and when you follow the lame, uncertain curves for a little distance they suddenly commit suicide—plunge off at outrageous angles, destroy themselves in unheard-of contradictions.',
+            'It is dull enough to confuse the eye in following, and pronounced enough to irritate, and when you follow the curves for a little distance they lose interest in themselves and wander off at angles, as if whoever drew them had been called away to something better.',
+          ],
+          [
+            'The color is repellant, almost revolting; a smouldering, unclean yellow, strangely faded by the slow-turning sunlight.',
+            'The color is a yellow, and not a good one, faded unevenly where the sun has been at it.',
+          ],
+          [
+            'It is a dull yet lurid orange in some places, a sickly sulphur tint in others.',
+            'In some places it is nearly orange, and in others the shade of a mustard plaster.',
+          ],
+          [
+            'No wonder the children hated it! I should hate it myself if I had to live in this room long.',
+            'No wonder the children tore at it. I shall not be here long enough to mind.',
+          ],
+        ]),
+      },
+    ],
+  },
+  {
+    kind: 'CONTINUE',
+    title: 'One page from outside the room, after John faints',
+    chapter: 3,
+    section: 0,
+    ask: 'The story ends with John fainting and her creeping over him, and I have always stopped there. I want to try one short last section from outside her head: the same evening, seen by Jennie, John’s sister, coming back to a quiet house. Plain prose, past tense, plainer than anything before it. Jennie describes what she sees and what she does first, and understands none of it. No diagnosis, no moral, and do not use the word yellow.',
+    preContext:
+      'The story is a journal kept in secret by a young wife and mother whose husband, John, a physician, has prescribed complete rest and forbidden her to write. They have taken an old colonial mansion for the summer, and John has put her in the top-floor nursery: barred windows, a bed nailed to the floor, and a yellow wallpaper whose pattern she has come to believe hides a woman trying to get out. John’s sister Jennie keeps house for them, kindly and watchfully, and reports on her to John. On their last day, with the furniture moved downstairs and Jennie out of the way, the narrator locks herself in, throws the key down into the front path, and tears off all the paper she can reach. When John gets the door open he finds her creeping round the walls, saying she has got out at last and that they cannot put her back. He faints, and she goes on creeping over him. That is where the journal stops. Nothing in it says what happened next.',
+    suggestions: [
+      {
+        by: 'example-helper-1',
+        note: 'Stayed out of her head entirely. Jennie notices things in the order a housekeeper would, and does the one ordinary thing left to do.',
+        prose:
+          'Jennie came back from the village a little after six with the last of the parcels, and found the front door standing open and the house quite still.\n\nShe called up the stairs, and nobody answered.\n\nAn axe stood against the wall on the top landing. The nursery door beside it was open, and had not been touched.\n\nHer brother was sitting on the floor of the bare room with his back against the wall and his collar undone, and he did not get up when she came in. Most of the paper was off the walls. It lay about the boards in long curled strips, like something that had been shed, and the smell of it was stronger than she had ever known it.\n\nHis wife was asleep on the great bed, on the canvas mattress, with her hands under her cheek.\n\nJennie went down to the kitchen and put the kettle on, because it was the first thing she could think of to do, and stood beside it until it boiled.',
+      },
+    ],
+  },
+]

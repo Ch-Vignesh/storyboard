@@ -78,8 +78,16 @@ test('closing, going private, passing, withdrawing, restoring, joining and remov
   await page.goto(`${path}/c/1/1/history`)
   await page.getByRole('button', { name: 'Restore this version' }).first().click()
   await expect(dialog()).toContainText('Nobody else’s accepted words are affected.')
+  // 8.14 (FR-8.6) — a reason if they want one, from the chips, and History shows it.
+  await dialog().getByRole('button', { name: 'I have solved it another way' }).click()
   await dialog().getByRole('button', { name: 'Restore this version' }).click()
   await expect(page.getByText(/restored from/i).first()).toBeVisible()
+  await expect(
+    page
+      .getByRole('listitem')
+      .filter({ hasText: /restored from/i })
+      .first(),
+  ).toContainText('“I have solved it another way”')
 
   // 5.5 — closing for real, and opening it again.
   await page.goto(requestPath)

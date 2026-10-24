@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { prisma } from '@storyboard/db'
-import { IMPORT_LIMITS } from '@storyboard/import/types'
+import { IMPORT_LIMITS, TOO_LARGE } from '@storyboard/import/types'
 
 import { auth } from '@/auth'
 import { logger } from '@/lib/logger'
@@ -57,7 +57,7 @@ export async function PUT(request: Request): Promise<NextResponse> {
 
   const declared = Number(request.headers.get('content-length') ?? '0')
   if (declared > IMPORT_LIMITS.bytes) {
-    return NextResponse.json({ error: 'That file is larger than 5 MB.' }, { status: 413 })
+    return NextResponse.json({ error: TOO_LARGE }, { status: 413 })
   }
 
   // The header is a claim, and a chunked upload makes none, so the body is
@@ -65,7 +65,7 @@ export async function PUT(request: Request): Promise<NextResponse> {
   // an unannounced body fill the server's memory (phase 12 audit).
   const body = await readCapped(request, IMPORT_LIMITS.bytes)
   if (!body) {
-    return NextResponse.json({ error: 'That file is larger than 5 MB.' }, { status: 413 })
+    return NextResponse.json({ error: TOO_LARGE }, { status: 413 })
   }
 
   await putObject(key, body)

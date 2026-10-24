@@ -57,18 +57,22 @@ export const REQUEST_KINDS = [
     label: 'Rewrite this',
     blurb: 'There is prose here and it is not working. You want someone to write it again.',
     returns: 'prose',
+    // Phase 14, item 7.1 — how the reader's margin names it, as the prototype does.
+    wants: 'Wants it rewritten',
   },
   {
     value: 'CONTINUE',
     label: 'Write what comes next',
     blurb: 'This part does not exist yet. You want someone to write it.',
     returns: 'prose',
+    wants: 'Wants someone to write it',
   },
   {
     value: 'UNBLOCK',
     label: 'Help me think',
     blurb: 'You want options, a diagnosis, a direction — not someone else’s prose.',
     returns: 'ideas',
+    wants: 'Wants ideas',
   },
 ] as const
 
@@ -227,7 +231,10 @@ export const suggestionNoteSchema = z
   )
   .optional()
 
-/** FR-6.10 — a fixed set, chosen in one click. There is no free-text field. */
+/**
+ * FR-6.10 — a fixed set, chosen in one click. There is no free-text field.
+ * FR-8.6 offers the same four on a restore (phase 14, item 8.14).
+ */
 export const PASS_CHIPS = [
   { value: 'NOT_THE_DIRECTION', label: 'Not the direction I want' },
   { value: 'DOES_NOT_FIT_VOICE', label: 'Does not fit the voice' },

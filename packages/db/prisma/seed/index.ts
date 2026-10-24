@@ -3,15 +3,18 @@
  *
  *   pnpm db:seed
  *
- * Seeds reference data (genres, FR-15.6) and the example storyboards under
- * prisma/seed/storyboards/, each flagged `isSeed` and owned by the platform
- * account so they are never mistaken for the work of a real writer (FR-15.3).
+ * Seeds reference data (genres, FR-15.6, and the kill switches of item 9.4,
+ * off) and the example storyboards under prisma/seed/storyboards/, each
+ * flagged `isSeed` and owned by the platform account so they are never
+ * mistaken for the work of a real writer (FR-15.3).
  */
 import { loadRootEnv } from '@storyboard/config/env'
 
 import { createPrismaClient } from '../../src/client'
+import { SEEDED_FLAGS, seedFlags } from './flags'
 import { GENRES } from './genres'
 import { seedExampleStoryboard } from './storyboards'
+import { ensureSeedAccounts } from './storyboards/accounts'
 import { seedLibrary } from './storyboards/seed-library'
 
 loadRootEnv()
@@ -40,11 +43,20 @@ async function main(): Promise<void> {
     }
     console.warn(`genres: ${String(GENRES.length)} ensured, ${String(created)} new`)
 
-    const example = await seedExampleStoryboard(prisma)
+    // Item 9.4 (D-18) — the kill switches, new ones off, existing ones as they stand.
+    const flags = await seedFlags(prisma)
+    console.warn(
+      `flags: ${String(SEEDED_FLAGS.length)} ensured, ${String(flags.created)} new, every new one off`,
+    )
+
+    // FR-15.3 — whoever owns and answers the examples, made before anything they own.
+    const accounts = await ensureSeedAccounts(prisma)
+
+    const example = await seedExampleStoryboard(prisma, accounts)
     console.warn(`example storyboard: ${example}`)
 
     // FR-15.1 to FR-15.4 — the launch library.
-    const library = await seedLibrary(prisma)
+    const library = await seedLibrary(prisma, accounts)
     console.warn(
       `library: ${String(library.created)} created, ${String(library.skipped)} already present, ` +
         `${String(library.requests)} requests (${String(library.answered)} answered)` +
@@ -53,6 +65,18 @@ async function main(): Promise<void> {
         // of this output somebody needs to notice (decision 0023).
         (library.corrected
           ? `\nlibrary: ${String(library.corrected)} excerpt(s) corrected to match their cited edition`
+          : '') +
+        // Item 9.5 — what a database seeded before the library grew was given.
+        (library.extended
+          ? `\nlibrary: ${String(library.extended)} section(s) added to stories already present`
+          : '') +
+        (library.help
+          ? `\nlibrary: ${String(library.help)} suggestion(s) and idea(s) from the example helpers`
+          : '') +
+        // A stuck point the library names and the database could not take. On
+        // a fresh database the library's own test keeps this empty.
+        (library.unplaced.length
+          ? `\nlibrary: not placed, their section is already asked about: ${library.unplaced.join('; ')}`
           : ''),
     )
   } finally {

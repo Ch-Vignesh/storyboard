@@ -1,3 +1,4 @@
+import { ExampleNotice } from '@/components/example-notice'
 import { SiteHeader } from '@/components/site-header'
 
 /**
@@ -6,10 +7,16 @@ import { SiteHeader } from '@/components/site-header'
  * pages in `../(story)`. They sit beside that group rather than inside it
  * only because of where they already were; the header is the same.
  */
-export default function HelpPagesLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function HelpPagesLayout({
+  children,
+  params,
+}: Readonly<{ children: React.ReactNode; params: Promise<{ slug: string }> }>) {
+  const { slug } = await params
   return (
     <>
       <SiteHeader />
+      {/* FR-15.3 (item 7.7) — where browse sends helpers, above all. */}
+      <ExampleNotice slug={slug} />
       {children}
     </>
   )

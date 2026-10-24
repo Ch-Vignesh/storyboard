@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 import { auth } from '@/auth'
 import Link from '@/components/link'
 import { readTimeZone } from '@/lib/dates'
+import { NOT_INDEXED } from '@/lib/metadata'
 import { formatInZone } from '@/lib/time-zone'
 import { caller } from '@/trpc/server'
 
@@ -12,7 +13,8 @@ import { HistoryPanel } from '../../../../c/[chapter]/[section]/(tools)/history/
 
 type Params = { params: Promise<{ slug: string; sectionId: string }> }
 
-export const metadata: Metadata = { title: 'History' }
+// Item 9.8 — every earlier wording of a passage the reader already shows: not for an index.
+export const metadata: Metadata = { title: 'History', robots: NOT_INDEXED }
 
 /**
  * Phase 14, item 5.8 (decision 0008; FR-2.4, FR-8.2) — a section's history

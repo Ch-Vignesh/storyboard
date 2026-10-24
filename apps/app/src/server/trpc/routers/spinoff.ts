@@ -3,12 +3,14 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { canReadStoryboard, loadStoryboard } from '@/lib/authz/guard'
+import { isOn, PAUSED } from '@/lib/flags'
 import { hasBlocked } from '@/server/blocks'
 import { publicId, slugify } from '@/lib/ids'
 import { logger } from '@/lib/logger'
-import { BULK_WRITE_TRANSACTION, DAILY_LIMITS } from '@/lib/schemas/constants'
+import { LINEAGE, BULK_WRITE_TRANSACTION, DAILY_LIMITS } from '@/lib/schemas/constants'
 import { DAY_MS, consume, key, used } from '@/server/limits'
 import { afterCommit } from '@/server/after-commit'
+import { recordEvent } from '@/server/audit'
 import { titleSchema } from '@/lib/schemas/storyboard'
 
 import { copyTree } from '@/server/tree'
@@ -17,7 +19,6 @@ import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '.
 const log = logger.child({ router: 'spinoff' })
 
 /** FR-10.5 — the chain is shown three deep, with a link to the rest. */
-const LINEAGE_SHOWN = 3
 
 /**
  * Spin-offs (FR-10.3 to FR-10.7).
@@ -43,6 +44,12 @@ export const spinOffRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
       const userId = ctx.session.user.id
+
+      // Item 9.4 (D-18) — paused by an administrator: refused before the
+      // story is even looked at, so the answer is the same for every story.
+      if (await isOn('pause-spin-offs', ctx.db)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: PAUSED['pause-spin-offs'] })
+      }
 
       // FR-10.7 is enforced inside `can()`: spinning off requires a public
       // storyboard, for authors as much as for anyone else.
@@ -124,6 +131,9 @@ export const spinOffRouter = createTRPCRouter({
             forkedFromId: original.id,
             forkedFromVersionId: source.id,
             forkedAt: now,
+            // Item 7.6 — its copied revisions keep their original times
+            // (decision 0019); the spin-off itself was made now.
+            lastWrittenAt: now,
             forkedRevisionMap: revisionMap,
             genres: { create: original.genres.map((entry) => ({ genreId: entry.genreId })) },
           },
@@ -218,11 +228,21 @@ export const spinOffRouter = createTRPCRouter({
         { event: 'spinoff.created', spinOffId: created.id, originalId: original.id, userId },
         'spin-off created',
       )
+      // Item 10.2 (NFR-7) — stored as well as logged, on the original's record.
+      await recordEvent(ctx.db, {
+        event: 'spinoff.created',
+        actorId: userId,
+        subjectId: original.ownerId,
+        storyboardId: original.id,
+        target: { type: 'STORYBOARD', id: created.id },
+      })
       return created
     }),
 
   /**
-   * FR-10.5 — the lineage chain, truncated to three ancestors.
+   * FR-10.5 — the lineage chain. The banner asks for the nearest
+   * `LINEAGE.shown`; the lineage page asks for all of it (`full`), back to
+   * the first story or to `LINEAGE.walkMax`, and is told which (item 7.11).
    *
    * Walked one row at a time rather than with a recursive CTE: a chain is a
    * handful of rows, the cap is small, and a loop is the version anyone can
@@ -230,7 +250,7 @@ export const spinOffRouter = createTRPCRouter({
    * points at something older than itself.
    */
   lineage: publicProcedure
-    .input(z.object({ storyboardId: z.string().min(1) }))
+    .input(z.object({ storyboardId: z.string().min(1), full: z.boolean().optional() }))
     .query(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
       const { storyboardId } = await loadStoryboard(ctx.db, actor, { id: input.storyboardId })
@@ -270,7 +290,9 @@ export const spinOffRouter = createTRPCRouter({
         })
       ).forkedAt
 
-      while (cursor && ancestors.length < 20 && !seen.has(cursor)) {
+      // One past what is shown, to know whether there is more.
+      const limit = input.full ? LINEAGE.walkMax : LINEAGE.shown + 1
+      while (cursor && ancestors.length < limit && !seen.has(cursor)) {
         seen.add(cursor)
         const row: {
           id: string
@@ -349,11 +371,17 @@ export const spinOffRouter = createTRPCRouter({
         cursor = row.forkedFromId
       }
 
+      // Stopped by the limit with a link still ahead — not by the first
+      // story, a missing row or a loop.
+      const moreBeyond = cursor !== null && ancestors.length >= limit && !seen.has(cursor)
+      const shown = input.full ? ancestors : ancestors.slice(0, LINEAGE.shown)
       return {
-        /** Nearest first. The banner uses the first; the page shows this many. */
-        ancestors: ancestors.slice(0, LINEAGE_SHOWN),
-        total: ancestors.length,
-        truncated: ancestors.length > LINEAGE_SHOWN,
+        /** Nearest first: the original, then the one it came from, and so on. */
+        ancestors: shown,
+        /** More lie beyond the ones returned. */
+        truncated: ancestors.length > shown.length || moreBeyond,
+        /** The full walk stopped at its cap with more behind it, said honestly. */
+        reachedCap: input.full === true && moreBeyond,
       }
     }),
 

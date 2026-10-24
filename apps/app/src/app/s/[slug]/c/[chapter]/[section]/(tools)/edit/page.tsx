@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
+import { auth } from '@/auth'
 import { SectionEditor } from '@/components/section-editor'
 import { flavourForStoryType, parseDoc } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
@@ -36,7 +37,21 @@ export default async function EditSectionPage({ params, searchParams }: Params) 
   const detail = await caller.section.get({ sectionId: located.section.id })
   if (!detail.permissions.canEdit && !detail.permissions.canSubmitSuggestion) notFound()
 
-  const returnHref = `/s/${slug}${suffix}`
+  // Item 8.1 — back to this section's own address, which opens its chapter
+  // and scrolls to it, not to chapter one.
+  const returnHref = `/s/${slug}/c/${chapterNo}/${sectionNo}${suffix}`
+  // And on through the story, a section at a time, across chapters.
+  const order = located.data.chapters.flatMap((chapter, chapterIndex) =>
+    chapter.sections.map((section, sectionIndex) => ({
+      href: `/s/${slug}/c/${String(chapterIndex + 1)}/${String(sectionIndex + 1)}/edit${suffix}`,
+      label:
+        section.title ?? `chapter ${String(chapterIndex + 1)}, section ${String(sectionIndex + 1)}`,
+      id: section.id,
+    })),
+  )
+  const here = order.findIndex((entry) => entry.id === located.section.id)
+  const previous = here > 0 ? order[here - 1] : undefined
+  const next = here >= 0 ? order[here + 1] : undefined
   const flavour = flavourForStoryType(located.storyboard.type)
   const head = detail.section.currentRevision
   // A draft overtaken by somebody else's save (section.get decides). Opening
@@ -106,6 +121,19 @@ export default async function EditSectionPage({ params, searchParams }: Params) 
         canCommit={detail.permissions.canEdit}
         startsUnsaved={Boolean(detail.draft) && !draftIsBehind}
         returnHref={returnHref}
+        previous={previous ? { href: previous.href, label: previous.label } : null}
+        next={next ? { href: next.href, label: next.label } : null}
+        // Item 8.5 — what this opened on, so a newer copy on the device is offered back.
+        savedAt={
+          (draftIsBehind || !detail.draft
+            ? head?.createdAt
+            : detail.draft.updatedAt
+          )?.toISOString() ?? null
+        }
+        contentsHref={`/s/${slug}/contents${suffix}`}
+        // Item 8.5 — whose words the device keeps: on a shared computer the
+        // next person to sign in is not offered them.
+        writerId={(await auth())?.user?.id ?? 'guest'}
       />
     </main>
   )

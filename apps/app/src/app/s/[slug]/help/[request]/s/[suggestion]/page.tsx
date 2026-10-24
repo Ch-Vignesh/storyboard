@@ -7,6 +7,7 @@ import { PASS_CHIPS, suggestionStateLabel, waitsOnClosedRequest } from '@/lib/sc
 import { CopyLink } from '@/components/copy-link'
 import { ReportButton } from '@/components/report-button'
 import { readTimeZone } from '@/lib/dates'
+import { orNotFound, suggestionMetadata } from '@/lib/metadata'
 import { formatInZone } from '@/lib/time-zone'
 import { caller } from '@/trpc/server'
 
@@ -15,7 +16,12 @@ import { DecisionPanel } from './decision-panel'
 type Params = { params: Promise<{ slug: string; request: string; suggestion: string }> }
 
 export const dynamic = 'force-dynamic'
-export const metadata: Metadata = { title: 'Comparison' }
+
+// Items 9.6 and 9.8 — named for its writer and its story, and never indexed.
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
+  const { suggestion } = await params
+  return orNotFound(suggestionMetadata(caller, suggestion))
+}
 
 /** Screen 10 — side by side, accept or pass at the foot (FR-7, FR-6.10). */
 export default async function SuggestionPage({ params }: Params) {
@@ -30,7 +36,7 @@ export default async function SuggestionPage({ params }: Params) {
     throw error
   }
 
-  const { suggestion, permissions } = data
+  const { suggestion, permissions, proofRevisionId } = data
   // Hidden after a report (item 2.7, decision 0045): no comparison for anyone
   // but the writer and a moderator; the page says what happened instead.
   const comparison = suggestion.redacted
@@ -109,6 +115,15 @@ export default async function SuggestionPage({ params }: Params) {
           <p className="mt-4 text-[13.5px] text-ink-soft">
             {PASS_CHIPS.find((chip) => chip.value === suggestion.passReason)?.label}. It stays here,
             and on {name}&rsquo;s profile.
+          </p>
+        ) : null}
+
+        {/* Item 8.12 (FR-13.6) — to its writer, once it is in the story. */}
+        {proofRevisionId ? (
+          <p className="mt-4 text-[13.5px]">
+            <Link href={`/proof/${proofRevisionId}`} className="text-pencil hover:underline">
+              Proof that you wrote this
+            </Link>
           </p>
         ) : null}
       </header>

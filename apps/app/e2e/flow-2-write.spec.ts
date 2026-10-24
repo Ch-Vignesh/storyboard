@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { signUpAndOnboard } from './helpers'
+import { signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * Critical flow 2 (architecture section 8):
@@ -28,14 +28,17 @@ test('a writer creates a storyboard and writes a section', async ({ page }) => {
 
   await page.getByRole('button', { name: /create and start writing/i }).click()
 
-  // FR-2.2 — never a blank slate: the main draft, one chapter, one section.
-  await expect(page).toHaveURL(/\/s\/the-ship-never-lands-/)
-  await expect(page.getByRole('heading', { name: 'The ship never lands' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: /chapter one/i })).toBeVisible()
-  await expect(page.getByText(/this section is empty/i)).toBeVisible()
+  // FR-2.2 — never a blank slate: the main draft, one chapter, one section,
+  // and (phase 14, item 8.2) the editor open on it, ready for the first word.
+  await expect(page).toHaveURL(/\/s\/the-ship-never-lands-[^/]+\/c\/1\/1\/edit$/)
+  const reader = await page.context().newPage()
+  await reader.goto(storyPath(page))
+  await expect(reader.getByRole('heading', { name: 'The ship never lands' })).toBeVisible()
+  await expect(reader.getByRole('heading', { name: /chapter one/i })).toBeVisible()
+  await expect(reader.getByText(/this section is empty/i)).toBeVisible()
+  await reader.close()
 
   // Write.
-  await page.getByRole('link', { name: 'Edit' }).first().click()
   await expect(page).toHaveURL(/\/edit$/)
 
   const editor = page.getByRole('textbox', { name: /section text/i })
@@ -98,13 +101,12 @@ test('a writer creates a storyboard and writes a section', async ({ page }) => {
     page.getByText(/the harbour had been empty for a year before she noticed/i).first(),
   ).toBeVisible()
 
-  // FR-13.6 — the hash is on screen, and its writer can take a signed proof
-  // of it. The route existed and nothing linked to it until 2026-10-16.
+  // FR-13.6 — the hash is on screen, and its writer can hand out the public
+  // record of it (item 8.12), which `proof.spec.ts` follows to the PDF. The
+  // proof existed and nothing linked to it until 2026-10-16.
   await expect(versions.first()).toContainText('Fingerprint')
   const proof = versions.first().getByRole('link', { name: /proof that you wrote this/i })
-  const proofResponse = await page.request.get((await proof.getAttribute('href')) ?? '')
-  expect(proofResponse.status()).toBe(200)
-  expect(proofResponse.headers()['content-type']).toContain('pdf')
+  await expect(proof).toHaveAttribute('href', /^\/proof\//u)
 
   // FR-7.5 — any two versions, picked from the list.
   await versions.first().getByLabel('Compare', { exact: true }).check()
@@ -165,7 +167,7 @@ test('a private storyboard is invisible to a stranger, not merely read-only', as
   await authorPage.getByRole('radio', { name: /private/i }).check()
   await authorPage.getByRole('button', { name: /create and start writing/i }).click()
   await expect(authorPage).toHaveURL(/\/s\/kept-to-myself-/)
-  const url = new URL(authorPage.url()).pathname
+  const url = storyPath(authorPage)
   await author.close()
 
   // A signed-in stranger.

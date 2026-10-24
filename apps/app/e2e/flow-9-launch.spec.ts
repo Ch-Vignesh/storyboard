@@ -38,7 +38,12 @@ test('a stranger reads a stuck passage, signs up, and sends a suggestion', async
 
   // The margin of open requests is the thing that makes the site legible
   // (FR-11.5): a visitor can see somebody is stuck before they know the word.
-  await expect(page.getByText(/what does mr bennet say next/i)).toBeVisible()
+  // From its width up the margin is a column of its own (phase 14, item 7.1).
+  await expect(
+    page
+      .getByRole('complementary', { name: 'In the margin' })
+      .getByRole('button', { name: /what does mr bennet say next/i }),
+  ).toBeVisible()
   await expect(page.getByRole('link', { name: /sign in to help/i })).toBeVisible()
 
   // ── Sign up and finish onboarding, through the real screens.

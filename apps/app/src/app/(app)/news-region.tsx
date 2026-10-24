@@ -2,6 +2,7 @@
 
 import type { SuggestionState } from '@storyboard/db'
 import { useSuspenseQuery } from '@tanstack/react-query'
+import { ExampleLabel } from '@/components/example-label'
 import Link from '@/components/link'
 
 import { PASS_CHIPS } from '@/lib/schemas/help'
@@ -26,6 +27,7 @@ export function NewsRegion() {
       href: `/s/${suggestion.request.storyboard.slug}/help/${suggestion.request.publicId}/s/${suggestion.publicId}`,
       title: suggestion.request.title,
       storyboard: suggestion.request.storyboard.title,
+      example: suggestion.request.storyboard.isSeed,
       state: suggestion.state,
       reason: suggestion.passReason,
     })),
@@ -35,6 +37,7 @@ export function NewsRegion() {
       href: `/s/${idea.request.storyboard.slug}/help/${idea.request.publicId}`,
       title: idea.request.title,
       storyboard: idea.request.storyboard.title,
+      example: idea.request.storyboard.isSeed,
       state: 'IDEA_HELPED' as const,
       reason: null,
     })),
@@ -44,9 +47,15 @@ export function NewsRegion() {
 
   return (
     <section className="mt-12">
-      <h2 className="text-[13px] font-medium tracking-wide text-ink-faint uppercase">
-        Work you have helped with
-      </h2>
+      <div className="flex items-baseline justify-between gap-4">
+        <h2 className="text-[13px] font-medium tracking-wide text-ink-faint uppercase">
+          Work you have helped with
+        </h2>
+        {/* Item 9.2 — this region is only what has moved; everything sent is there. */}
+        <Link href="/suggestions" className="shrink-0 text-[13px] text-pencil hover:underline">
+          See all<span className="sr-only"> the suggestions you have sent</span>
+        </Link>
+      </div>
 
       <ul className="mt-4 divide-y divide-rule border-y border-rule">
         {items.map((item) => (
@@ -58,6 +67,8 @@ export function NewsRegion() {
               <span className="min-w-0">
                 <span className="block truncate text-[14.5px] text-ink">{item.title}</span>
                 <span className="mt-0.5 block text-[12.5px] text-ink-faint">
+                  {/* FR-15.3 (item 7.7) */}
+                  {item.example ? <ExampleLabel className="mr-1.5" /> : null}
                   {item.storyboard}
                   {item.state === 'PASSED' && item.reason
                     ? ` · ${PASS_CHIPS.find((chip) => chip.value === item.reason)?.label ?? ''}`

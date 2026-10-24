@@ -88,6 +88,9 @@ test('a password is changed from settings, and this device stays signed in', asy
   const { email } = await signUpAndOnboard(page)
 
   await page.goto('/settings')
+  // As in the address test below: what is typed before the page hydrates is
+  // lost, and the button reloads the page instead of changing anything.
+  await page.waitForLoadState('networkidle')
   // Two forms ask for the current password (the address form first, item 3.2).
   await page
     .getByLabel('Current password', { exact: true })
@@ -130,6 +133,8 @@ test('signing out on every device ends the other sessions too', async ({ page, b
   await expect(phone.getByRole('heading', { name: /your dashboard/iu })).toBeVisible()
 
   await page.goto('/settings')
+  // A click before the page hydrates does nothing.
+  await page.waitForLoadState('networkidle')
   await page.getByRole('button', { name: 'Sign out on every device' }).click()
   await expect(page).toHaveURL(/\/signin\?ended=1/u)
 
@@ -148,6 +153,10 @@ test('a writer changes their email address from the link sent to the new one', a
   const newEmail = email.replace('@', '-moved@')
 
   await page.goto('/settings')
+  // Typed before the page hydrates, the fields are reset and "Email me a link"
+  // stays disabled: the first attempt failed that way on a cold server
+  // (phase 14 final pass, 2026-10-24).
+  await page.waitForLoadState('networkidle')
   await page.getByLabel('New email address').fill(newEmail)
   await page
     .getByLabel('Current password', { exact: true })

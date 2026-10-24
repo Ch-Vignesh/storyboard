@@ -12,6 +12,7 @@ import type { MouseEvent } from 'react'
 
 import Link from '@/components/link'
 import { NOTIFICATIONS } from '@/lib/schemas/notifications'
+import { ExampleLabel } from '@/components/example-label'
 import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
@@ -39,7 +40,9 @@ export function NotificationList({ timeZone }: { timeZone: string }) {
 
   // The list and the count here, and the header's count, which the server reads.
   const settle = () => {
-    void queryClient.invalidateQueries({ queryKey: trpc.notification.list.queryKey() })
+    // `pathKey`: the list is an infinite query, which `queryKey()` (a plain
+    // query's key) never matched, so marking read left the list as it was.
+    void queryClient.invalidateQueries({ queryKey: trpc.notification.list.pathKey() })
     void queryClient.invalidateQueries({ queryKey: trpc.notification.unreadCount.queryKey() })
     router.refresh()
   }
@@ -119,6 +122,8 @@ export function NotificationList({ timeZone }: { timeZone: string }) {
               {notification.title ? (
                 <p className="mt-1 pl-3.5 font-manuscript text-[15px] text-ink">
                   {notification.title}
+                  {/* FR-15.3 (item 7.7) */}
+                  {notification.example ? <ExampleLabel className="ml-2" /> : null}
                 </p>
               ) : null}
               <p className="mt-1 pl-3.5 text-[12px] text-ink-faint">

@@ -197,6 +197,7 @@ function Marked({ marks, side }: { marks: readonly WordMark[]; side: 'left' | 'r
         if (mark.kind === 'removed' && side === 'left') {
           return (
             <del key={index} className="bg-crimson/8 text-crimson decoration-crimson/70">
+              <span className="sr-only">removed: </span>
               {mark.text}
             </del>
           )
@@ -204,6 +205,7 @@ function Marked({ marks, side }: { marks: readonly WordMark[]; side: 'left' | 'r
         if (mark.kind === 'added' && side === 'right') {
           return (
             <ins key={index} className="bg-pencil-wash text-pencil decoration-pencil/70">
+              <span className="sr-only">added: </span>
               {mark.text}
             </ins>
           )

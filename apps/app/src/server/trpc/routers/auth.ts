@@ -9,6 +9,7 @@ import {
   hashToken,
 } from '@/auth/tokens'
 import { env } from '@/env'
+import { isOn, PAUSED } from '@/lib/flags'
 import { logger } from '@/lib/logger'
 import { maskEmail } from '@/lib/mask-email'
 import { emailSchema, passwordSchema } from '@/lib/schemas/auth'
@@ -302,6 +303,13 @@ export const authRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Item 9.4 (D-18) — the switch an administrator throws against a wave
+      // of sign-ups. First, so a refused attempt spends no limit and sends
+      // nothing; the same for every address, so it says nothing about any.
+      if (await isOn('pause-sign-ups', ctx.db)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: PAUSED['pause-sign-ups'] })
+      }
+
       // Keyed on the address rather than the person: there is no person yet.
       // An address is not an identity, but it is what the action is about, and
       // it is what somebody abusing this has to keep changing.

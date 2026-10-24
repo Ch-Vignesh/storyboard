@@ -37,7 +37,7 @@ The codebase is open source (contributors welcome, transparency for writers who 
 
 ## 2. Vocabulary
 
-This table is normative. `scripts/check-vocabulary.ts` fails CI if a banned term appears in any file under `app/`, `components/`, or `messages/`.
+This table is normative. `scripts/check-vocabulary.ts` fails CI if a banned term appears in any file under `app/`, `components/`, or `messages/`, or, since phase 14's item 10.4, in the copy the server writes: emails, notifications, the names of permissions, what an export prints around the manuscript, import's reasons, and the message of every error a call returns.
 
 ### 2.1 Objects
 
@@ -109,10 +109,13 @@ Contributor status is a historical fact, not a live permission grant. A contribu
 | Spin off (own copy)                    | ✓     | ✓         | ✓      | —     |
 | Report a user or storyboard            | ✓     | ✓         | ✓      | —     |
 | Export the manuscript to a file †      | ✓     | ✓         | —      | —     |
+| Publish an edition ‡                   | ✓     | —         | —      | —     |
 
 \* Owners and co-authors bypass the three-suggestion quota on their own storyboard (FR-13.2).
 
 † Recorded 2026-10-16: the code enforced this row and the table never said so. A reader who wants the words takes them by spinning off, which keeps the credit chain (FR-10.3).
+
+‡ Added 2026-10-24 with decision 0044 (publishing): a published edition is a frozen copy of the main draft, and putting one out is the owner's, as visibility is.
 
 ---
 
@@ -297,7 +300,7 @@ User
 - **FR-13.5** Reporting: a user, a storyboard, a suggestion, or an idea can be reported with a category (spam · abuse · plagiarism · off-topic · lifted work). **10 upheld reports** against a user suspends the account pending review. Reports from the same reporter against the same target are deduplicated. Raw report counts are never shown publicly.
 - **FR-13.6** **The copying problem, stated honestly.** Screenshots and copy-paste cannot be prevented in a browser; the product will not pretend otherwise. What it does instead, and what it says on the visibility selector at creation time:
   - Every revision is timestamped and content-hashed at write time, giving the author a verifiable, publicly linkable record of when they wrote it. This is the only defence that actually works, and it works well.
-  - A one-tap "proof of authorship" export produces a signed PDF: title, author, section, word count, SHA-256 of the content, and timestamp.
+  - A one-tap "proof of authorship" export produces a signed PDF: title, author, section, word count, SHA-256 of the content, and timestamp. _(Amended 2026-10-24 by decision 0052, D-11: not signed; every version has a public record at `/proof/{revision}` that anyone can check, which the PDF prints. The record shows who wrote the words on Draftboard and when, and cannot show that they were original to that person.)_
   - Manuscript exports carry a visible footer with author, contributors, and source URL.
   - The visibility selector says, in plain words: _"Anyone can read a public storyboard, and anyone can copy what they read. Timestamps prove you wrote it first. If that isn't enough for this manuscript, keep it private and invite people you know."_
   - Deferred, and to be described as deferred rather than promised: disabling right-click, watermarking on-screen text, plagiarism-database registration. The first two are trivially defeated; the third needs a partner.

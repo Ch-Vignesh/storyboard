@@ -70,7 +70,9 @@ test.describe('what a machine can check (NFR-4)', () => {
       // "suggest") this used to pick the first such action, which for a guest
       // goes to sign-in: the test scanned the sign-in page, sometimes half way
       // through the redirect, and failed for a missing <title> (2026-10-15).
-      const request = page.locator('a[href*="/help/"]:not([href$="/help/new"])').first()
+      // A visible one: from the margin's width up, the copy under each
+      // section is drawn but hidden (phase 14, item 7.1).
+      const request = page.locator('a[href*="/help/"]:not([href$="/help/new"]):visible').first()
       if (await request.count()) {
         await request.click()
         await page.waitForURL(/\/help\/(?!new)/u)

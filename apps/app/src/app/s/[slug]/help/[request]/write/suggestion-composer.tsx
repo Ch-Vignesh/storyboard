@@ -19,7 +19,15 @@ import { countWords } from '@/lib/schemas/help'
 import { allowanceLine, quotaFull, quotaFullLine, type Allowance } from '@/lib/allowance-words'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { RevisionComparison } from '@/components/revision-comparison'
-import { REQUEST_ASK_PREVIEW_CHARS } from '@/lib/schemas/constants'
+import { REQUEST_ASK_PREVIEW_CHARS, SAVE_RETRY } from '@/lib/schemas/constants'
+import {
+  couldNotReach,
+  forgetLocalCopy,
+  KEPT_ON_DEVICE,
+  keepLocalCopy,
+  readLocalCopy,
+  type LocalCopy,
+} from '@/lib/unsaved'
 import { useTRPC } from '@/trpc/client'
 
 const AUTOSAVE_IDLE_MS = DRAFT_IDLE_SECONDS * 1000
@@ -49,6 +57,7 @@ export function SuggestionComposer({
   requestTitle,
   backHref,
   initialNote,
+  savedAt = null,
 }: {
   suggestionId: string
   flavour: DocFlavour
@@ -73,13 +82,23 @@ export function SuggestionComposer({
   maxWords: number
   requestTitle: string
   backHref: string
+  /** Item 8.5 — when the draft was last saved, so a newer copy on the device is offered back. */
+  savedAt?: string | null
 }) {
   const trpc = useTRPC()
   const [words, setWords] = useState(0)
   const [note, setNote] = useState(initialNote)
   // What `persist` sends, read at save time so the callback stays stable.
   const noteRef = useRef(initialNote)
-  const [saved, setSaved] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  // 'waiting': the server could not be reached; tried again (item 8.5).
+  const [saved, setSaved] = useState<'idle' | 'saving' | 'saved' | 'error' | 'waiting'>('idle')
+  // Item 8.5 — words kept on this device that the saved draft does not have.
+  const [recovered, setRecovered] = useState<LocalCopy | null>(null)
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const failures = useRef(0)
+  const persistRef = useRef<() => Promise<boolean>>(async () => true)
+  // The device's copy of this draft, apart from any section's.
+  const localKey = `suggestion:${suggestionId}`
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
   const [checked, setChecked] = useState<Set<number>>(new Set())
@@ -92,7 +111,10 @@ export function SuggestionComposer({
   const persisted = useRef(0)
   const inFlight = useRef<Promise<boolean> | null>(null)
 
-  const saveDraft = useMutation(trpc.suggestion.saveDraft.mutationOptions())
+  // Item 8.5 — sent even while offline, so a failure is told, not held (as in the editor).
+  const saveDraft = useMutation(
+    trpc.suggestion.saveDraft.mutationOptions({ networkMode: 'always' }),
+  )
   // The stable function on it, not the object, which is new every render: the
   // autosave effect below depends on `persist`, and a `persist` remade on each
   // re-render let the effect's clean-up clear the pending save (phase 14,
@@ -110,10 +132,19 @@ export function SuggestionComposer({
       // The pre-filled text already has a word count; showing 0 until the first
       // keystroke would be wrong.
       setWords(countWords(instance.getText()))
+      // Item 8.5 — a newer, different copy kept on this device is offered back.
+      if (change) return
+      const kept = readLocalCopy(localKey)
+      if (!kept) return
+      const openedOn = savedAt ? Date.parse(savedAt) : 0
+      const differs = JSON.stringify(kept.contentJson) !== JSON.stringify(instance.getJSON())
+      if (kept.at > openedOn && differs) setRecovered(kept)
+      else forgetLocalCopy(localKey)
     },
     onUpdate: ({ editor: instance }) => {
       edits.current += 1
       setWords(countWords(instance.getText()))
+      if (!change) keepLocalCopy(localKey, instance.getJSON())
     },
   })
 
@@ -136,8 +167,25 @@ export function SuggestionComposer({
         persisted.current = at
         setSaved('saved')
         setError(null)
+        failures.current = 0
+        if (edits.current === persisted.current) forgetLocalCopy(localKey)
         return true
       } catch (caught) {
+        // Item 8.5 — unreachable: kept on the device and tried again, sooner
+        // at first; a refusal is the server's own sentence.
+        if (couldNotReach(caught)) {
+          setSaved('waiting')
+          setError(null)
+          if (!retryTimer.current) {
+            const delay = Math.min(SAVE_RETRY.maxMs, SAVE_RETRY.firstMs * 2 ** failures.current)
+            failures.current += 1
+            retryTimer.current = setTimeout(() => {
+              retryTimer.current = null
+              void persistRef.current()
+            }, delay)
+          }
+          return false
+        }
         setSaved('error')
         setError(caught instanceof Error ? caught.message : 'Could not save.')
         return false
@@ -149,7 +197,27 @@ export function SuggestionComposer({
     } finally {
       inFlight.current = null
     }
-  }, [change, editor, saveNow, suggestionId])
+  }, [change, editor, localKey, saveNow, suggestionId])
+
+  useEffect(() => {
+    persistRef.current = persist
+  }, [persist])
+
+  // Item 8.5 — back online, try at once.
+  useEffect(() => {
+    const onOnline = () => {
+      if (retryTimer.current) {
+        clearTimeout(retryTimer.current)
+        retryTimer.current = null
+      }
+      void persistRef.current()
+    }
+    window.addEventListener('online', onOnline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      if (retryTimer.current) clearTimeout(retryTimer.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (!editor) return
@@ -358,8 +426,14 @@ export function SuggestionComposer({
           >
             <span className="tabular-nums">{words}</span> of {minWords}–{maxWords} words
           </span>
-          <span className="text-ink-faint">
-            {saved === 'saving' ? 'Saving' : saved === 'saved' ? 'Draft saved' : ''}
+          <span className={saved === 'waiting' ? 'text-ochre' : 'text-ink-faint'}>
+            {saved === 'saving'
+              ? 'Saving'
+              : saved === 'saved'
+                ? 'Draft saved'
+                : saved === 'waiting'
+                  ? KEPT_ON_DEVICE
+                  : ''}
           </span>
         </div>
 
@@ -373,6 +447,51 @@ export function SuggestionComposer({
         {flavour === 'screenplay' ? (
           <div className="mt-4">
             <ElementPicker editor={editor} />
+          </div>
+        ) : null}
+
+        {/* Item 8.5 — words this device kept that the saved draft does not have. */}
+        {recovered ? (
+          <div className="mt-4 border-l-2 border-pencil bg-pencil-wash px-4 py-3 text-[13px] text-ink">
+            <p>
+              This device kept words you wrote here on{' '}
+              {new Date(recovered.at).toLocaleString('en-GB', {
+                day: 'numeric',
+                month: 'long',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}{' '}
+              that were never saved.
+            </p>
+            <div className="mt-2 flex items-center gap-3">
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  if (!editor) return
+                  editor.commands.setContent(
+                    recovered.contentJson as Parameters<typeof editor.commands.setContent>[0],
+                  )
+                  edits.current += 1
+                  keepLocalCopy(localKey, editor.getJSON())
+                  setWords(countWords(editor.getText()))
+                  setRecovered(null)
+                  void persist()
+                }}
+              >
+                Put them back
+              </Button>
+              <button
+                type="button"
+                className="text-[12.5px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+                onClick={() => {
+                  forgetLocalCopy(localKey)
+                  setRecovered(null)
+                }}
+              >
+                Throw them away
+              </button>
+            </div>
           </div>
         ) : null}
 

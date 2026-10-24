@@ -1,7 +1,7 @@
 import { FORMATS, STRATEGIES } from '@storyboard/import/types'
 import { z } from 'zod'
 
-import { TITLE_MAX_CHARS } from './constants'
+import { TITLE_MAX_CHARS, IMPORT_OUTLINE_MAX } from './constants'
 
 /**
  * What a writer may send back after reviewing a proposal (FR-3.2).
@@ -31,13 +31,13 @@ export const confirmedChapterSchema = z.object({
     // A section is a unit somebody writes in and asks for help on (FR-5.1).
     // Thousands of them in one chapter is not a manuscript; it is a way to
     // make one request write a great many rows.
-    .max(500, 'That is more sections than one chapter can hold.'),
+    .max(IMPORT_OUTLINE_MAX.sectionsPerChapter, 'That is more sections than one chapter can hold.'),
 })
 
 export const confirmedOutlineSchema = z
   .array(confirmedChapterSchema)
   .min(1, 'There is nothing to import.')
-  .max(500, 'That is more chapters than a manuscript can have here.')
+  .max(IMPORT_OUTLINE_MAX.chapters, 'That is more chapters than a manuscript can have here.')
 
 export type ConfirmedOutline = z.infer<typeof confirmedOutlineSchema>
 export type ConfirmedChapter = z.infer<typeof confirmedChapterSchema>

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { signUpAndOnboard } from './helpers'
+import { signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * Phase 14, item 4.1 — one header, everywhere. Before it, a story's
@@ -33,7 +33,7 @@ test('every page carries the site header, read right for guests and members', as
   await page.getByRole('button', { name: 'Literary fiction', exact: true }).click()
   await page.getByRole('button', { name: /create and start writing/i }).click()
   await expect(page).toHaveURL(/\/s\//)
-  const story = new URL(page.url()).pathname
+  const story = storyPath(page)
 
   for (const url of [
     `${story}/contents`,

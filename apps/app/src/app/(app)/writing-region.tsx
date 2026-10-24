@@ -6,10 +6,14 @@ import Link from '@/components/link'
 import { useRouter } from 'next/navigation'
 
 import { STORY_TYPE_LABELS } from '@/lib/schemas/storyboard'
+import { lastWrittenWords } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
-/** FR-11.1, region one. */
-export function WritingRegion() {
+/**
+ * FR-11.1, region one. Most recently written first, saying when, and which
+ * are finished (phase 14, item 7.6).
+ */
+export function WritingRegion({ timeZone }: { timeZone: string }) {
   const trpc = useTRPC()
   const { data: storyboards } = useSuspenseQuery(trpc.storyboard.listMine.queryOptions())
 
@@ -62,6 +66,10 @@ export function WritingRegion() {
                       : ''}
                     {storyboard.role === 'coauthor' ? ' · co-author' : ''}
                     {storyboard.visibility === 'PRIVATE' ? ' · private' : ''}
+                    {storyboard.state === 'FINISHED' ? ' · finished' : ''}
+                    {storyboard.lastWrittenAt
+                      ? ` · ${lastWrittenWords(storyboard.lastWrittenAt, timeZone)}`
+                      : ''}
                   </span>
                 </span>
                 <span className="shrink-0 text-[12.5px] text-ink-faint tabular-nums">

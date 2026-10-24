@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { signUpAndOnboard } from './helpers'
+import { signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * FR-4.2 in the editor (decision 0040): a script is written element by
@@ -16,9 +16,8 @@ test('a screenwriter writes a scene, element by element', async ({ page }) => {
   await page.getByRole('button', { name: 'Thriller', exact: true }).click()
   await page.getByRole('button', { name: /create and start writing/i }).click()
   await expect(page).toHaveURL(/\/s\/harbour-lights-/)
-  const storyPath = new URL(page.url()).pathname
+  const story = storyPath(page)
 
-  await page.getByRole('link', { name: 'Edit' }).first().click()
   const editor = page.getByRole('textbox', { name: /section text/i })
   const element = page.getByRole('combobox', { name: 'Element' })
   await editor.click()
@@ -43,7 +42,7 @@ test('a screenwriter writes a scene, element by element', async ({ page }) => {
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
 
   // Read back as a script.
-  await page.goto(storyPath)
+  await page.goto(story)
   await expect(page.locator('.sp-scene_heading')).toHaveText('INT. HARBOUR OFFICE - NIGHT')
   await expect(page.locator('.sp-action')).toHaveText('Rain against the glass.')
   await expect(page.locator('.sp-character')).toHaveText('MARGARET')

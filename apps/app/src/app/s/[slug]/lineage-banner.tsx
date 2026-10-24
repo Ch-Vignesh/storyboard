@@ -54,11 +54,31 @@ export function LineageBanner({ storyboardId, slug }: { storyboardId: string; sl
               <span className="whitespace-pre-line italic">{origin.rightsNote}</span>
             </>
           ) : null}
+          {/* FR-10.5 (item 7.11) — the chain, up to three, and the way to all of it. */}
+          {ancestors.length > 1 ? (
+            <>
+              {' '}
+              That came from{' '}
+              {ancestors.slice(1).map((ancestor, index) => (
+                <span key={ancestor.id}>
+                  {index > 0 ? ', which came from ' : null}
+                  {ancestor.hidden || !ancestor.slug ? (
+                    <span className="italic">{ancestor.title}</span>
+                  ) : (
+                    <Link href={`/s/${ancestor.slug}`} className="text-pencil hover:underline">
+                      {ancestor.title}
+                    </Link>
+                  )}
+                </span>
+              ))}
+              {lineage.data?.truncated ? ', and further back' : null}.
+            </>
+          ) : null}
           {ancestors.length > 1 || lineage.data?.truncated ? (
             <>
               {' '}
               <Link href={`/s/${slug}/lineage`} className="text-pencil hover:underline">
-                See where it came from
+                See the full lineage
               </Link>
               .
             </>

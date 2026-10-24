@@ -1,8 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 
 import type { PrismaClient } from '../../../src/generated/prisma/client'
-import { LIBRARY, SEED_HELPERS, type SeedRequest, type SeedWork } from './library'
-import { PLATFORM_ACCOUNT } from './index'
+import { ensureSeedAccounts, type SeedAccounts } from './accounts'
+import { LIBRARY, type SeedWork } from './library'
+import { deriveOf, docOf, paragraphsOf } from './prose'
+import { ensureRequests, type RequestsAdded, type Tx } from './requests'
 
 /**
  * Seeding the library (FR-15.1 to FR-15.4, FR-15.6).
@@ -17,29 +19,12 @@ import { PLATFORM_ACCOUNT } from './index'
  * answered requests sees a place that does not. So most of what is seeded here
  * is somebody stuck, and the answered ones are there only to show what the loop
  * looks like when it closes (FR-15.4).
+ *
+ * A work a database already has is brought up to the library, never back:
+ * corrected prose (decision 0023), then since item 9.5 the sections added to
+ * its end and the requests and help added to it, each made only where it is
+ * missing. A work deleted and waiting for its purge is left as it is.
  */
-
-const WORDS = /\s+/u
-
-function derive(text: string) {
-  const trimmed = text.trim()
-  return {
-    contentText: trimmed,
-    wordCount: trimmed.length === 0 ? 0 : trimmed.split(WORDS).length,
-    contentHash: createHash('sha256').update(trimmed, 'utf8').digest('hex'),
-  }
-}
-
-/** Paragraphs to the restricted document FR-4.1 allows, and nothing else. */
-function doc(paragraphs: string[]) {
-  return {
-    type: 'doc',
-    content: paragraphs.map((text) => ({
-      type: 'paragraph',
-      content: [{ type: 'text', text }],
-    })),
-  }
-}
 
 function slugify(title: string): string {
   return (
@@ -60,66 +45,73 @@ export type LibraryResult = {
   answered: number
   /** Sections whose text was corrected on a database that already had them. */
   corrected: number
+  /** Item 9.5 — sections added to the end of works a database already had. */
+  extended: number
+  /** D-14 — suggestions and ideas from the example helpers, made on this run. */
+  help: number
+  /** Requests whose section is already asked about, so not made (FR-5.1). */
+  unplaced: string[]
 }
 
-export async function seedLibrary(prisma: PrismaClient): Promise<LibraryResult> {
-  const platform = await prisma.user.upsert({
-    where: { email: PLATFORM_ACCOUNT.email },
-    create: {
-      email: PLATFORM_ACCOUNT.email,
-      username: PLATFORM_ACCOUNT.username,
-      displayName: PLATFORM_ACCOUNT.displayName,
-      bio: PLATFORM_ACCOUNT.bio,
-      onboardedAt: new Date(),
-    },
-    // Everything shown, kept current: this pass runs on every seed, where the
-    // example storyboard's returns early once it exists. It is how a database
-    // seeded as Storyboard came to say Draftboard (phase 12).
-    update: {
-      username: PLATFORM_ACCOUNT.username,
-      displayName: PLATFORM_ACCOUNT.displayName,
-      bio: PLATFORM_ACCOUNT.bio,
-    },
-    select: { id: true },
-  })
+export async function seedLibrary(
+  prisma: PrismaClient,
+  accounts?: SeedAccounts,
+  /** The works to seed: the library, or a test's own. */
+  library: readonly SeedWork[] = LIBRARY,
+): Promise<LibraryResult> {
+  const owners = accounts ?? (await ensureSeedAccounts(prisma))
 
-  // FR-15.3 — the contributors of the seeded suggestions are seeded accounts
-  // too, and say so on their profiles. A credit line pointing at an invented
-  // person would be the fake community the requirement forbids.
-  const helpers = new Map<string, string>()
-  for (const helper of SEED_HELPERS) {
-    const row = await prisma.user.upsert({
-      where: { email: `${helper.username}@storyboard.invalid` },
-      create: {
-        email: `${helper.username}@storyboard.invalid`,
-        username: helper.username,
-        displayName: helper.displayName,
-        bio: helper.bio,
-        onboardedAt: new Date(),
-      },
-      update: { displayName: helper.displayName, bio: helper.bio },
-      select: { id: true },
-    })
-    helpers.set(helper.username, row.id)
+  const result: LibraryResult = {
+    created: 0,
+    skipped: 0,
+    requests: 0,
+    answered: 0,
+    corrected: 0,
+    extended: 0,
+    help: 0,
+    unplaced: [],
+  }
+  const count = (work: SeedWork, added: RequestsAdded) => {
+    result.requests += added.requests
+    result.answered += added.answered
+    result.help += added.help
+    result.unplaced.push(...added.unplaced.map((title) => `${work.title}: ${title}`))
   }
 
-  const result: LibraryResult = { created: 0, skipped: 0, requests: 0, answered: 0, corrected: 0 }
-
-  for (const work of LIBRARY) {
+  for (const work of library) {
     const existing = await prisma.storyboard.findUnique({
       where: { publicId: work.publicId },
-      select: { id: true },
+      select: { id: true, deletedAt: true },
     })
-    if (existing) {
-      result.skipped += 1
-      result.corrected += await reconcileText(prisma, work, existing.id, platform.id)
+
+    if (!existing) {
+      count(work, await seedOne(prisma, work, owners))
+      result.created += 1
       continue
     }
 
-    const counts = await seedOne(prisma, work, platform.id, helpers)
-    result.created += 1
-    result.requests += counts.requests
-    result.answered += counts.answered
+    result.skipped += 1
+    // On its way out: deleted, and waiting for the purge (FR-2.6). Nothing is
+    // corrected or added, so a seed run never puts anything back on a story
+    // somebody chose to remove.
+    if (existing.deletedAt) continue
+
+    result.corrected += await reconcileText(prisma, work, existing.id, owners.platformId)
+
+    const grown = await prisma.$transaction(async (tx) => {
+      const { added, sections } = await ensureSections(tx, work, existing.id, owners.platformId)
+      return {
+        added,
+        requests: await ensureRequests(tx, {
+          storyboardId: existing.id,
+          accounts: owners,
+          requests: work.requests,
+          sections: [sections],
+        }),
+      }
+    })
+    result.extended += grown.added
+    count(work, grown.requests)
   }
 
   return result
@@ -169,18 +161,20 @@ async function reconcileText(
     const section = sections.find((candidate) => candidate.order === index)
     const current = section?.currentRevision
     if (!section || !current) continue
-    if (current.contentText === wanted.trim()) continue
+
+    const paragraphs = paragraphsOf(wanted)
+    const derived = deriveOf(paragraphs)
+    if (current.contentText === derived.contentText) continue
 
     // Somebody else's prose stands here now. Leave it alone.
     if (current.source !== 'AUTHORED' || current.authorId !== platformId) continue
 
-    const derived = derive(wanted)
     await prisma.$transaction(async (tx) => {
       const revision = await tx.revision.create({
         data: {
           sectionId: section.id,
           parentId: current.id,
-          contentJson: doc([wanted]),
+          contentJson: docOf(paragraphs),
           ...derived,
           source: 'AUTHORED',
           authorId: platformId,
@@ -198,22 +192,83 @@ async function reconcileText(
   return corrected
 }
 
+/**
+ * Item 9.5 — the sections a work gained after a database was seeded, added at
+ * the end of its chapter, where the library puts them. Returns every section
+ * id in order, for the requests to find their section by.
+ */
+async function ensureSections(
+  tx: Tx,
+  work: SeedWork,
+  storyboardId: string,
+  platformId: string,
+): Promise<{ added: number; sections: string[] }> {
+  const chapter = await tx.chapter.findFirstOrThrow({
+    where: { order: 0, deletedAt: null, version: { storyboardId, isMain: true } },
+    select: {
+      id: true,
+      sections: { where: { deletedAt: null }, select: { id: true, order: true } },
+    },
+  })
+
+  let added = 0
+  const sections: string[] = []
+  for (const [index, text] of work.chapter.sections.entries()) {
+    const found = chapter.sections.find((candidate) => candidate.order === index)
+    if (found) {
+      sections.push(found.id)
+      continue
+    }
+    sections.push(await createSection(tx, chapter.id, index, text, platformId))
+    added += 1
+  }
+  return { added, sections }
+}
+
+async function createSection(
+  tx: Tx,
+  chapterId: string,
+  order: number,
+  text: string,
+  platformId: string,
+): Promise<string> {
+  const paragraphs = paragraphsOf(text)
+  const derived = deriveOf(paragraphs)
+
+  const section = await tx.section.create({
+    data: { chapterId, lineageId: randomUUID(), order, wordCount: derived.wordCount },
+    select: { id: true },
+  })
+  const revision = await tx.revision.create({
+    data: {
+      sectionId: section.id,
+      contentJson: docOf(paragraphs),
+      ...derived,
+      source: 'AUTHORED',
+      authorId: platformId,
+    },
+    select: { id: true },
+  })
+  await tx.section.update({
+    where: { id: section.id },
+    data: { currentRevisionId: revision.id },
+  })
+  return section.id
+}
+
 async function seedOne(
   prisma: PrismaClient,
   work: SeedWork,
-  platformId: string,
-  helpers: Map<string, string>,
-): Promise<{ requests: number; answered: number }> {
+  accounts: SeedAccounts,
+): Promise<RequestsAdded> {
   const genres = await prisma.genre.findMany({
     where: { slug: { in: work.genres } },
     select: { id: true },
   })
 
   const now = new Date()
-  let requests = 0
-  let answered = 0
 
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const storyboard = await tx.storyboard.create({
       data: {
         publicId: work.publicId,
@@ -225,7 +280,7 @@ async function seedOne(
         // Decision 0007 — public from the start, so the whole history reads.
         publicFrom: now,
         isSeed: true,
-        ownerId: platformId,
+        ownerId: accounts.platformId,
         rightsNote: `${work.source.author}, first published ${String(
           work.source.firstPublished,
         )}. Public domain in the United States. Text from ${work.source.url}`,
@@ -239,7 +294,7 @@ async function seedOne(
         storyboardId: storyboard.id,
         name: 'Main draft',
         isMain: true,
-        createdById: platformId,
+        createdById: accounts.platformId,
       },
       select: { id: true },
     })
@@ -254,180 +309,16 @@ async function seedOne(
       select: { id: true },
     })
 
-    /** Section id and head revision id, by index, for the requests below. */
-    const sections: Array<{ id: string; revisionId: string }> = []
-
+    const sections: string[] = []
     for (const [index, text] of work.chapter.sections.entries()) {
-      const content = doc([text])
-      const derived = derive(text)
-
-      const section = await tx.section.create({
-        data: {
-          chapterId: chapter.id,
-          lineageId: randomUUID(),
-          order: index,
-          wordCount: derived.wordCount,
-        },
-        select: { id: true },
-      })
-
-      const revision = await tx.revision.create({
-        data: {
-          sectionId: section.id,
-          contentJson: content,
-          ...derived,
-          source: 'AUTHORED',
-          authorId: platformId,
-        },
-        select: { id: true },
-      })
-
-      await tx.section.update({
-        where: { id: section.id },
-        data: { currentRevisionId: revision.id },
-      })
-
-      sections.push({ id: section.id, revisionId: revision.id })
+      sections.push(await createSection(tx, chapter.id, index, text, accounts.platformId))
     }
 
-    // FR-5.1, enforced by `one_open_request_per_section`: a section may have
-    // only one request in OPEN or ANSWERED at a time. A resolved one does not
-    // count, so an answered request can share a section with an open one — but
-    // two open ones cannot. The library asks for a section by index; this puts
-    // each open request on the first section that is still free, so the data
-    // can say where a stuck point *is* without also having to solve the
-    // packing problem.
-    const spokenFor = new Set<number>()
-
-    for (const request of work.requests) {
-      let index = request.section
-      if (!request.accepted) {
-        if (spokenFor.has(index)) {
-          const free = sections.findIndex((_, at) => !spokenFor.has(at))
-          if (free === -1) {
-            // Nowhere to put it. Better to seed one request fewer than to seed
-            // a storyboard that will not load.
-            continue
-          }
-          index = free
-        }
-        spokenFor.add(index)
-      }
-
-      const target = sections[index] ?? sections[0]
-      if (!target) continue
-
-      const created = await createRequest(tx, {
-        request,
-        storyboardId: storyboard.id,
-        sectionId: target.id,
-        headRevisionId: target.revisionId,
-        platformId,
-        helpers,
-      })
-
-      requests += 1
-      if (created.answered) answered += 1
-    }
+    return ensureRequests(tx, {
+      storyboardId: storyboard.id,
+      accounts,
+      requests: work.requests,
+      sections: [sections],
+    })
   })
-
-  return { requests, answered }
-}
-
-type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]
-
-async function createRequest(
-  tx: Tx,
-  input: {
-    request: SeedRequest
-    storyboardId: string
-    sectionId: string
-    headRevisionId: string
-    platformId: string
-    helpers: Map<string, string>
-  },
-): Promise<{ answered: boolean }> {
-  const { request } = input
-
-  const row = await tx.contributionRequest.create({
-    data: {
-      publicId: randomUUID().replaceAll('-', '').slice(0, 10),
-      storyboardId: input.storyboardId,
-      sectionId: input.sectionId,
-      openedById: input.platformId,
-      kind: request.kind,
-      title: request.title,
-      ask: request.ask,
-      preContext: request.preContext ?? null,
-      state: request.accepted ? 'RESOLVED' : 'OPEN',
-    },
-    select: { id: true },
-  })
-
-  if (!request.accepted) return { answered: false }
-
-  const contributorId = input.helpers.get(request.accepted.by)
-  if (!contributorId) return { answered: false }
-
-  // FR-15.4 wants answered requests visible so a visitor can see the loop
-  // close: the suggestion, the acceptance, and the credit that followed.
-  const derived = derive(request.accepted.prose)
-  const suggestion = await tx.suggestion.create({
-    data: {
-      publicId: randomUUID().replaceAll('-', '').slice(0, 10),
-      requestId: row.id,
-      contributorId,
-      baseRevisionId: input.headRevisionId,
-      contentJson: doc([request.accepted.prose]),
-      // A suggestion carries no hash: it is not yet a revision, and nothing
-      // depends on proving when it was written until it is accepted.
-      contentText: derived.contentText,
-      wordCount: derived.wordCount,
-      note: request.accepted.note,
-      state: 'ACCEPTED',
-      submittedAt: new Date(),
-      decidedAt: new Date(),
-      decidedById: input.platformId,
-    },
-    select: { id: true },
-  })
-
-  // FR-8.1 — accepting writes a revision attributed to both halves.
-  const revision = await tx.revision.create({
-    data: {
-      sectionId: input.sectionId,
-      parentId: input.headRevisionId,
-      contentJson: doc([request.accepted.prose]),
-      ...derived,
-      source: 'ACCEPTED',
-      authorId: contributorId,
-      acceptedById: input.platformId,
-      suggestionId: suggestion.id,
-    },
-    select: { id: true },
-  })
-
-  await tx.section.update({
-    where: { id: input.sectionId },
-    data: { currentRevisionId: revision.id, wordCount: derived.wordCount },
-  })
-
-  // FR-9.1 — the credit, which is the point of the whole loop.
-  const section = await tx.section.findUniqueOrThrow({
-    where: { id: input.sectionId },
-    select: { lineageId: true },
-  })
-  await tx.credit.create({
-    data: {
-      storyboardId: input.storyboardId,
-      contributorId,
-      type: 'PROSE',
-      sectionLineage: section.lineageId,
-      revisionId: revision.id,
-      suggestionId: suggestion.id,
-      isLive: true,
-    },
-  })
-
-  return { answered: true }
 }

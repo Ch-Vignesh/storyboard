@@ -1,7 +1,7 @@
 # 0044 — Publishing: a read-only edition of a story
 
 **Date:** 2026-10-18
-**Status:** proposed, at the owner's request; built as milestone 7b of `06-completion-plan.md`
+**Status:** accepted, at the owner's request; built as milestone 7b of `06-completion-plan.md` (2026-10-24)
 **Extends:** FR-14 (publishing and export), FR-10.3 to FR-10.6 (spin-offs), decision 0014 (shared revisions)
 
 ## Why
@@ -56,3 +56,19 @@ A publication is a socially significant event (NFR-7). Five items in
 milestone 7b, after the reader work of milestone 7 that the edition page
 reuses. The terms' paragraph on publishing (item 2.2) is written against this
 record and finished when 7b lands.
+
+## Amended 2026-10-24, when it was built
+
+- **The current edition is derived, not stored.** There is no unpublishing,
+  so the current edition is always the highest-numbered one, and a
+  `Storyboard.currentPublicationId` could only ever drift from that. It was
+  left out; `Publication` is unique on story and number, and the newest is
+  read where it is needed.
+- **Who publishes.** The owner, as with visibility: a new matrix cell,
+  `storyboard:publish`, owner only, and a row in the SRS's table (3.2).
+- **Who is told.** A spin-off's edition tells the original's authors only
+  when the spin-off is public; a private edition is nobody's news and its
+  link would lead nowhere. Anyone who blocked its writer is not told
+  (decision 0046).
+- **Status:** accepted and built (items 7b.1 to 7b.5; the export part of 7b.3
+  follows item 8.8's file names).

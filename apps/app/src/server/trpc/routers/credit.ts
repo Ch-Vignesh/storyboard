@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { loadStoryboard } from '@/lib/authz/guard'
+import { CONTRIBUTORS_STRIP_MAX } from '@/lib/schemas/constants'
 import { mainDraftOwnShare } from '@/server/own-share'
 import { mainDraftPlaces, type Place } from '@/server/places'
 
@@ -93,6 +94,79 @@ export const creditRouter = createTRPCRouter({
           place: credit.sectionLineage ? (placeOf.get(credit.sectionLineage) ?? null) : null,
         })),
         contributors: [...byContributor.values()],
+      }
+    }),
+
+  /**
+   * Phase 14, item 7.3 (FR-9.2) — the strip in the reader's margin, as the
+   * prototype drew it: the most recent contributors first, each with their
+   * latest credit or how many they have, and how many people there are in
+   * all, for "All contributors". Only the shown credits' places are resolved.
+   */
+  strip: publicProcedure
+    .input(z.object({ storyboardId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { storyboardId } = await loadStoryboard(ctx.db, actor, { id: input.storyboardId })
+
+      const credits = await ctx.db.credit.findMany({
+        where: { storyboardId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          type: true,
+          createdAt: true,
+          sectionLineage: true,
+          inheritedFromId: true,
+          contributor: {
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              avatar: { select: { updatedAt: true } },
+            },
+          },
+        },
+      })
+
+      // Newest first, so the first credit met for a person is their latest.
+      // Erased people (decision 0013) are one line together, as on the page.
+      const people = new Map<
+        string,
+        {
+          contributor: (typeof credits)[number]['contributor']
+          latest: (typeof credits)[number]
+          count: number
+        }
+      >()
+      for (const credit of credits) {
+        const key = credit.contributor?.id ?? 'erased'
+        const entry = people.get(key)
+        if (entry) entry.count += 1
+        else people.set(key, { contributor: credit.contributor, latest: credit, count: 1 })
+      }
+
+      const shown = [...people.values()].slice(0, CONTRIBUTORS_STRIP_MAX)
+      const lineages = shown
+        .map((entry) => entry.latest.sectionLineage)
+        .filter((lineage): lineage is string => Boolean(lineage))
+      const placeOf = lineages.length
+        ? await mainDraftPlaces(ctx.db, storyboardId, lineages)
+        : new Map<string, Place>()
+
+      return {
+        total: people.size,
+        contributors: shown.map((entry) => ({
+          contributor: entry.contributor,
+          count: entry.count,
+          latest: {
+            type: entry.latest.type,
+            createdAt: entry.latest.createdAt,
+            inherited: entry.latest.inheritedFromId !== null,
+            place: entry.latest.sectionLineage
+              ? (placeOf.get(entry.latest.sectionLineage) ?? null)
+              : null,
+          },
+        })),
       }
     }),
 })

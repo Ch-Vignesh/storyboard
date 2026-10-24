@@ -2,11 +2,11 @@ import type { Metadata } from 'next'
 
 import { readTimeZone } from '@/lib/dates'
 import { filtersFromParams } from '@/lib/schemas/browse'
+import { BROWSE_LIMITS } from '@/lib/schemas/constants'
 import { caller } from '@/trpc/server'
 
 import { BrowseFilters } from './browse-filters'
-import { RequestCard } from './request-card'
-import { StoryboardCard } from './storyboard-card'
+import { RequestResults, StoryResults } from './results'
 
 export const dynamic = 'force-dynamic'
 export const metadata: Metadata = {
@@ -34,14 +34,11 @@ export default async function BrowsePage({ searchParams }: Params) {
   const filters = filtersFromParams(params)
   // Item 6.15 — the cards say when each request closes, in the reader's zone.
   const timeZone = await readTimeZone()
-  const [{ requests }, storyboards, genres] = await Promise.all([
+  // Item 9.1 — the stories answer the same search, genres and types.
+  const storyInput = { query: filters.query, genreIds: filters.genreIds, types: filters.types }
+  const [requests, storyboards, genres] = await Promise.all([
     caller.browse.requests(filters),
-    caller.browse.storyboards({
-      query: filters.query,
-      genreIds: filters.genreIds,
-      types: filters.types,
-      take: 12,
-    }),
+    caller.browse.storyboards({ ...storyInput, take: BROWSE_LIMITS.storiesPage }),
     caller.user.genres(),
   ])
 
@@ -61,45 +58,9 @@ export default async function BrowsePage({ searchParams }: Params) {
         <BrowseFilters genres={genres} filters={filters} />
 
         <div className="min-w-0">
-          <div className="flex items-baseline justify-between border-b border-rule pb-3">
-            <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
-              Open for help
-            </h2>
-            <p role="status" className="text-[12.5px] text-ink-faint">
-              {requests.length === 0
-                ? 'nothing matches'
-                : `${String(requests.length)} ${requests.length === 1 ? 'passage' : 'passages'}`}
-            </p>
-          </div>
-
-          {requests.length === 0 ? (
-            <p className="mt-6 border border-rule bg-paper-sunk px-5 py-12 text-center text-[14px] text-ink-soft">
-              Nothing matches those filters. Widening the word range usually helps most.
-            </p>
-          ) : (
-            <ul className="mt-5 grid gap-4 sm:grid-cols-2">
-              {requests.map((request) => (
-                <li key={request.id}>
-                  <RequestCard request={request} timeZone={timeZone} />
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {storyboards.length > 0 ? (
-            <section className="mt-14">
-              <h2 className="border-b border-rule pb-3 text-[12px] font-medium tracking-wide text-ink-faint uppercase">
-                Stories you can read
-              </h2>
-              <ul className="mt-5 grid gap-4 sm:grid-cols-2">
-                {storyboards.map((storyboard) => (
-                  <li key={storyboard.id}>
-                    <StoryboardCard storyboard={storyboard} />
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+          {/* Item 9.1 — every page, by "Show more", and an honest count of them. */}
+          <RequestResults filters={filters} initial={requests} timeZone={timeZone} />
+          <StoryResults input={storyInput} initial={storyboards} timeZone={timeZone} />
         </div>
       </div>
     </main>

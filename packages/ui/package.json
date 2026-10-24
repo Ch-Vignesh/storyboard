@@ -11,6 +11,7 @@
     "./globals.css": "./src/styles/globals.css",
     "./fonts.css": "./src/styles/fonts.css",
     "./cn": "./src/lib/cn.ts",
+    "./brand": "./src/brand.tsx",
     "./components/*": "./src/components/*.tsx"
   },
   "scripts": {

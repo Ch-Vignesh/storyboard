@@ -5,6 +5,7 @@ import { SECTION_REASON_COPY, STRATEGY_COPY } from '@storyboard/import/types'
 import { Button } from '@storyboard/ui/components/button'
 import { Input } from '@storyboard/ui/components/input'
 import { useState } from 'react'
+import { TITLE_MAX_CHARS } from '@/lib/schemas/constants'
 
 export type OutlineSection = { from: number; to: number }
 export type OutlineChapter = { title: string; sections: OutlineSection[] }
@@ -235,7 +236,7 @@ export function BoundaryReview({
               <Input
                 aria-label={`Name of chapter ${String(chapterIndex + 1)}`}
                 value={chapter.title}
-                maxLength={200}
+                maxLength={TITLE_MAX_CHARS}
                 onChange={(event) => rename(chapterIndex, event.target.value)}
                 className="h-7 flex-1 border-transparent bg-transparent px-1 text-[14px] focus:border-rule focus:bg-paper"
               />

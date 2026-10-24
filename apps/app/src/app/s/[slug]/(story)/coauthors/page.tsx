@@ -47,6 +47,15 @@ export default async function CoauthorsPage({ params }: Params) {
         the owner does. Only the owner invites, changes who can read it, or deletes it. Up to{' '}
         {list.max} co-authors, invitations included.
       </p>
+      {/* Item 8.10 — the details are every author's, and this is where a
+          co-author finds the way to them. */}
+      <p className="mt-2 max-w-measure text-[14.5px] leading-relaxed text-ink-soft">
+        Every author changes the story&rsquo;s title, type and genres in{' '}
+        <Link href={`/s/${slug}/settings`} className="text-pencil hover:underline">
+          its settings
+        </Link>
+        .
+      </p>
 
       <CoauthorManager
         storyboardId={data.storyboard.id}

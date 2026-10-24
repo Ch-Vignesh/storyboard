@@ -16,6 +16,7 @@ import {
   type ReportTarget,
 } from '@/lib/schemas/report'
 import { useTRPC } from '@/trpc/client'
+import { REPORT_NOTE_MAX_CHARS } from '@/lib/schemas/constants'
 
 /**
  * FR-13.5 — reporting, from wherever the thing being reported is.
@@ -126,7 +127,7 @@ export function ReportButton({
         <Textarea
           id={`note-${targetId}`}
           rows={2}
-          maxLength={1000}
+          maxLength={REPORT_NOTE_MAX_CHARS}
           value={note}
           onChange={(event) => setNote(event.target.value)}
           placeholder="Only if the category above does not cover it."

@@ -228,6 +228,91 @@ describe.skipIf(!databaseUrl)('purging a deleted storyboard (FR-2.6)', () => {
     expect(result.purged).toBeGreaterThanOrEqual(1)
   })
 
+  /**
+   * Phase 14, item 9.5 (D-14) — the seeded stories carry help from the example
+   * helpers: suggestions waiting on an author, and ideas. The seed writes it as
+   * rows on the story's requests and nowhere else (no notification, no
+   * calendar day, no credit), so when a seeded story goes for good it all goes
+   * with it, and the helpers are left with nothing pointing at it.
+   */
+  it('takes a seeded story’s waiting suggestions and ideas with it', async () => {
+    const { user, storyboard, chapter, section, revision } = await writeSomething('seeded')
+    await db.storyboard.update({ where: { id: storyboard.id }, data: { isSeed: true } })
+    const run = randomUUID().replaceAll('-', '').slice(0, 8)
+
+    const helper = await db.user.create({
+      data: { email: `purge-helper-${run}@example.test`, username: `pg_help_${run}` },
+      select: { id: true },
+    })
+    made.push(helper.id)
+
+    // One open request per section (FR-5.1), so the question has its own.
+    const second = await db.section.create({
+      data: { chapterId: chapter.id, lineageId: randomUUID(), order: 1, wordCount: 0 },
+      select: { id: true },
+    })
+
+    const rewrite = await db.contributionRequest.create({
+      data: {
+        publicId: `rw${run}`,
+        storyboardId: storyboard.id,
+        sectionId: section.id,
+        kind: 'REWRITE',
+        title: 'The opening is flat',
+        ask: 'Make the empty harbour matter.',
+        state: 'ANSWERED',
+        openedById: user.id,
+      },
+      select: { id: true },
+    })
+    const waiting = await db.suggestion.create({
+      data: {
+        publicId: `wt${run}`,
+        requestId: rewrite.id,
+        contributorId: helper.id,
+        baseRevisionId: revision.id,
+        contentJson: { type: 'doc', content: [] },
+        contentText: 'For a year the harbour had been empty.',
+        wordCount: 8,
+        state: 'SUBMITTED',
+        submittedAt: new Date(),
+      },
+      select: { id: true },
+    })
+
+    const question = await db.contributionRequest.create({
+      data: {
+        publicId: `qs${run}`,
+        storyboardId: storyboard.id,
+        sectionId: second.id,
+        kind: 'UNBLOCK',
+        title: 'Why is it empty?',
+        ask: 'I do not know why nobody comes.',
+        state: 'ANSWERED',
+        openedById: user.id,
+      },
+      select: { id: true },
+    })
+    const idea = await db.idea.create({
+      data: { requestId: question.id, authorId: helper.id, body: 'The fish went first.' },
+      select: { id: true },
+    })
+
+    await deleteAndAge(storyboard.id)
+    await purgeDeletedStoryboards(db)
+
+    expect(await db.storyboard.findUnique({ where: { id: storyboard.id } })).toBeNull()
+    expect(await db.suggestion.findUnique({ where: { id: waiting.id } })).toBeNull()
+    expect(await db.idea.findUnique({ where: { id: idea.id } })).toBeNull()
+    expect(
+      await db.contributionRequest.count({ where: { id: { in: [rewrite.id, question.id] } } }),
+    ).toBe(0)
+    // The helper's account stays, holding nothing from the story.
+    expect(await db.user.findUnique({ where: { id: helper.id } })).not.toBeNull()
+    expect(await db.suggestion.count({ where: { contributorId: helper.id } })).toBe(0)
+    expect(await db.idea.count({ where: { authorId: helper.id } })).toBe(0)
+  })
+
   it('does not touch a storyboard nobody deleted', async () => {
     const { storyboard } = await writeSomething('alive')
     await purgeDeletedStoryboards(db)

@@ -1,6 +1,7 @@
 import { prisma } from '@storyboard/db'
 
 import { env } from '@/env'
+import { isOn } from '@/lib/flags'
 import { logger } from '@/lib/logger'
 import { displayNameSchema } from '@/lib/schemas/profile'
 
@@ -54,7 +55,7 @@ export type GoogleProfile = {
 
 export type GoogleOutcome =
   | { ok: true; userId: string; username: string | null; onboarded: boolean }
-  | { ok: false; reason: 'unverified' | 'suspended' | 'deleted' | 'disconnected' }
+  | { ok: false; reason: 'unverified' | 'suspended' | 'deleted' | 'disconnected' | 'paused' }
 
 /**
  * Find or create the account behind a Google sign-in.
@@ -128,6 +129,14 @@ export async function resolveGoogleUser(profile: GoogleProfile): Promise<GoogleO
       username: existing.username,
       onboarded: existing.onboardedAt !== null,
     }
+  }
+
+  // Item 9.4 (D-18) — a first Google sign-in is a sign-up, and pausing
+  // sign-ups pauses it too. Asked only here, after the lookup: somebody who
+  // already has an account signs in as usual.
+  if (await isOn('pause-sign-ups')) {
+    log.info({ event: 'auth.google.paused' }, 'new account refused while sign-ups are paused')
+    return { ok: false, reason: 'paused' }
   }
 
   const created = await prisma.user.create({

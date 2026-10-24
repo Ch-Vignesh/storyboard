@@ -55,7 +55,7 @@ export default async function DashboardPage() {
           </Link>
         </div>
         <NeedsYouRegion invitations={invitations} timeZone={timeZone} />
-        <WritingRegion />
+        <WritingRegion timeZone={timeZone} />
         <NewsRegion />
         <OpenRequestsRegion timeZone={timeZone} />
       </main>

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { CONTROL_CHARACTERS } from './help'
+import { REPORT_NOTE_MAX_CHARS } from './constants'
 
 /**
  * FR-13.5 — reporting.
@@ -57,7 +58,7 @@ export const createReportSchema = z.object({
   note: z
     .string()
     .trim()
-    .max(1000, 'Keep it under 1000 characters.')
+    .max(REPORT_NOTE_MAX_CHARS, `Keep it under ${String(REPORT_NOTE_MAX_CHARS)} characters.`)
     // The same refusal every other free-text field carries. One copy of the
     // rule, in help.ts, because two copies drift.
     .refine((value) => !CONTROL_CHARACTERS.test(value), 'That text cannot be used here.')

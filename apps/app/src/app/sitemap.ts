@@ -3,6 +3,7 @@ import type { MetadataRoute } from 'next'
 
 import { env } from '@/env'
 import { visibleStoryboardsWhere } from '@/lib/authz/guard'
+import { profilesWithPublicWork } from '@/server/sitemap'
 
 /**
  * Everything a stranger may read, for search engines (phase 8).
@@ -24,12 +25,16 @@ export const revalidate = 3_600
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const app = env.NEXT_PUBLIC_APP_URL
 
-  const storyboards = await prisma.storyboard.findMany({
-    where: visibleStoryboardsWhere(null),
-    select: { slug: true, updatedAt: true },
-    orderBy: { updatedAt: 'desc' },
-    take: LIMIT,
-  })
+  const [storyboards, profiles] = await Promise.all([
+    prisma.storyboard.findMany({
+      where: visibleStoryboardsWhere(null),
+      select: { slug: true, updatedAt: true },
+      orderBy: { updatedAt: 'desc' },
+      take: LIMIT,
+    }),
+    // Item 9.8 — the people behind that work, at the address the SRS gives them.
+    profilesWithPublicWork(prisma, LIMIT),
+  ])
 
   return [
     { url: `${app}/browse`, changeFrequency: 'daily', priority: 0.8 },
@@ -42,6 +47,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: storyboard.updatedAt,
       changeFrequency: 'weekly' as const,
       priority: 0.6,
+    })),
+    ...profiles.map((username) => ({
+      url: `${app}/@${username}`,
+      changeFrequency: 'weekly' as const,
+      priority: 0.4,
     })),
   ]
 }

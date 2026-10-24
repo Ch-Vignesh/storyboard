@@ -8,11 +8,14 @@ import Link from '@/components/link'
 import { useState } from 'react'
 
 import { nameOf } from '@/lib/people'
+import { VERSION_NAME_MAX_CHARS } from '@/lib/schemas/constants'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 import type { AppRouter } from '@/server/trpc/routers/_app'
 import type { inferRouterOutputs } from '@trpc/server'
 
 type Version = inferRouterOutputs<AppRouter>['version']['list']['versions'][number]
+type VersionEvent = inferRouterOutputs<AppRouter>['version']['list']['events'][number]
 
 const DATE = { day: 'numeric', month: 'short', year: 'numeric' } as const
 
@@ -27,12 +30,17 @@ export function VersionsPanel({
   slug,
   storyboardId,
   initialVersions,
+  initialEvents,
   canEdit,
+  timeZone,
 }: {
   slug: string
   storyboardId: string
   initialVersions: Version[]
+  /** Item 7.10 — the promotions so far, newest first. */
+  initialEvents: VersionEvent[]
   canEdit: boolean
+  timeZone: string
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -41,6 +49,7 @@ export function VersionsPanel({
 
   // The server already rendered a list; the query replaces it once it lands.
   const versions: Version[] = data?.versions ?? initialVersions
+  const events: VersionEvent[] = data?.events ?? initialEvents
   const refresh = () => queryClient.invalidateQueries({ queryKey: listOptions.queryKey })
 
   const [creatingFrom, setCreatingFrom] = useState<string | null>(null)
@@ -101,7 +110,7 @@ export function VersionsPanel({
         </p>
       ) : null}
 
-      <ul className="divide-y divide-rule border-y border-rule">
+      <ul aria-label="Versions" className="divide-y divide-rule border-y border-rule">
         {versions.map((version) => (
           <li key={version.id} className="py-4">
             <div className="flex items-baseline justify-between gap-4">
@@ -122,7 +131,7 @@ export function VersionsPanel({
                       <Input
                         id={`rename-${version.id}`}
                         autoFocus
-                        maxLength={120}
+                        maxLength={VERSION_NAME_MAX_CHARS}
                         value={renameTo}
                         onChange={(event) => setRenameTo(event.target.value)}
                       />
@@ -277,7 +286,7 @@ export function VersionsPanel({
                     id={`new-from-${version.id}`}
                     autoFocus
                     required
-                    maxLength={120}
+                    maxLength={VERSION_NAME_MAX_CHARS}
                     value={newName}
                     onChange={(event) => setNewName(event.target.value)}
                     placeholder="Chapter 4, the other way"
@@ -299,6 +308,29 @@ export function VersionsPanel({
           </li>
         ))}
       </ul>
+
+      {/* FR-10.2 (item 7.10) — "records the swap in storyboard history". */}
+      {events.length > 0 ? (
+        <section className="mt-10 border-t border-rule pt-6">
+          <h2 className="text-[12px] font-medium tracking-wide text-ink-faint uppercase">
+            Which draft was the main one
+          </h2>
+          <ol aria-label="Which draft was the main one" className="mt-3 space-y-2.5">
+            {events.map((event) => (
+              <li key={event.id} className="text-[13.5px] leading-relaxed text-ink-soft">
+                <time dateTime={event.createdAt.toISOString()} className="text-ink-faint">
+                  {formatInZone(event.createdAt, 'dayMonthShort', timeZone)}
+                </time>
+                {' — '}&lsquo;{event.versionName}&rsquo; became the main draft, by{' '}
+                {nameOf(event.actor)}.
+                {event.previousName
+                  ? ` The previous one is kept as ‘${event.previousName}’.`
+                  : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
 
       {/* FR-7.5 — two versions side by side, once there are two. */}
       {versions.length > 1 ? (

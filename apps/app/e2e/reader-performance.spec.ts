@@ -149,21 +149,60 @@ test.describe('the reader at 120,000 words (NFR-1)', () => {
     expect(totalWords).toBeGreaterThanOrEqual(120_000)
   })
 
-  test('never ships the whole manuscript in one payload', async ({ page }) => {
-    const response = await page.goto(`/s/${SLUG}`)
-    expect(response?.status()).toBe(200)
-
-    const html = (await response?.text()) ?? ''
+  test('ships the opening chapter with the page, and never the whole manuscript', async ({
+    page,
+    request,
+  }) => {
+    // Phase 14, item 7.4 — the raw first response, as a crawler or a link
+    // preview gets it. It used to say "Loading…" and pass this check with no
+    // prose in it at all.
+    const response = await request.get(`/s/${SLUG}`)
+    expect(response.status()).toBe(200)
+    const html = await response.text()
     const occurrences = html.split(SENTENCE.trim()).length - 1
 
-    // One chapter is 10 sections of ~5 repetitions each; the whole manuscript
-    // would be 24 times that. The assertion is deliberately loose — the point
-    // is the order of magnitude, not an exact count.
-    const wholeBook = CHAPTERS * SECTIONS_PER_CHAPTER * 5
-    expect(occurrences).toBeLessThan(wholeBook / 2)
+    // One chapter is ten sections of six five-sentence paragraphs. The page
+    // carries it twice — drawn, and in the data the reader hydrates from —
+    // and the book would be twenty-four times that.
+    const perChapter = SECTIONS_PER_CHAPTER * paragraphsOfAbout(500).length * 5
+    expect(html).toContain(SENTENCE.repeat(5).trim())
+    expect(occurrences).toBeGreaterThanOrEqual(perChapter)
+    expect(occurrences).toBeLessThanOrEqual(perChapter * 3)
 
     // The contents rail lists every chapter even though it carries no prose.
+    await page.goto(`/s/${SLUG}`)
     await expect(page.getByRole('navigation', { name: 'Contents' })).toContainText('Chapter 24')
+  })
+
+  test("first contentful paint under Chrome's Fast 3G preset is measured", async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'network throttling is a Chromium protocol')
+    // NFR-1's stated condition. DevTools' "Fast 3G": 1.6 Mbit/s down and
+    // 750 kbit/s up at 90%, and 562.5 ms of added latency. Measured and
+    // reported, not asserted: item 7.4 asks for the budget to be asserted
+    // only once the build meets it, and never for the measurement to be
+    // weakened until it does.
+    const session = await page.context().newCDPSession(page)
+    await session.send('Network.enable')
+    await session.send('Network.emulateNetworkConditions', {
+      offline: false,
+      latency: 562.5,
+      downloadThroughput: ((1.6 * 1024 * 1024) / 8) * 0.9,
+      uploadThroughput: ((750 * 1024) / 8) * 0.9,
+    })
+    await page.goto(`/s/${SLUG}`, { timeout: 60_000 })
+    await expect(page.getByText(SENTENCE.trim()).first()).toBeVisible({ timeout: 60_000 })
+    const fcp = await page.evaluate(
+      () =>
+        performance.getEntriesByName('first-contentful-paint')[0]?.startTime ??
+        Number.POSITIVE_INFINITY,
+    )
+    test.info().annotations.push({ type: 'fcp-fast-3g-ms', description: String(Math.round(fcp)) })
+    // Printed so every run shows the figure the tracker records.
+    console.warn(`first contentful paint, Fast 3G: ${String(Math.round(fcp))} ms`)
+    expect(Number.isFinite(fcp)).toBe(true)
   })
 
   test('paints inside the NFR-1 budget and drops no frame when changing chapter', async ({

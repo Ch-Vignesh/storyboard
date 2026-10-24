@@ -17,6 +17,7 @@ import { STORY_NOT_FOUND } from '@/lib/authz'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import {
   createStoryboardSchema,
+  TYPE_FAMILY_COPY,
   updateStoryboardSchema,
   visibilitySchema,
 } from '@/lib/schemas/storyboard'
@@ -176,6 +177,7 @@ export const storyboardRouter = createTRPCRouter({
           isSeed: true,
           publicFrom: true,
           finishedAt: true,
+          lastWrittenAt: true,
           // Item 2.7 — only its authors and a moderator ever get this far on a
           // hidden story; the reader shows them why.
           hiddenAt: true,
@@ -197,7 +199,8 @@ export const storyboardRouter = createTRPCRouter({
         where: input.versionId
           ? { id: input.versionId, storyboardId, deletedAt: null }
           : { storyboardId, isMain: true },
-        select: { id: true, name: true, isMain: true },
+        // Item 7b.2 — an edition is read at its own address, not as an alternate.
+        select: { id: true, name: true, isMain: true, frozenAt: true },
       })
       if (!version) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'That version does not exist.' })
@@ -258,6 +261,22 @@ export const storyboardRouter = createTRPCRouter({
         (await ctx.db.credit.count({ where: { storyboardId, type: { not: 'COAUTHOR' } } })) > 0
       const ownShare = contributed ? await mainDraftOwnShare(ctx.db, storyboardId) : null
 
+      // Decision 0044 (item 7b.2) — the reader says when there is a published
+      // edition, and which edition a frozen version is.
+      const [latestEdition, thisEdition] = await Promise.all([
+        ctx.db.publication.findFirst({
+          where: { storyboardId },
+          orderBy: { number: 'desc' },
+          select: { number: true, publishedAt: true },
+        }),
+        version.frozenAt
+          ? ctx.db.publication.findUnique({
+              where: { versionId: version.id },
+              select: { number: true },
+            })
+          : null,
+      ])
+
       return {
         storyboard: {
           ...storyboard,
@@ -271,7 +290,8 @@ export const storyboardRouter = createTRPCRouter({
           ),
           ownShare,
         },
-        version,
+        version: { ...version, edition: thisEdition?.number ?? null },
+        latestEdition,
         chapters,
         permissions,
         /** Decision 0007: the reader may not see the whole chain — and is told
@@ -281,12 +301,60 @@ export const storyboardRouter = createTRPCRouter({
       }
     }),
 
+  /**
+   * Phase 14, item 8.7 — the address a story is at now, for an address from
+   * before a retitling. The address asked for, if it is current: that says
+   * nothing new. Otherwise the current one, but only to someone who may read
+   * the story, since its new title is in it; anyone else gets null, and the
+   * page gives its 404 as for any story they may not read.
+   */
+  currentSlug: publicProcedure
+    .input(z.object({ slug: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const exact = await ctx.db.storyboard.findUnique({
+        where: { slug: input.slug },
+        select: { id: true },
+      })
+      if (exact) return input.slug
+      const actor = actorFrom(ctx.session, ctx.account)
+      try {
+        const { storyboardId } = await loadStoryboard(ctx.db, actor, { slug: input.slug })
+        const row = await ctx.db.storyboard.findUniqueOrThrow({
+          where: { id: storyboardId },
+          select: { slug: true },
+        })
+        return row.slug
+      } catch (error) {
+        if (error instanceof TRPCError && error.code === 'NOT_FOUND') return null
+        throw error
+      }
+    }),
+
+  /**
+   * FR-15.3 (phase 14, item 7.7) — whether a story is a seeded example, for
+   * the line under the header on its pages. Read with the story's own read
+   * right: a story this person may not read is not found, as everywhere.
+   */
+  isExample: publicProcedure
+    .input(z.object({ slug: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const { storyboardId } = await loadStoryboard(ctx.db, actor, { slug: input.slug })
+      const row = await ctx.db.storyboard.findUniqueOrThrow({
+        where: { id: storyboardId },
+        select: { isSeed: true },
+      })
+      return row.isSeed
+    }),
+
   /** FR-11.1 region one: storyboards you are writing, owned or co-authored. */
   listMine: protectedProcedure.query(async ({ ctx }) => {
     const userId = ctx.session.user.id
     const rows = await ctx.db.storyboard.findMany({
       where: authoredStoryboardsWhere(userId),
-      orderBy: { updatedAt: 'desc' },
+      // Item 7.6 — most recently written first; `updatedAt` moves with
+      // settings, never with writing.
+      orderBy: [{ lastWrittenAt: { sort: 'desc', nulls: 'last' } }, { updatedAt: 'desc' }],
       select: {
         id: true,
         slug: true,
@@ -298,6 +366,7 @@ export const storyboardRouter = createTRPCRouter({
         hiddenAt: true,
         ownerId: true,
         updatedAt: true,
+        lastWrittenAt: true,
         genres: { select: { genre: { select: { id: true, name: true } } } },
         versions: {
           where: { isMain: true },
@@ -325,6 +394,7 @@ export const storyboardRouter = createTRPCRouter({
       state: row.state,
       isSeed: row.isSeed,
       updatedAt: row.updatedAt,
+      lastWrittenAt: row.lastWrittenAt,
       role: row.ownerId === userId ? ('owner' as const) : ('coauthor' as const),
       genres: row.genres.map((entry) => entry.genre),
       wordCount:
@@ -356,6 +426,26 @@ export const storyboardRouter = createTRPCRouter({
       }
     }
 
+    // Phase 14, item 8.4 (FR-2.1, D-16) — the type changes within its family
+    // only: prose to prose, script to script. The sections are written in one
+    // family's blocks (FR-4.2); across, every one would have to be rewritten.
+    if (input.type !== undefined) {
+      const current = await ctx.db.storyboard.findUniqueOrThrow({
+        where: { id: storyboardId },
+        select: { type: true },
+      })
+      const family = flavourForStoryType(current.type)
+      if (family !== flavourForStoryType(input.type)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: TYPE_FAMILY_COPY[family] })
+      }
+    }
+
+    // Item 8.7 — a new title, a new address; the old one goes on finding it
+    // by its `publicId`, and redirects.
+    const { publicId: storyPublicId } = await ctx.db.storyboard.findUniqueOrThrow({
+      where: { id: storyboardId },
+      select: { publicId: true },
+    })
     return ctx.db.$transaction(async (tx) => {
       if (input.genreIds) {
         await tx.storyboardGenre.deleteMany({ where: { storyboardId } })
@@ -366,11 +456,14 @@ export const storyboardRouter = createTRPCRouter({
       return tx.storyboard.update({
         where: { id: storyboardId },
         data: {
-          ...(input.title === undefined ? {} : { title: input.title }),
+          ...(input.title === undefined
+            ? {}
+            : { title: input.title, slug: `${slugify(input.title)}-${storyPublicId}` }),
           ...(input.logline === undefined ? {} : { logline: input.logline }),
           ...(input.rightsNote === undefined ? {} : { rightsNote: input.rightsNote }),
+          ...(input.type === undefined ? {} : { type: input.type }),
         },
-        select: { id: true, title: true, logline: true, rightsNote: true },
+        select: { id: true, slug: true, title: true, logline: true, rightsNote: true },
       })
     })
   }),

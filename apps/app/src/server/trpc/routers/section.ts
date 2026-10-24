@@ -6,6 +6,7 @@ import { z } from 'zod'
 
 import { loadChapter, loadSection } from '@/lib/authz/guard'
 import { afterCommit } from '@/server/after-commit'
+import { recordEvent } from '@/server/audit'
 import { closeRequestsOnSections } from '@/server/close-requests'
 import { sectionsRequestImpact } from '@/server/impact'
 import type { Person } from '@/lib/people'
@@ -19,6 +20,7 @@ import {
 } from '@/lib/doc/schema'
 import { derive } from '@/lib/doc/text'
 import { HISTORY, SOFT_DELETE_GRACE_DAYS, TITLE_MAX_CHARS } from '@/lib/schemas/constants'
+import { passChipSchema } from '@/lib/schemas/help'
 import { logger } from '@/lib/logger'
 
 import {
@@ -233,6 +235,87 @@ export const sectionRouter = createTRPCRouter({
         data: { title: input.title === '' ? null : (input.title ?? null) },
         select: { id: true, title: true },
       })
+    }),
+
+  /**
+   * FR-2.3 (phase 14, item 8.3) — a section to another chapter of the same
+   * version, at a position counted from 0. Both chapters are renumbered in one
+   * transaction; the section keeps its lineage, its history, its drafts and
+   * its requests, which follow it to its new address. A chapter keeps at least
+   * one section, as Remove already insists.
+   */
+  move: activeProcedure
+    .input(
+      z.object({
+        sectionId: z.string().min(1),
+        toChapterId: z.string().min(1),
+        position: z.number().int().min(0),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const actor = actorFrom(ctx.session, ctx.account)
+      const {
+        sectionId,
+        chapterId: fromChapterId,
+        versionId,
+      } = await loadSection(ctx.db, actor, input.sectionId, 'storyboard:structure')
+      const target = await loadChapter(ctx.db, actor, input.toChapterId, 'storyboard:structure')
+      const chapter = await ctx.db.chapter.findUniqueOrThrow({
+        where: { id: target.chapterId },
+        select: { deletedAt: true },
+      })
+      if (target.versionId !== versionId || chapter.deletedAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'A section moves to another chapter of the same draft.',
+        })
+      }
+
+      const live = { deletedAt: null, mergedIntoId: null }
+      const moved = await ctx.db.$transaction(async (tx) => {
+        const from = await tx.section.findMany({
+          where: { chapterId: fromChapterId, ...live },
+          orderBy: { order: 'asc' },
+          select: { id: true },
+        })
+        const sameChapter = fromChapterId === target.chapterId
+        if (!sameChapter && from.length <= 1) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'A chapter keeps at least one section. Add another to it first, or remove the chapter.',
+          })
+        }
+        const left = from.filter((section) => section.id !== sectionId)
+        const into = sameChapter
+          ? left
+          : await tx.section.findMany({
+              where: { chapterId: target.chapterId, ...live },
+              orderBy: { order: 'asc' },
+              select: { id: true },
+            })
+        const at = Math.min(input.position, into.length)
+        const ordered = [...into.slice(0, at), { id: sectionId }, ...into.slice(at)]
+
+        if (!sameChapter) {
+          for (const [order, section] of left.entries()) {
+            await tx.section.update({ where: { id: section.id }, data: { order } })
+          }
+        }
+        for (const [order, section] of ordered.entries()) {
+          await tx.section.update({
+            where: { id: section.id },
+            data: section.id === sectionId ? { order, chapterId: target.chapterId } : { order },
+          })
+        }
+        return { chapterId: target.chapterId, position: at }
+      })
+
+      log.info(
+        { event: 'section.moved', sectionId, from: fromChapterId, to: moved.chapterId },
+        'section moved',
+      )
+      return moved
     }),
 
   /** FR-2.3 — one transaction rewrites every sibling's `order`. */
@@ -904,6 +987,8 @@ export const sectionRouter = createTRPCRouter({
           restoredFromId: true,
           // FR-8.4 — "restored from 12 Sep": the date of the version copied.
           restoredFrom: { select: { createdAt: true } },
+          // FR-8.6 (item 8.14) — and why, when the person restoring said.
+          restoreReason: true,
           author: { select: { id: true, username: true, displayName: true } },
           acceptedBy: { select: { id: true, username: true, displayName: true } },
         },
@@ -934,7 +1019,14 @@ export const sectionRouter = createTRPCRouter({
    * the record of the contribution).
    */
   restoreRevision: activeProcedure
-    .input(z.object({ sectionId: z.string().min(1), revisionId: z.string().min(1) }))
+    .input(
+      z.object({
+        sectionId: z.string().min(1),
+        revisionId: z.string().min(1),
+        // FR-8.6 (item 8.14) — optional, and one of FR-6.10's chips: no free text.
+        reason: passChipSchema.optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
       const { sectionId, storyboardId, currentRevisionId } = await loadSection(
@@ -998,6 +1090,7 @@ export const sectionRouter = createTRPCRouter({
             contentHash: source.contentHash,
             source: 'RESTORED',
             restoredFromId: source.id,
+            restoreReason: input.reason ?? null,
             authorId: userId,
           },
           select: { id: true },
@@ -1064,6 +1157,15 @@ export const sectionRouter = createTRPCRouter({
         },
         'revision restored',
       )
+      // Item 10.2 (NFR-7) — stored as well as logged.
+      await recordEvent(ctx.db, {
+        event: 'section.restore',
+        actorId: userId,
+        subjectId: null,
+        storyboardId,
+        target: { type: 'SECTION', id: sectionId },
+        detail: { restoredFrom: source.id, revisionId, creditsNoLongerLive: unlinked.length },
+      })
       return { revisionId, creditsNoLongerLive: unlinked.length }
     }),
 })

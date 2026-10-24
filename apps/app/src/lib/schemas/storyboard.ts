@@ -1,6 +1,11 @@
 import { z } from 'zod'
 
-import { SOFT_DELETE_GRACE_DAYS, STORYBOARD_GENRES, TITLE_MAX_CHARS } from './constants'
+import {
+  SOFT_DELETE_GRACE_DAYS,
+  STORYBOARD_GENRES,
+  TITLE_MAX_CHARS,
+  STORY_DETAIL_CHARS,
+} from './constants'
 
 /**
  * FR-2.1 — everything required to create a storyboard, and nothing else.
@@ -54,6 +59,19 @@ export const titleSchema = z
   .min(1, 'Give it a title. You can change it later.')
   .max(TITLE_MAX_CHARS, 'That title is too long.')
 
+/**
+ * Phase 14, item 8.10 (FR-2.1) — what the genre picker says, from the bounds:
+ * the hint beside it, and the sentence when a form is sent without enough.
+ * The create form said "(up to 3)" and stayed disabled without one.
+ */
+export const GENRE_COPY = {
+  hint: `Choose ${String(STORYBOARD_GENRES.min)} to ${String(STORYBOARD_GENRES.max)}`,
+  missing:
+    STORYBOARD_GENRES.min === 1
+      ? 'Choose a genre first: it is how readers looking for this kind of story find it.'
+      : `Choose at least ${String(STORYBOARD_GENRES.min)} genres first: they are how readers looking for this kind of story find it.`,
+} as const
+
 export const createStoryboardSchema = z.object({
   title: titleSchema,
   type: storyTypeSchema,
@@ -68,11 +86,41 @@ export const createStoryboardSchema = z.object({
 export const updateStoryboardSchema = z.object({
   storyboardId: z.string().min(1),
   title: titleSchema.optional(),
-  logline: z.string().trim().max(300, 'Keep the logline under 300 characters.').nullish(),
+  logline: z
+    .string()
+    .trim()
+    .max(
+      STORY_DETAIL_CHARS.logline,
+      `Keep the logline under ${String(STORY_DETAIL_CHARS.logline)} characters.`,
+    )
+    .nullish(),
   /** FR-14.5 — free text, displayed as written, never verified. */
-  rightsNote: z.string().trim().max(500, 'Keep the rights note under 500 characters.').nullish(),
+  rightsNote: z
+    .string()
+    .trim()
+    .max(
+      STORY_DETAIL_CHARS.rightsNote,
+      `Keep the rights note under ${String(STORY_DETAIL_CHARS.rightsNote)} characters.`,
+    )
+    .nullish(),
   genreIds: createStoryboardSchema.shape.genreIds.optional(),
+  /** Item 8.4 (FR-2.1, D-16) — within its family only; `storyboard.update` refuses a change across. */
+  type: storyTypeSchema.optional(),
 })
+
+/**
+ * Phase 14, item 8.4 (D-16) — why a story's type stays in its family, in the
+ * words the server's refusal and the settings form share. The family is the
+ * document flavour (`flavourForStoryType`): within one, every section is
+ * written in the same blocks and only the label changes; across, every block
+ * would have to be rewritten as the other kind.
+ */
+export const TYPE_FAMILY_COPY = {
+  prose:
+    'This story is prose, so it can become another kind of prose but not a script: every paragraph would have to be rewritten as scene headings, action and dialogue. To write it as a script, start a new story.',
+  screenplay:
+    'This story is a script, so it can become a screenplay or a stage play but not prose: its scene headings, characters and dialogue would all become plain paragraphs. To write it as prose, start a new story.',
+} as const
 
 /**
  * FR-13.6, quoted rather than paraphrased. This is the product being honest

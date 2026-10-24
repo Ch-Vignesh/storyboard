@@ -12,6 +12,8 @@ export const ADMIN_SCREENS = [
   { href: '/admin/names', label: 'Names', capability: 'names.ban' },
   { href: '/admin/seeds', label: 'Seeds', capability: 'seeds.manage' },
   { href: '/admin/flags', label: 'Flags', capability: 'flags.toggle' },
+  { href: '/admin/events', label: 'Events', capability: 'events.read' },
+  { href: '/admin/errors', label: 'Errors', capability: 'errors.read' },
 ] as const satisfies ReadonlyArray<{ href: string; label: string; capability: AdminCapability }>
 
 export type AdminScreen = (typeof ADMIN_SCREENS)[number]

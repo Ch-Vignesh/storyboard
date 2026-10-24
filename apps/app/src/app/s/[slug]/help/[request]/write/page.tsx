@@ -141,6 +141,7 @@ export default async function ComposerPage({ params, searchParams }: Params) {
         change={typeof change === 'string'}
         requestTitle={data.request.title}
         backHref={`/s/${slug}/help/${publicId}`}
+        savedAt={draft.suggestion.updatedAt.toISOString()}
       />
     </main>
   )

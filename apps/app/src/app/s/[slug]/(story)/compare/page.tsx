@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
+import { NOT_INDEXED } from '@/lib/metadata'
 import { caller } from '@/trpc/server'
 
 import { ComparePanel } from './compare-panel'
@@ -13,7 +14,8 @@ type Params = {
 }
 
 export const dynamic = 'force-dynamic'
-export const metadata: Metadata = { title: 'Compare versions' }
+// Item 9.8 — two drafts side by side, of text the reader already shows: not for an index.
+export const metadata: Metadata = { title: 'Compare versions', robots: NOT_INDEXED }
 
 /** FR-7.5 — two versions of a storyboard, side by side. */
 export default async function ComparePage({ params, searchParams }: Params) {

@@ -53,6 +53,7 @@ export async function assembleAccountExport(
           termsAcceptedAt: true,
           rulesSeenAt: true,
           lastSeenAt: true,
+          weeklyDigestSentAt: true,
           showPassedWork: true,
           readingTypeScale: true,
           readingLineHeight: true,
@@ -155,6 +156,8 @@ export async function assembleAccountExport(
         termsAccepted: user.termsAcceptedAt,
         rulesRead: user.rulesSeenAt,
         lastSeen: user.lastSeenAt,
+        // Item 10.6 — when the weekly digest last went to this address.
+        weeklyDigestSent: user.weeklyDigestSentAt,
         googleConnected: user.googleLinkedAt,
       },
       genres: genres.map((pin) => pin.genre.name),

@@ -23,11 +23,11 @@ import { Input } from '@storyboard/ui/components/input'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import Link from '@/components/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { requestsSentence } from '@/lib/impact-words'
-import { SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
+import { SOFT_DELETE_GRACE_DAYS, TITLE_MAX_CHARS } from '@/lib/schemas/constants'
 import type { Person } from '@/lib/people'
 import { useTRPC } from '@/trpc/client'
 
@@ -106,6 +106,21 @@ export function ContentsEditor({
     }),
   )
   const createSection = useMutation(trpc.section.create.mutationOptions({ onSuccess: refresh }))
+  // Item 8.3 (FR-2.3) — a section to another chapter, or another place in its
+  // own, by a form as well as by dragging, which is also the keyboard's way.
+  const [moving, setMoving] = useState<{
+    sectionId: string
+    toChapterId: string
+    position: number
+  } | null>(null)
+  const moveSection = useMutation(
+    trpc.section.move.mutationOptions({
+      onSuccess: () => {
+        setMoving(null)
+        refresh()
+      },
+    }),
+  )
   const renameSection = useMutation(trpc.section.rename.mutationOptions({ onSuccess: refresh }))
   const deleteSection = useMutation(
     trpc.section.delete.mutationOptions({
@@ -159,7 +174,8 @@ export function ContentsEditor({
     createSection.error ??
     renameSection.error ??
     deleteSection.error ??
-    joinSection.error
+    joinSection.error ??
+    moveSection.error
 
   function onChapterDragEnd(event: DragEndEvent) {
     const { active, over } = event
@@ -232,7 +248,11 @@ export function ContentsEditor({
         >
           <ul className="space-y-6">
             {chapters.map((chapter, chapterIndex) => (
-              <SortableRow key={chapter.id} id={chapter.id}>
+              <SortableRow
+                key={chapter.id}
+                id={chapter.id}
+                label={`Move chapter ‘${chapter.title}’`}
+              >
                 {(handle) => (
                   <div className="border border-rule bg-paper">
                     <div className="flex items-center gap-2 border-b border-rule px-3 py-2.5">
@@ -275,70 +295,120 @@ export function ContentsEditor({
                       >
                         <ul className="divide-y divide-rule">
                           {chapter.sections.map((section, sectionIndex) => (
-                            <SortableRow key={section.id} id={section.id}>
+                            <SortableRow
+                              key={section.id}
+                              id={section.id}
+                              label={`Move section ‘${section.title ?? `Section ${String(sectionIndex + 1)}`}’`}
+                            >
                               {(sectionHandle) => (
-                                <div className="flex items-center gap-2 px-3 py-2">
-                                  {sectionHandle}
-                                  {/* FR-2.3 — sections are named here, as
+                                <>
+                                  <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                                    {sectionHandle}
+                                    {/* FR-2.3 — sections are named here, as
                                       chapters are. `section.rename` had no
                                       caller until the 2026-10-16 spec review. */}
-                                  <Input
-                                    aria-label={`Chapter ${chapterIndex + 1}, section ${sectionIndex + 1} name`}
-                                    defaultValue={section.title ?? ''}
-                                    placeholder={`Section ${sectionIndex + 1}`}
-                                    className="h-8 min-w-0 flex-1 border-transparent text-[13.5px] hover:border-rule"
-                                    onBlur={(event) => {
-                                      const title = event.target.value.trim()
-                                      if (title !== (section.title ?? '')) {
-                                        renameSection.mutate({ sectionId: section.id, title })
-                                      }
-                                    }}
-                                  />
-                                  <Link
-                                    href={`/s/${slug}/c/${chapterIndex + 1}/${sectionIndex + 1}/edit${versionQuery}`}
-                                    className="shrink-0 text-[12.5px] text-pencil hover:underline"
-                                  >
-                                    Write
-                                  </Link>
-                                  <span className="shrink-0 text-[12px] text-ink-faint tabular-nums">
-                                    {section.wordCount.toLocaleString('en-GB')}
-                                  </span>
-                                  {/* FR-2.4 — never called "merge" in the interface. */}
-                                  {sectionIndex > 0 ? (
+                                    <Input
+                                      aria-label={`Chapter ${chapterIndex + 1}, section ${sectionIndex + 1} name`}
+                                      defaultValue={section.title ?? ''}
+                                      placeholder={`Section ${sectionIndex + 1}`}
+                                      className="h-8 min-w-0 flex-1 border-transparent text-[13.5px] hover:border-rule"
+                                      onBlur={(event) => {
+                                        const title = event.target.value.trim()
+                                        if (title !== (section.title ?? '')) {
+                                          renameSection.mutate({ sectionId: section.id, title })
+                                        }
+                                      }}
+                                    />
+                                    <Link
+                                      href={`/s/${slug}/c/${chapterIndex + 1}/${sectionIndex + 1}/edit${versionQuery}`}
+                                      className="shrink-0 text-[12.5px] text-pencil hover:underline"
+                                    >
+                                      Write
+                                    </Link>
+                                    <span className="shrink-0 text-[12px] text-ink-faint tabular-nums">
+                                      {section.wordCount.toLocaleString('en-GB')}
+                                    </span>
+                                    {/* FR-2.4 — never called "merge" in the interface. */}
+                                    {sectionIndex > 0 ? (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        disabled={joinSection.isPending}
+                                        onClick={() =>
+                                          setPending({
+                                            kind: 'join',
+                                            id: section.id,
+                                            name:
+                                              section.title ??
+                                              `Section ${String(sectionIndex + 1)}`,
+                                          })
+                                        }
+                                      >
+                                        Join with the one above
+                                      </Button>
+                                    ) : null}
                                     <Button
                                       size="sm"
                                       variant="ghost"
-                                      disabled={joinSection.isPending}
+                                      disabled={
+                                        chapter.sections.length <= 1 || deleteSection.isPending
+                                      }
                                       onClick={() =>
                                         setPending({
-                                          kind: 'join',
+                                          kind: 'section',
                                           id: section.id,
                                           name:
                                             section.title ?? `Section ${String(sectionIndex + 1)}`,
                                         })
                                       }
                                     >
-                                      Join with the one above
+                                      Remove
                                     </Button>
+                                    {/* Item 8.3 — the keyboard's way, and the only way across chapters. */}
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      aria-expanded={moving?.sectionId === section.id}
+                                      onClick={() =>
+                                        setMoving(
+                                          moving?.sectionId === section.id
+                                            ? null
+                                            : {
+                                                sectionId: section.id,
+                                                toChapterId: chapter.id,
+                                                position: sectionIndex,
+                                              },
+                                        )
+                                      }
+                                    >
+                                      Move to…
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      disabled={createSection.isPending}
+                                      onClick={() =>
+                                        createSection.mutate({
+                                          chapterId: chapter.id,
+                                          afterSectionId: section.id,
+                                        })
+                                      }
+                                    >
+                                      Add one after
+                                    </Button>
+                                  </div>
+                                  {moving?.sectionId === section.id ? (
+                                    <MoveForm
+                                      chapters={chapters}
+                                      moving={moving}
+                                      fromChapterId={chapter.id}
+                                      busy={moveSection.isPending}
+                                      onChange={setMoving}
+                                      onCancel={() => setMoving(null)}
+                                      onMove={() => moveSection.mutate(moving)}
+                                    />
                                   ) : null}
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    disabled={
-                                      chapter.sections.length <= 1 || deleteSection.isPending
-                                    }
-                                    onClick={() =>
-                                      setPending({
-                                        kind: 'section',
-                                        id: section.id,
-                                        name:
-                                          section.title ?? `Section ${String(sectionIndex + 1)}`,
-                                      })
-                                    }
-                                  >
-                                    Remove
-                                  </Button>
-                                </div>
+                                </>
                               )}
                             </SortableRow>
                           ))}
@@ -375,7 +445,7 @@ export function ContentsEditor({
         <Input
           aria-label="New chapter name"
           placeholder="Chapter five"
-          maxLength={200}
+          maxLength={TITLE_MAX_CHARS}
           value={newChapterTitle}
           onChange={(event) => setNewChapterTitle(event.target.value)}
         />
@@ -384,6 +454,95 @@ export function ContentsEditor({
         </Button>
       </form>
     </div>
+  )
+}
+
+/**
+ * Item 8.3 (FR-2.3) — where to move a section: a chapter, and a place in it.
+ * The places are counted as the reader counts them, from 1; "at the end" is
+ * one past the last.
+ */
+function MoveForm({
+  chapters,
+  moving,
+  fromChapterId,
+  busy,
+  onChange,
+  onCancel,
+  onMove,
+}: {
+  chapters: ReadonlyArray<{ id: string; title: string; sections: ReadonlyArray<{ id: string }> }>
+  moving: { sectionId: string; toChapterId: string; position: number }
+  fromChapterId: string
+  busy: boolean
+  onChange: (next: { sectionId: string; toChapterId: string; position: number }) => void
+  onCancel: () => void
+  onMove: () => void
+}) {
+  const id = useId()
+  const target = chapters.find((chapter) => chapter.id === moving.toChapterId)
+  // In its own chapter the section is not one of the places it can go to.
+  const others = (target?.sections ?? []).filter((section) => section.id !== moving.sectionId)
+  const places = others.length + 1
+  return (
+    <form
+      className="flex flex-wrap items-end gap-3 border-t border-rule/70 bg-paper-sunk px-3 py-2.5 text-[13px]"
+      onSubmit={(event) => {
+        event.preventDefault()
+        onMove()
+      }}
+    >
+      <div className="flex flex-col gap-1">
+        <label htmlFor={`${id}-chapter`} className="text-[12px] text-ink-faint">
+          Chapter
+        </label>
+        <select
+          id={`${id}-chapter`}
+          className="h-8 rounded-control border border-rule bg-paper px-2"
+          value={moving.toChapterId}
+          onChange={(event) => {
+            const next = chapters.find((chapter) => chapter.id === event.target.value)
+            const count = (next?.sections ?? []).filter(
+              (section) => section.id !== moving.sectionId,
+            ).length
+            onChange({ ...moving, toChapterId: event.target.value, position: count })
+          }}
+        >
+          {chapters.map((chapter, index) => (
+            <option key={chapter.id} value={chapter.id}>
+              {index + 1}. {chapter.title}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label htmlFor={`${id}-place`} className="text-[12px] text-ink-faint">
+          Place
+        </label>
+        <select
+          id={`${id}-place`}
+          className="h-8 rounded-control border border-rule bg-paper px-2"
+          value={Math.min(moving.position, places - 1)}
+          onChange={(event) => onChange({ ...moving, position: Number(event.target.value) })}
+        >
+          {Array.from({ length: places }, (_, index) => (
+            <option key={index} value={index}>
+              {index === places - 1 ? `${String(index + 1)} — at the end` : String(index + 1)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <Button type="submit" size="sm" variant="primary" disabled={busy}>
+        {busy
+          ? 'Moving…'
+          : moving.toChapterId === fromChapterId
+            ? 'Move it there'
+            : 'Move it to that chapter'}
+      </Button>
+      <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+        Cancel
+      </Button>
+    </form>
   )
 }
 
@@ -421,9 +580,12 @@ function Consequences({
 
 function SortableRow({
   id,
+  label,
   children,
 }: {
   id: string
+  /** Item 8.11 — what the handle moves: "Move section ‘Vessel’". */
+  label: string
   children: (handle: React.ReactNode) => React.ReactNode
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -433,7 +595,8 @@ function SortableRow({
   const handle = (
     <button
       type="button"
-      aria-label="Reorder"
+      aria-label={label}
+      title={label}
       className="shrink-0 cursor-grab px-1 text-ink-faint hover:text-ink active:cursor-grabbing"
       {...attributes}
       {...listeners}

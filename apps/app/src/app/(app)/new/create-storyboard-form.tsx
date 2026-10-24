@@ -8,8 +8,13 @@ import { useMutation, useSuspenseQuery } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
-import { STORYBOARD_GENRES } from '@/lib/schemas/constants'
-import { STORY_TYPES, VISIBILITY_COPY, type StoryTypeValue } from '@/lib/schemas/storyboard'
+import { STORYBOARD_GENRES, TITLE_MAX_CHARS } from '@/lib/schemas/constants'
+import {
+  GENRE_COPY,
+  STORY_TYPES,
+  VISIBILITY_COPY,
+  type StoryTypeValue,
+} from '@/lib/schemas/storyboard'
 import { useTRPC } from '@/trpc/client'
 
 export function CreateStoryboardForm() {
@@ -26,7 +31,9 @@ export function CreateStoryboardForm() {
 
   const create = useMutation(
     trpc.storyboard.create.mutationOptions({
-      onSuccess: (storyboard) => router.push(`/s/${storyboard.slug}`),
+      // Phase 14, item 8.2 (FR-2.2) — straight to the first word: the editor,
+      // open on the section every new story starts with.
+      onSuccess: (storyboard) => router.push(`/s/${storyboard.slug}/c/1/1/edit`),
     }),
   )
 
@@ -37,15 +44,23 @@ export function CreateStoryboardForm() {
       return [...current, id]
     })
 
-  const canSubmit =
-    title.trim().length > 0 && genreIds.length >= STORYBOARD_GENRES.min && !create.isPending
+  // Item 8.10 — sent without a genre, the form says so rather than sitting
+  // disabled with no reason given.
+  const [genresMissing, setGenresMissing] = useState(false)
+  const tooFewGenres = genreIds.length < STORYBOARD_GENRES.min
+  const canSubmit = title.trim().length > 0 && !create.isPending
 
   return (
     <form
       className="mt-9 space-y-7"
       onSubmit={(event) => {
         event.preventDefault()
-        if (canSubmit) create.mutate({ title: title.trim(), type, genreIds, visibility })
+        if (!canSubmit) return
+        if (tooFewGenres) {
+          setGenresMissing(true)
+          return
+        }
+        create.mutate({ title: title.trim(), type, genreIds, visibility })
       }}
     >
       <div className="space-y-1.5">
@@ -53,7 +68,7 @@ export function CreateStoryboardForm() {
         <Input
           id="title"
           required
-          maxLength={200}
+          maxLength={TITLE_MAX_CHARS}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           placeholder="The ship never lands"
@@ -78,9 +93,12 @@ export function CreateStoryboardForm() {
         </p>
       </div>
 
-      <fieldset className="space-y-2">
+      <fieldset
+        className="space-y-2"
+        aria-describedby={genresMissing ? 'genres-missing' : undefined}
+      >
         <legend className="text-[13.5px] font-medium text-ink">
-          Genres <span className="font-normal text-ink-faint">(up to {STORYBOARD_GENRES.max})</span>
+          Genres <span className="font-normal text-ink-faint">({GENRE_COPY.hint})</span>
         </legend>
         <ul className="flex flex-wrap gap-2">
           {genres.map((genre) => {
@@ -105,6 +123,11 @@ export function CreateStoryboardForm() {
             )
           })}
         </ul>
+        {genresMissing && tooFewGenres ? (
+          <p id="genres-missing" role="alert" className="text-[13px] text-crimson">
+            {GENRE_COPY.missing}
+          </p>
+        ) : null}
       </fieldset>
 
       <fieldset className="space-y-2">

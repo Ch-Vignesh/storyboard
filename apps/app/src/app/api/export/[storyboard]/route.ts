@@ -1,4 +1,9 @@
-import { EXPORT_FORMATS, exportManuscript, type ExportFormat } from '@storyboard/export'
+import {
+  contentDisposition,
+  EXPORT_FORMATS,
+  exportManuscript,
+  type ExportFormat,
+} from '@storyboard/export'
 import { TRPCError } from '@trpc/server'
 import { NextResponse } from 'next/server'
 
@@ -7,6 +12,7 @@ import { prisma } from '@storyboard/db'
 import { actorFrom } from '@/server/trpc/init'
 import { loadStoryboard } from '@/lib/authz/guard'
 import { logger } from '@/lib/logger'
+import { timeZoneFromCookieHeader } from '@/lib/time-zone'
 import { assembleManuscript } from '@/server/export/manuscript'
 
 const log = logger.child({ route: 'export' })
@@ -20,15 +26,24 @@ type Params = { params: Promise<{ storyboard: string }> }
  * filename, and tRPC would mean base64 through JSON and a second hop to turn it
  * back into a download. The permission check is the same one the API uses
  * (NFR-6): `loadStoryboard` with `storyboard:export`, at the data layer.
+ *
+ * What to take is said in named query parameters (item 8.8): `format`,
+ * `version` for an alternate version, and `chapter` for one chapter by the
+ * number the reader gives it. Anything later adds a name of its own.
  */
 export async function GET(request: Request, { params }: Params): Promise<NextResponse> {
   const { storyboard: slug } = await params
   const url = new URL(request.url)
   const format = url.searchParams.get('format') ?? 'docx'
   const versionId = url.searchParams.get('version') ?? undefined
+  const chapterParam = url.searchParams.get('chapter')
+  const chapter = chapterParam === null ? undefined : Number(chapterParam)
 
   if (!(EXPORT_FORMATS as readonly string[]).includes(format)) {
     return NextResponse.json({ error: 'That is not a format this can write.' }, { status: 400 })
+  }
+  if (chapter !== undefined && !(Number.isSafeInteger(chapter) && chapter >= 1)) {
+    return NextResponse.json({ error: 'Chapters are numbered from 1.' }, { status: 400 })
   }
 
   const session = await auth()
@@ -57,10 +72,11 @@ export async function GET(request: Request, { params }: Params): Promise<NextRes
 
   let manuscript
   try {
-    manuscript = await assembleManuscript(prisma, storyboardId, versionId)
+    manuscript = await assembleManuscript(prisma, storyboardId, { versionId, chapter })
   } catch (error) {
-    // A `?version=` that is not one of this story's: the same answer as a
-    // story that is not there. It was a 500 until the 2026-10-16 spec review.
+    // A `?version=` that is not one of this story's, or a `?chapter=` past
+    // its last: the same answer as a story that is not there. It was a 500
+    // until the 2026-10-16 spec review.
     if (error instanceof TRPCError && error.code === 'NOT_FOUND') {
       return NextResponse.json({ error: 'Not found.' }, { status: 404 })
     }
@@ -74,18 +90,38 @@ export async function GET(request: Request, { params }: Params): Promise<NextRes
     )
   }
 
-  const file = await exportManuscript(manuscript, format as ExportFormat)
+  // Item 7b.3 (decision 0044) — a published edition is named as one.
+  const edition = versionId
+    ? await prisma.publication.findUnique({ where: { versionId }, select: { number: true } })
+    : null
+
+  // Item 8.8 — named for the day where the writer is (item 1.18), and for
+  // what it holds when that is not the whole main draft.
+  const file = await exportManuscript(manuscript, format as ExportFormat, {
+    timeZone: timeZoneFromCookieHeader(request.headers.get('cookie')),
+    chapter,
+    version: manuscript.version.isMain || edition ? null : manuscript.version.name,
+    extra: edition ? `edition ${String(edition.number)}` : null,
+  })
 
   log.info(
-    { event: 'export.written', storyboardId, format, bytes: file.body.byteLength },
+    {
+      event: 'export.written',
+      storyboardId,
+      format,
+      chapter: chapter ?? null,
+      alternate: !manuscript.version.isMain,
+      bytes: file.body.byteLength,
+    },
     'manuscript exported',
   )
 
   return new NextResponse(new Uint8Array(file.body), {
     headers: {
       'content-type': file.mediaType,
-      // The quoted name is what a browser puts in the downloads folder.
-      'content-disposition': `attachment; filename="${file.fileName}"`,
+      // What a browser puts in the downloads folder: `filename*`, the title
+      // as written, where it can; the quoted ASCII name where it cannot.
+      'content-disposition': contentDisposition(file),
       'content-length': String(file.body.byteLength),
       // An export is a snapshot of a manuscript that changes; never cache it.
       'cache-control': 'no-store',

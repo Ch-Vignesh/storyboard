@@ -1,6 +1,6 @@
 import PDFDocument from 'pdfkit'
 
-import { originLine, sourceLine } from './front-matter'
+import { footerLine, originLine } from './front-matter'
 import type { AuthorshipProof, BlockNode, InlineNode, Manuscript } from './types'
 
 /**
@@ -15,6 +15,8 @@ import type { AuthorshipProof, BlockNode, InlineNode, Manuscript } from './types
 const MARGIN = 72 // one inch
 const BODY = 12
 const LEADING = 1.6
+/** The footer's type size, and the smallest a long footer is set at to stay on one line. */
+const FOOTER = { size: 8, min: 5 }
 
 type Pdf = InstanceType<typeof PDFDocument>
 
@@ -213,16 +215,27 @@ export async function toPdf(manuscript: Manuscript): Promise<Buffer> {
   }
 
   // FR-14.3 — the source on every page, written after the fact so that it lands
-  // on pages the flow created as well as the ones we asked for.
+  // on pages the flow created as well as the ones we asked for. Item 8.13 —
+  // naming the author and the number who helped. One line, never wrapped (a
+  // second line would spill into a new page), so a long one is set smaller.
+  const footer = footerLine(manuscript)
+  const width = document.page.width - MARGIN * 2
+  const size = Math.max(
+    FOOTER.min,
+    Math.min(
+      FOOTER.size,
+      (FOOTER.size * width) / document.font(base).fontSize(FOOTER.size).widthOfString(footer),
+    ),
+  )
   const range = document.bufferedPageRange()
   for (let index = range.start; index < range.start + range.count; index += 1) {
     document.switchToPage(index)
     document
       .font(base)
-      .fontSize(8)
-      .text(sourceLine(manuscript), MARGIN, document.page.height - MARGIN + 4, {
+      .fontSize(size)
+      .text(footer, MARGIN, document.page.height - MARGIN + 4, {
         align: 'center',
-        width: document.page.width - MARGIN * 2,
+        width,
         lineBreak: false,
       })
   }
@@ -259,7 +272,8 @@ export async function toAuthorshipProof(proof: AuthorshipProof): Promise<Buffer>
     .fillColor('#55636d')
     .text(
       'A record of what was stored, and when. It is evidence of a timestamp, not a ruling on ' +
-        'authorship, and it makes no legal claim.',
+        'authorship, and it makes no legal claim. It shows who wrote these words on Draftboard ' +
+        'and when; it cannot show that they were original to that person.',
       { width: 380 },
     )
   document.fillColor('#000000').moveDown(1.5)
@@ -270,8 +284,11 @@ export async function toAuthorshipProof(proof: AuthorshipProof): Promise<Buffer>
   label('Section', proof.sectionTitle)
   label('Words', proof.wordCount.toLocaleString('en-GB'))
   label('Written', proof.writtenAt.toISOString())
-  label('Address', proof.url)
+  // Item 8.12 (D-11) — not signed: checked against the public record, which
+  // anyone can open at this address.
+  label('Check it at', proof.url)
 
+  // vocabulary-ok: the proof names its algorithm, so anyone can recompute it (FR-13.6).
   document.font('Helvetica-Bold').fontSize(9).text('SHA-256 OF THE TEXT', { characterSpacing: 0.4 })
   document.font('Courier').fontSize(10).text(proof.contentHash, { width: 400 })
   document.moveDown(1.5)
@@ -282,7 +299,8 @@ export async function toAuthorshipProof(proof: AuthorshipProof): Promise<Buffer>
     .fillColor('#55636d')
     .text(
       `Issued ${proof.exportedAt.toISOString()}. The hash is of the section's plain text as ` +
-        'stored. Anyone holding the same text can compute it and compare.',
+        'stored. Anyone holding the same text can compute it and compare, and anyone can ' +
+        'open the address above to see that the record says the same.',
       { width: 400 },
     )
 

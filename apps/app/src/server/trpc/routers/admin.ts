@@ -3,9 +3,14 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { canAdmin, GRANTABLE_CAPABILITIES } from '@/lib/authz/admin'
+import { forgetFlags } from '@/lib/flags'
 import { logger } from '@/lib/logger'
 import {
   ACCOUNT_DELETION_GRACE_DAYS,
+  AUDIT_LOG,
+  FEATURE_FLAG_DESCRIPTIONS,
+  FEATURE_FLAG_KEYS,
+  REPORT_QUEUE_PAGE,
   REPORTS_TO_SUSPEND,
   SEED_TARGETS,
   STANDING_NOTE_MAX_CHARS,
@@ -26,7 +31,9 @@ import { setHiddenState } from '@/server/hidden'
 import { afterResponse } from '@/server/after-response'
 import { getMailer } from '@/server/mail/mailer'
 import { deletionByAdminMail } from '@/server/mail/templates/account-deletion'
+import { auditEvents, recordEvent } from '@/server/audit'
 import { banUsername, unbanUsername } from '@/server/retired-usernames'
+import { serverErrorKinds } from '@/server/server-errors'
 
 import { type Account, adminProcedure, createTRPCRouter } from '../init'
 
@@ -57,22 +64,43 @@ export const adminRouter = createTRPCRouter({
   /** Decision 0043 (item 2b.4) — the numbers the admin opens on. Counts, never pages. */
   overview: adminProcedure('overview.read').query(({ ctx }) => overviewCounts(ctx.db, new Date())),
 
-  /** The queue. Open reports first, oldest first — a queue, not a feed. */
+  /**
+   * The queue. Open reports first, oldest first — a queue, not a feed.
+   *
+   * Item 9.3 — a page at a time (`REPORT_QUEUE_PAGE`), the next one by
+   * cursor: a queue that stopped at its first fifty hid the fifty-first from
+   * the one person working it. The cursor is the last report's time and id,
+   * so deciding a report does not lose the place of the ones after it.
+   */
   reports: adminProcedure('reports.decide')
     .input(
       z.object({
         state: z.enum(['OPEN', 'UPHELD', 'DISMISSED']).default('OPEN'),
-        limit: z.number().int().min(1).max(100).default(50),
+        cursor: z.object({ at: z.date(), id: z.string().min(1).max(64) }).nullish(),
       }),
     )
     .query(async ({ ctx, input }) => {
-      const reports = await ctx.db.report.findMany({
-        where: { state: input.state },
-        // The open queue is worked oldest first; the upheld and dismissed
-        // lists are histories, read newest first (found by flow 8 once a
-        // database had more upheld reports than one page shows).
-        orderBy: { createdAt: input.state === 'OPEN' ? 'asc' : 'desc' },
-        take: input.limit,
+      // The open queue is worked oldest first; the upheld and dismissed
+      // lists are histories, read newest first (found by flow 8 once a
+      // database had more upheld reports than one page shows). The id breaks
+      // a tie, so a cursor is exact.
+      const oldestFirst = input.state === 'OPEN'
+      const direction = oldestFirst ? 'asc' : 'desc'
+      const after = input.cursor
+      const rows = await ctx.db.report.findMany({
+        where: {
+          state: input.state,
+          ...(after
+            ? {
+                OR: [
+                  { createdAt: oldestFirst ? { gt: after.at } : { lt: after.at } },
+                  { createdAt: after.at, id: oldestFirst ? { gt: after.id } : { lt: after.id } },
+                ],
+              }
+            : {}),
+        },
+        orderBy: [{ createdAt: direction }, { id: direction }],
+        take: REPORT_QUEUE_PAGE + 1,
         select: {
           id: true,
           targetType: true,
@@ -86,6 +114,8 @@ export const adminRouter = createTRPCRouter({
           resolvedBy: { select: { username: true, displayName: true } },
         },
       })
+      const reports = rows.slice(0, REPORT_QUEUE_PAGE)
+      const last = reports.at(-1)
 
       // What each report is actually about, resolved here rather than in the
       // component: a moderator should not have to open four tabs to see what
@@ -103,6 +133,8 @@ export const adminRouter = createTRPCRouter({
       return {
         reports: detailed,
         counts: Object.fromEntries(counts.map((row) => [row.state, row._count._all])),
+        nextCursor:
+          rows.length > REPORT_QUEUE_PAGE && last ? { at: last.createdAt, id: last.id } : null,
       }
     }),
 
@@ -159,6 +191,13 @@ export const adminRouter = createTRPCRouter({
           },
           'content hidden after a report',
         )
+        // Item 10.2 (NFR-7, decision 0043) — each admin action stored as well as logged.
+        await recordEvent(ctx.db, {
+          event: 'admin.content_hidden',
+          actorId: adminId,
+          target: { type: report.targetType, id: report.targetId },
+          detail: { reportId: report.id, reason: report.category },
+        })
       }
 
       // FR-13.5 — ten upheld against one person suspends them pending review.
@@ -182,6 +221,12 @@ export const adminRouter = createTRPCRouter({
               { event: 'admin.auto_suspended', userId: subject, upheld },
               'account suspended by upheld report count',
             )
+            await recordEvent(ctx.db, {
+              event: 'admin.auto_suspended',
+              actorId: adminId,
+              target: { type: 'USER', id: subject },
+              detail: { upheld },
+            })
           } else if (user?.role === 'ADMIN') {
             // Decision 0043 — the one person who runs the place is not locked
             // out of it by reports; the count is logged for whoever reads them.
@@ -197,6 +242,13 @@ export const adminRouter = createTRPCRouter({
         { event: 'admin.report_decided', reportId: report.id, decision: input.decision, adminId },
         'report decided',
       )
+      await recordEvent(ctx.db, {
+        event: 'admin.report_decided',
+        actorId: adminId,
+        subjectId: subject,
+        target: { type: report.targetType, id: report.targetId },
+        detail: { reportId: report.id, decision: input.decision, category: report.category },
+      })
       return { decision: input.decision, suspended, hidden }
     }),
 
@@ -241,6 +293,13 @@ export const adminRouter = createTRPCRouter({
         { event: 'admin.user_status', userId: user.id, status: input.status, adminId },
         'account status changed by hand',
       )
+      // The note stays on the account, for administrators; the event says what was done.
+      await recordEvent(ctx.db, {
+        event: 'admin.user_status',
+        actorId: adminId,
+        target: { type: 'USER', id: user.id },
+        detail: { status: input.status },
+      })
       // Decision 0018 — the work is untouched. Nothing else happens here.
       return user
     }),
@@ -272,6 +331,11 @@ export const adminRouter = createTRPCRouter({
         select: { id: true, username: true, displayName: true, status: true, bannedAt: true },
       })
       log.warn({ event: 'admin.user_banned', userId: user.id, adminId }, 'account banned')
+      await recordEvent(ctx.db, {
+        event: 'admin.user_banned',
+        actorId: adminId,
+        target: { type: 'USER', id: user.id },
+      })
       return user
     }),
 
@@ -301,6 +365,11 @@ export const adminRouter = createTRPCRouter({
         select: { id: true, username: true, displayName: true, status: true },
       })
       log.warn({ event: 'admin.user_unbanned', userId: user.id, adminId }, 'ban lifted')
+      await recordEvent(ctx.db, {
+        event: 'admin.user_unbanned',
+        actorId: adminId,
+        target: { type: 'USER', id: user.id },
+      })
       return user
     }),
 
@@ -361,6 +430,11 @@ export const adminRouter = createTRPCRouter({
         { event: 'admin.account_deleted', userId: target.id, adminId },
         'account deletion scheduled by an administrator',
       )
+      await recordEvent(ctx.db, {
+        event: 'admin.account_deleted',
+        actorId: adminId,
+        target: { type: 'USER', id: target.id },
+      })
       return { finishesAt }
     }),
 
@@ -454,6 +528,10 @@ export const adminRouter = createTRPCRouter({
     const answered = await ctx.db.contributionRequest.count({
       where: { state: 'RESOLVED', ...seeded },
     })
+    // Phase 14, item 9.5 — rewrites still open, which the library once had none of.
+    const openRewrites = await ctx.db.contributionRequest.count({
+      where: { kind: 'REWRITE', state: { in: ['OPEN', 'ANSWERED'] }, ...seeded },
+    })
 
     return {
       storyboards,
@@ -462,47 +540,75 @@ export const adminRouter = createTRPCRouter({
         genres: { have: genres.size, want: SEED_TARGETS.genres },
         openRequests: { have: openRequests, want: SEED_TARGETS.openRequests },
         answeredRequests: { have: answered, want: SEED_TARGETS.answeredRequests },
+        openRewrites: { have: openRewrites, want: SEED_TARGETS.openRewrites },
       },
     }
   }),
 
-  /** FR-15.5 — feature flags, readable by anyone, writable here. */
-  flags: adminProcedure('flags.toggle').query(({ ctx }) =>
-    ctx.db.featureFlag.findMany({ orderBy: { key: 'asc' } }),
-  ),
+  /**
+   * FR-15.5 with D-18 (item 9.4) — the known switches, each with where it
+   * stands and who last threw it. Known means listed in `FEATURE_FLAG_KEYS`,
+   * which is what `lib/flags.ts` reads: a switch nothing reads is not offered,
+   * and one not seeded yet is shown off, as it is.
+   */
+  flags: adminProcedure('flags.toggle').query(async ({ ctx }) => {
+    const rows = await ctx.db.featureFlag.findMany({
+      where: { key: { in: [...FEATURE_FLAG_KEYS] } },
+      select: {
+        key: true,
+        enabled: true,
+        updatedAt: true,
+        updatedBy: { select: { username: true, displayName: true } },
+      },
+    })
+    return FEATURE_FLAG_KEYS.map((key) => {
+      const row = rows.find((candidate) => candidate.key === key)
+      return {
+        key,
+        description: FEATURE_FLAG_DESCRIPTIONS[key],
+        enabled: row?.enabled ?? false,
+        // The seed writes a row nobody threw; only a person's switch is news.
+        changedAt: row?.updatedBy ? row.updatedAt : null,
+        changedBy: row?.updatedBy ? nameOf(row.updatedBy) : null,
+      }
+    })
+  }),
 
+  /** Item 9.4 — a known switch, on or off. The words are the list's, not typed here. */
   setFlag: adminProcedure('flags.toggle')
-    .input(
-      z.object({
-        key: z
-          .string()
-          .trim()
-          .min(1)
-          .max(80)
-          .regex(/^[a-z][a-z0-9-]*$/u, 'Lower case, digits and hyphens.'),
-        enabled: z.boolean(),
-        description: z.string().trim().min(1).max(300),
-      }),
-    )
+    .input(z.object({ key: z.enum(FEATURE_FLAG_KEYS), enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
+      const description = FEATURE_FLAG_DESCRIPTIONS[input.key]
       const flag = await ctx.db.featureFlag.upsert({
         where: { key: input.key },
         create: {
           key: input.key,
           enabled: input.enabled,
-          description: input.description,
+          description,
           updatedById: ctx.session.user.id,
         },
-        update: {
-          enabled: input.enabled,
-          description: input.description,
-          updatedById: ctx.session.user.id,
-        },
+        update: { enabled: input.enabled, description, updatedById: ctx.session.user.id },
+        select: { key: true, enabled: true },
       })
+      // This instance obeys at once; the others within `FLAG_CACHE_SECONDS`.
+      forgetFlags(input.key)
       log.info(
-        { event: 'admin.flag_set', key: flag.key, enabled: flag.enabled },
+        {
+          event: 'admin.flag_set',
+          key: flag.key,
+          enabled: flag.enabled,
+          adminId: ctx.session.user.id,
+        },
         'feature flag changed',
       )
+      await recordEvent(ctx.db, {
+        event: 'admin.flag_set',
+        actorId: ctx.session.user.id,
+        subjectId: null,
+        storyboardId: null,
+        target: { type: 'FLAG', id: flag.key },
+        detail: { enabled: flag.enabled },
+      })
       return flag
     }),
 
@@ -552,6 +658,12 @@ export const adminRouter = createTRPCRouter({
         { event: 'admin.role_set', userId: user.id, role: user.role, adminId },
         'role changed',
       )
+      await recordEvent(ctx.db, {
+        event: 'admin.role_set',
+        actorId: adminId,
+        target: { type: 'USER', id: user.id },
+        detail: { role: user.role },
+      })
       return user
     }),
 
@@ -598,6 +710,12 @@ export const adminRouter = createTRPCRouter({
         { event: 'admin.grants_set', userId: input.userId, capabilities: wanted, adminId },
         'sub-admin grants changed',
       )
+      await recordEvent(ctx.db, {
+        event: 'admin.grants_set',
+        actorId: adminId,
+        target: { type: 'USER', id: input.userId },
+        detail: { capabilities: wanted },
+      })
       return { userId: input.userId, capabilities: wanted }
     }),
 
@@ -638,6 +756,13 @@ export const adminRouter = createTRPCRouter({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'That name is already unavailable.' })
       }
       log.warn({ event: 'admin.name_banned', name: input.name, adminId }, 'username banned')
+      await recordEvent(ctx.db, {
+        event: 'admin.name_banned',
+        actorId: adminId,
+        subjectId: null,
+        storyboardId: null,
+        target: { type: 'NAME', id: input.name },
+      })
       return row
     }),
 
@@ -652,6 +777,13 @@ export const adminRouter = createTRPCRouter({
         { event: 'admin.name_unbanned', name: input.name, adminId: ctx.session.user.id },
         'username ban lifted',
       )
+      await recordEvent(ctx.db, {
+        event: 'admin.name_unbanned',
+        actorId: ctx.session.user.id,
+        subjectId: null,
+        storyboardId: null,
+        target: { type: 'NAME', id: input.name },
+      })
       return { name: input.name }
     }),
 
@@ -687,8 +819,36 @@ export const adminRouter = createTRPCRouter({
         },
         input.hidden ? 'content hidden after a report' : 'content shown again',
       )
+      await recordEvent(ctx.db, {
+        event: input.hidden ? 'admin.content_hidden' : 'admin.content_shown',
+        actorId: adminId,
+        target: { type: input.targetType, id: input.targetId },
+        detail: input.reason ? { reason: input.reason } : undefined,
+      })
       return { hidden: input.hidden }
     }),
+
+  /**
+   * Phase 14, item 10.1 (D-10) — the server's own faults, one entry per kind,
+   * the most recent first. Behind `errors.read` (decision 0043), which the
+   * admin may grant a sub-admin; whoever holds it is emailed about new kinds.
+   */
+  errors: adminProcedure('errors.read').query(({ ctx }) => serverErrorKinds(ctx.db)),
+
+  /**
+   * Phase 14, item 10.2 (NFR-7) — the stored events, the newest first, a page
+   * at a time, for a story, a person, both or neither. Behind `events.read`
+   * (decision 0043).
+   */
+  events: adminProcedure('events.read')
+    .input(
+      z.object({
+        story: z.string().trim().max(AUDIT_LOG.filterMaxChars).optional(),
+        person: z.string().trim().max(AUDIT_LOG.filterMaxChars).optional(),
+        cursor: z.string().min(1).optional(),
+      }),
+    )
+    .query(({ ctx, input }) => auditEvents(ctx.db, input)),
 })
 
 type Db = PrismaClient | Prisma.TransactionClient

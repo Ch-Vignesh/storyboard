@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { useTRPC } from '@/trpc/client'
+import { TITLE_MAX_CHARS } from '@/lib/schemas/constants'
 
 /**
  * FR-10.3 — start your own version of a public storyboard.
@@ -52,7 +53,7 @@ export function SpinOffButton({ storyboardId, title }: { storyboardId: string; t
         <Input
           id="spin-off-title"
           required
-          maxLength={200}
+          maxLength={TITLE_MAX_CHARS}
           value={newTitle}
           onChange={(event) => setNewTitle(event.target.value)}
         />

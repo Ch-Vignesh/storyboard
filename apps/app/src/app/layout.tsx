@@ -1,8 +1,12 @@
 import type { Metadata } from 'next'
 import { SessionProvider } from 'next-auth/react'
+import { cookies } from 'next/headers'
 
 import { TimeZoneCookie } from '@/components/time-zone-cookie'
+import { parseReading, READING_COOKIE, readingVariables } from '@/lib/reading'
 import { SiteFooter } from '@/components/site-footer'
+import { env } from '@/env'
+import { SITE } from '@/lib/metadata'
 import { TRPCReactProvider } from '@/trpc/client'
 
 // The typefaces, from this repository rather than fetched from Google on every
@@ -35,15 +39,31 @@ import './globals.css'
  */
 export const dynamic = 'force-dynamic'
 
+/**
+ * Phase 14, item 9.6 — the defaults every page starts from. `metadataBase`
+ * makes a canonical address or a preview picture absolute. Open Graph is
+ * given no title or description on purpose: Next.js then fills both from the
+ * page's own, so a page that names itself names its preview too, and the
+ * picture (`opengraph-image.tsx`) stays on every page that does not set its
+ * own Open Graph. Pages set a title, a description and robots, never
+ * `openGraph`, or the picture would go with it (`lib/metadata.ts`).
+ */
 export const metadata: Metadata = {
-  title: { default: 'Draftboard', template: '%s | Draftboard' },
-  description:
-    'Post the passage you are stuck on. Other writers propose prose. You accept one, with permanent credit.',
+  metadataBase: new URL(env.NEXT_PUBLIC_APP_URL),
+  title: { default: SITE.name, template: `%s | ${SITE.name}` },
+  description: SITE.description,
+  applicationName: SITE.name,
+  openGraph: { siteName: SITE.name, type: 'website', locale: 'en_GB' },
+  twitter: { card: 'summary_large_image' },
 }
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // NFR-5 (item 7.5) — the reader's type size and line height, set before
+  // anything is drawn, on every page that sets a manuscript.
+  const reading = parseReading((await cookies()).get(READING_COOKIE)?.value)
+
   return (
-    <html lang="en">
+    <html lang="en" style={readingVariables(reading)}>
       <body>
         {/* NFR-4 (item 4.8) — one skip link, on every page, to the one `main`
             every page has. The header and a contents rail are a lot to tab past. */}

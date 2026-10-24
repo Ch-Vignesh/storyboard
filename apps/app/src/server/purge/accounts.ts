@@ -4,6 +4,7 @@ import type { PrismaClient } from '@storyboard/db'
 
 import { logger } from '@/lib/logger'
 import { ACCOUNT_DELETION_GRACE_DAYS } from '@/lib/schemas/constants'
+import { recordEvent } from '@/server/audit'
 import { getMailer, type Mailer } from '@/server/mail/mailer'
 import { accountDeletedMail } from '@/server/mail/templates/account-deletion'
 import { retiredUsernameHash } from '@/server/retired-usernames'
@@ -73,6 +74,12 @@ export async function purgeDeletedAccounts(
         { event: 'purge.account', userId: user.id },
         'account passed its grace and was erased',
       )
+      // Item 10.2 — stored as well as logged, by id alone, as the line is.
+      await recordEvent(db, {
+        event: 'purge.account',
+        actorId: null,
+        target: { type: 'USER', id: user.id },
+      })
     } catch (error) {
       // One bad row must not stop the rest; it is retried tomorrow.
       log.error(

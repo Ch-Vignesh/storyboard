@@ -1,7 +1,7 @@
 import { AlignmentType, Document, Packer, Paragraph, TextRun } from 'docx'
 import { expect, test } from '@playwright/test'
 
-import { signUpAndOnboard } from './helpers'
+import { signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * Phase 5's exit criterion, in full:
@@ -188,15 +188,19 @@ test('a writer brings an 80,000-word manuscript in and takes it back out', async
 
   const markdown = await page.request.get(`/api/export/${slug}?format=md`)
   expect(markdown.ok()).toBe(true)
-  expect(markdown.headers()['content-disposition']).toContain('the-ship-never-lands.md')
+  // Item 8.8 — named for the story and the day, with the title as written too.
+  expect(markdown.headers()['content-disposition']).toMatch(
+    /filename="the-ship-never-lands-\d{4}-\d{2}-\d{2}\.md"; filename\*=UTF-8''The%20ship/u,
+  )
 
   const text = await markdown.text()
   expect(text).toContain('# The ship never lands')
   expect(text).toContain('## The harbour')
   expect(text).toContain('The harbour had been empty for a year')
-  // FR-14.3 — the source line is part of the file, not an option.
-  expect(text).toContain('Written on Draftboard')
-  expect(text).toContain(`/s/${slug}`)
+  // FR-14.3 — the source line is part of the file, not an option; item 8.13
+  // — it names the author (nobody has helped with this one yet).
+  const footer = new RegExp(`\\*Written by \\S+ · \\S+/s/${slug}\\*\\s*$`, 'u')
+  expect(text).toMatch(footer)
 
   const docx = await page.request.get(`/api/export/${slug}?format=docx`)
   expect(docx.ok()).toBe(true)
@@ -206,6 +210,19 @@ test('a writer brings an 80,000-word manuscript in and takes it back out', async
   const pdf = await page.request.get(`/api/export/${slug}?format=pdf`)
   expect(pdf.ok()).toBe(true)
   expect((await pdf.body()).subarray(0, 5).toString()).toBe('%PDF-')
+
+  // Item 8.8 — one chapter, by the number the reader gives it, with the
+  // contributors page and the source line still in it (FR-14.3).
+  await page.getByRole('radio', { name: 'One chapter' }).check()
+  await page.getByLabel('Which chapter').selectOption('2')
+  const one = page.getByRole('link', { name: 'Download Markdown (.md)' })
+  await expect(one).toHaveAttribute('href', /[?&]chapter=2(?:&|$)/u)
+  const chapterTwo = await page.request.get((await one.getAttribute('href')) ?? '')
+  expect(chapterTwo.headers()['content-disposition']).toMatch(/-chapter-2\.md"/u)
+  const chapterText = await chapterTwo.text()
+  expect(chapterText).toContain('## Chapter 3')
+  expect(chapterText).not.toContain('## The harbour')
+  expect(chapterText).toMatch(footer)
 })
 
 test('a finished storyboard reads as the work rather than the workshop', async ({ page }) => {
@@ -216,9 +233,8 @@ test('a finished storyboard reads as the work rather than the workshop', async (
   await page.getByRole('button', { name: 'Literary fiction', exact: true }).click()
   await page.getByRole('button', { name: /create and start writing/i }).click()
   await expect(page).toHaveURL(/\/s\//)
-  const path = new URL(page.url()).pathname
+  const path = storyPath(page)
 
-  await page.getByRole('link', { name: 'Edit' }).first().click()
   const editor = page.getByRole('textbox', { name: /section text/i })
   await editor.click()
   await editor.pressSequentially('She counted the lamp turns until they stopped agreeing.')
@@ -238,8 +254,9 @@ test('a finished storyboard reads as the work rather than the workshop', async (
   await open.click()
   await expect(page.getByRole('heading', { name: 'Does the ending land?' })).toBeVisible()
 
-  // ── FR-14.1 — the switch, and what it says before it is thrown.
-  await page.goto(`${path}/export`)
+  // ── FR-14.1 — the switch, and what it says before it is thrown. In the
+  // story's settings since item 8.10.
+  await page.goto(`${path}/settings`)
   await page.getByRole('button', { name: /^mark it finished$/i }).click()
   await expect(page.getByText(/closes any request still open/i)).toBeVisible()
   await page.getByRole('button', { name: /^mark it finished$/i }).click()
@@ -253,7 +270,7 @@ test('a finished storyboard reads as the work rather than the workshop', async (
   await expect(page.getByText('Does the ending land?')).toHaveCount(0)
 
   // ── And it is reversible, because a finished novel with a typo is ordinary.
-  await page.goto(`${path}/export`)
+  await page.goto(`${path}/settings`)
   await page.getByRole('button', { name: /actually, there is more to do/i }).click()
   await expect(page.getByRole('button', { name: /^mark it finished$/i })).toBeVisible()
 })

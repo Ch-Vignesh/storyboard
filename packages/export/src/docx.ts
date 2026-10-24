@@ -9,7 +9,7 @@ import {
   TextRun,
 } from 'docx'
 
-import { originLine, sourceLine } from './front-matter'
+import { footerLine, originLine, sourceLine } from './front-matter'
 import type { BlockNode, InlineNode, Manuscript } from './types'
 
 /**
@@ -222,13 +222,14 @@ export async function toDocx(manuscript: Manuscript): Promise<Buffer> {
     },
     sections: [
       {
-        // FR-14.3 — the source line on every page, not only the first.
+        // FR-14.3 — the source line on every page, not only the first; item
+        // 8.13 — with the author and the number who helped.
         footers: {
           default: new Footer({
             children: [
               new Paragraph({
                 alignment: AlignmentType.CENTER,
-                children: [new TextRun({ text: sourceLine(manuscript), size: 16 })],
+                children: [new TextRun({ text: footerLine(manuscript), size: 16 })],
               }),
             ],
           }),

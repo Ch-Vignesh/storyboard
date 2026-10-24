@@ -3,10 +3,13 @@ import Link from '@/components/link'
 
 import {
   ACCOUNT_DELETION_GRACE_DAYS,
+  AUDIT_LOG,
   BACKUP_RETENTION_DAYS,
   IMPORT_JOB_RETENTION_HOURS,
+  SERVER_ERRORS,
   SOFT_DELETE_GRACE_DAYS,
   TIME_ZONE_COOKIE_DAYS,
+  READING_COOKIE_DAYS,
   UNCONFIRMED_ACCOUNT_RETENTION_DAYS,
   USED_TOKEN_RETENTION_DAYS,
 } from '@/lib/schemas/constants'
@@ -18,7 +21,7 @@ export const metadata: Metadata = {
     'What Draftboard keeps about you, who processes it and where, what is public, how long things are kept, and your rights.',
 }
 
-const UPDATED = '18 October 2026'
+const UPDATED = '24 October 2026'
 
 /**
  * Phase 14, item 2.1 — the privacy policy, in plain language. Every claim is
@@ -61,9 +64,18 @@ export default function PrivacyPage() {
         <p>
           <strong className="font-medium text-ink">Operations:</strong> the address your requests
           come from, inside the records that limit how often an action can be repeated, kept for a
-          day; the server&rsquo;s own logs, which the host keeps briefly; and, when an administrator
-          suspends or closes an account, the note they left about it, which only administrators
-          read.
+          day; the server&rsquo;s own logs, which the host keeps briefly, and a note of each fault
+          the server could not handle, which names nobody and holds nothing anybody wrote; and, when
+          an administrator suspends or closes an account, the note they left about it, which only
+          administrators read.
+        </p>
+        <p>
+          <strong className="font-medium text-ink">A record of what was done:</strong> when somebody
+          accepts or passes on a suggestion, restores an earlier version, makes another version the
+          main draft, spins off a story, reports something, or asks for their account to be deleted
+          or then keeps it, and whenever an administrator decides something, a line is kept saying
+          who did it, about whom, on which story and when, never what anybody wrote. Only
+          administrators read it, to answer what happened when something goes wrong between people.
         </p>
         <p>
           <strong className="font-medium text-ink">Nothing else.</strong> We do not ask your age,
@@ -126,6 +138,11 @@ export default function PrivacyPage() {
             {UNCONFIRMED_ACCOUNT_RETENTION_DAYS} days, with everything about it. Sign-in links that
             were used or have expired are dropped after {USED_TOKEN_RETENTION_DAYS} days.
           </li>
+          <li>
+            The record of what was done is kept for {AUDIT_LOG.retentionDays} days. A line about a
+            deleted account stays until then, naming a former member. The notes of the
+            server&rsquo;s faults are kept for {SERVER_ERRORS.retentionDays} days.
+          </li>
         </ul>
       </Section>
 
@@ -160,8 +177,10 @@ export default function PrivacyPage() {
           No advertising, no analytics, no tracking pixels, in the pages or in the email. The only
           cookies are the ones that sign you in, set by our sign-in library, and{' '}
           <code className="font-mono text-[13px]">tz</code>, which remembers your browser&rsquo;s
-          time zone for {TIME_ZONE_COOKIE_DAYS} days so dates read right. All of them are necessary,
-          so there is no consent banner.
+          time zone for {TIME_ZONE_COOKIE_DAYS} days so dates read right, and{' '}
+          <code className="font-mono text-[13px]">reading</code>, which remembers the type size and
+          line spacing you chose for {READING_COOKIE_DAYS} days. All of them are necessary, so there
+          is no consent banner.
         </p>
         <p>
           We send you email about your account that cannot be turned off, such as confirming your
@@ -188,6 +207,10 @@ export default function PrivacyPage() {
 
       <Section title="Changes">
         <p>When this page changes, the date at the top changes and the change is described here.</p>
+        <p>
+          24 October 2026: the record of what was done, and the notes of the server&rsquo;s own
+          faults, under &ldquo;What is kept&rdquo; and &ldquo;How long&rdquo;.
+        </p>
       </Section>
     </main>
   )

@@ -140,6 +140,55 @@ describe.skipIf(!databaseUrl)('erasing a contribution record', () => {
     ).rejects.toThrow(/immutable/i)
   })
 
+  /**
+   * Phase 14, item 8.14 (FR-8.6) — a restore's reason is written with the
+   * revision, and the erasure hatch, which pins every other column by name,
+   * pins this one too: it would otherwise be the one column an unnaming
+   * transaction could rewrite.
+   */
+  it('writes a restore reason with the revision, and refuses to change it, flag or not', async () => {
+    const id = await makeRevision()
+    const restored = await db.revision.create({
+      data: {
+        sectionId,
+        contentJson: { type: 'doc', content: [] },
+        contentText: 'the tide went out',
+        wordCount: 4,
+        contentHash: 'hash'.padEnd(64, '0'),
+        source: 'RESTORED',
+        restoredFromId: id,
+        restoreReason: 'SOLVED_ANOTHER_WAY',
+        authorId: userId,
+      },
+      select: { id: true, restoreReason: true },
+    })
+    expect(restored.restoreReason).toBe('SOLVED_ANOTHER_WAY')
+
+    await expect(
+      db.revision.update({ where: { id: restored.id }, data: { restoreReason: null } }),
+    ).rejects.toThrow(/immutable/i)
+    await expect(
+      db.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(`select set_config('storyboard.erase_authorship', 'on', true)`)
+        await tx.revision.update({
+          where: { id: restored.id },
+          data: { authorId: null, restoreReason: 'NOT_THE_DIRECTION' },
+        })
+      }),
+    ).rejects.toThrow(/immutable/i)
+
+    // Unnaming alone still goes through.
+    await db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`select set_config('storyboard.erase_authorship', 'on', true)`)
+      await tx.revision.update({ where: { id: restored.id }, data: { authorId: null } })
+    })
+    const after = await db.revision.findUniqueOrThrow({
+      where: { id: restored.id },
+      select: { authorId: true, restoreReason: true },
+    })
+    expect(after).toEqual({ authorId: null, restoreReason: 'SOLVED_ANOTHER_WAY' })
+  })
+
   it('refuses to reassign authorship to somebody else', async () => {
     const id = await makeRevision()
     const other = await db.user.create({

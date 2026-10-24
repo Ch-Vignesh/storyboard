@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 
 import { ContributionCalendar } from '@/components/contribution-calendar'
 import { CopyLink } from '@/components/copy-link'
+import { ExampleLabel } from '@/components/example-label'
 import { UserAvatar } from '@/components/user-avatar'
 import { STORY_TYPE_LABELS } from '@/lib/schemas/storyboard'
 import { readTimeZone } from '@/lib/dates'
@@ -32,9 +33,13 @@ async function load(username: string) {
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { username } = await params
   const data = await load(username)
+  const handle = data.user.username ?? username
   return {
-    title: data.user.displayName ?? `@${data.user.username ?? username}`,
+    title: data.user.displayName ?? `@${handle}`,
     description: data.user.bio ?? undefined,
+    // Item 9.8 — served at /u/{username} and /@{username} (the rewrite in
+    // next.config.ts); the address the SRS gives it is the one to index.
+    alternates: { canonical: `/@${handle}` },
   }
 }
 
@@ -137,11 +142,8 @@ export default async function ProfilePage({ params }: Params) {
                   <span className="min-w-0">
                     <span className="block truncate font-manuscript text-[19px] text-ink">
                       {storyboard.title}
-                      {storyboard.isSeed ? (
-                        <span className="ml-2 border border-ochre/40 px-1 text-[10.5px] tracking-wide text-ochre uppercase">
-                          example
-                        </span>
-                      ) : null}
+                      {/* FR-15.3 (item 7.7) */}
+                      {storyboard.isSeed ? <ExampleLabel className="ml-2" /> : null}
                     </span>
                     {storyboard.logline ? (
                       <span className="mt-0.5 block truncate text-[13px] text-ink-soft">
@@ -156,6 +158,12 @@ export default async function ProfilePage({ params }: Params) {
                         : ''}
                     </span>
                   </span>
+                  {/* Item 7b.3 (decision 0044) — published, and where to read it. */}
+                  {storyboard.edition !== null ? (
+                    <span className="shrink-0 text-[12.5px] text-pencil">
+                      Published, edition {storyboard.edition}
+                    </span>
+                  ) : null}
                   {storyboard.requests.length > 0 ? (
                     // FR-11.4 — the open-requests badge is the call to action.
                     <span className="shrink-0 border border-ochre/40 bg-ochre-wash px-2 py-1 text-[12px] text-ochre">

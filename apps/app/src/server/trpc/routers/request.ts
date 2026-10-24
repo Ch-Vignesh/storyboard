@@ -22,16 +22,19 @@ import {
 import { redactIdea, redactSuggestionLine } from '@/server/hidden'
 import { closeRequest } from '@/server/close-requests'
 import { requestImpact } from '@/server/impact'
+import { excerpt } from '@/lib/excerpt'
 import { publicId } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import {
   BROWSE_LIMITS,
   CONTINUE_TARGET_MAX_WORDS,
   GENRE_SELECTION_MAX,
+  MARGIN_ASK_CHARS,
   NEEDS_YOU,
   REQUEST_PRE_CONTEXT_WORDS,
   REWRITE_TARGET_MIN_WORDS,
 } from '@/lib/schemas/constants'
+import { mainDraftPlaces } from '@/server/places'
 import {
   countWords,
   createRequestSchema,
@@ -86,7 +89,17 @@ const REQUEST_SELECT = {
     },
   },
   storyboard: {
-    select: { id: true, slug: true, title: true, type: true, state: true, ...AUTHORS_SELECT },
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      type: true,
+      state: true,
+      // Item 9.6 — whether a link preview may describe it, and a crawler index it.
+      visibility: true,
+      hiddenAt: true,
+      ...AUTHORS_SELECT,
+    },
   },
 } satisfies Prisma.ContributionRequestSelect
 
@@ -212,6 +225,15 @@ export const requestRouter = createTRPCRouter({
         .map((lineageId) => reading.find((section) => section.lineageId === lineageId))
         .filter((section) => section !== undefined)
 
+      // Phase 14, item 7.2 — the passage's address, counted as the reader
+      // counts, so "Read it in the story" opens at it. The stored `order`
+      // stops matching the reading order once a chapter is removed; none if
+      // the section has left the main draft.
+      const place =
+        (await mainDraftPlaces(ctx.db, row.storyboardId, [row.section.lineageId])).get(
+          row.section.lineageId,
+        ) ?? null
+
       const suggestions = await ctx.db.suggestion.findMany({
         where: {
           requestId: row.id,
@@ -286,12 +308,17 @@ export const requestRouter = createTRPCRouter({
 
       return {
         request: { ...row, constraints: asStringArray(row.constraints) },
+        place,
         readingList,
         // Hidden after a report (item 2.7): read as removed by everyone but
         // the writer and a moderator.
         suggestions: suggestions.map((suggestion) => redactSuggestionLine(suggestion, actor)),
         ideas: ideas.map((idea) => ({
           ...redactIdea(idea, actor),
+          // Item 6.8 — removed by its writer: the row stays in the thread and
+          // its words are sent to nobody. The page only hid them, and they
+          // were in its data for any reader (phase 14 final pass).
+          ...(idea.deletedAt === null ? {} : { body: '' }),
           canChange:
             actor?.id === idea.author.id &&
             !idea.markedHelpful &&
@@ -332,13 +359,20 @@ export const requestRouter = createTRPCRouter({
           minWords: true,
           maxWords: true,
           createdAt: true,
+          // Item 7.1 — the margin card carries the start of the ask.
+          ask: true,
           _count: { select: { suggestions: { where: ANSWERS } } },
           // Idea answers are counted in code (item 1.12): see `answers.ts`.
           ideas: { where: { parentId: null }, select: { authorId: true } },
           storyboard: { select: AUTHORS_SELECT },
         },
       })
-      return rows.map(withIdeaAnswers)
+      // Only its start travels: the reader's first response carries this list
+      // (item 7.4), and a whole ask is up to five hundred words.
+      return rows.map(withIdeaAnswers).map((row) => ({
+        ...row,
+        ask: excerpt(row.ask, MARGIN_ASK_CHARS),
+      }))
     }),
 
   /**
@@ -443,7 +477,7 @@ export const requestRouter = createTRPCRouter({
           select: {
             publicId: true,
             title: true,
-            storyboard: { select: { slug: true, title: true } },
+            storyboard: { select: { slug: true, title: true, isSeed: true } },
           },
         },
       },
@@ -466,7 +500,7 @@ export const requestRouter = createTRPCRouter({
           select: {
             publicId: true,
             title: true,
-            storyboard: { select: { slug: true, title: true } },
+            storyboard: { select: { slug: true, title: true, isSeed: true } },
           },
         },
       },
@@ -507,7 +541,7 @@ export const requestRouter = createTRPCRouter({
           select: {
             publicId: true,
             title: true,
-            storyboard: { select: { slug: true, title: true } },
+            storyboard: { select: { slug: true, title: true, isSeed: true } },
             section: { select: { chapter: { select: { order: true, title: true } } } },
           },
         },

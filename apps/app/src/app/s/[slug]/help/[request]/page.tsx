@@ -9,6 +9,7 @@ import { Manuscript } from '@/components/manuscript'
 import { flavourForStoryType } from '@/lib/doc/schema'
 import { closesOn, REQUEST_KINDS, REQUEST_STATE_LABELS } from '@/lib/schemas/help'
 import { readTimeZone } from '@/lib/dates'
+import { orNotFound, requestMetadata } from '@/lib/metadata'
 import { formatInZone } from '@/lib/time-zone'
 import { caller } from '@/trpc/server'
 
@@ -29,10 +30,10 @@ async function load(publicId: string) {
   }
 }
 
+// Item 9.6 — "{title} — a stuck point in {story}", read as this person reads the page.
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { request } = await params
-  const data = await load(request)
-  return { title: data.request.title }
+  return orNotFound(requestMetadata(caller, request))
 }
 
 /** Screen 8 — the ask, the context, and everything that has come back. */
@@ -40,7 +41,7 @@ export default async function RequestPage({ params }: Params) {
   const { slug, request: publicId } = await params
   const data = await load(publicId)
   const session = await auth()
-  const { request, permissions } = data
+  const { request, permissions, place } = data
 
   const kind = REQUEST_KINDS.find((option) => option.value === request.kind)!
   const flavour = flavourForStoryType(request.storyboard.type)
@@ -60,9 +61,25 @@ export default async function RequestPage({ params }: Params) {
           {request.storyboard.title}
         </Link>
         <span aria-hidden> / </span>
-        <span>
-          {request.section.chapter.order + 1}. {request.section.chapter.title}
-        </span>
+        {/* Item 7.2 — counted as the reader counts, and leading to the
+            passage itself rather than to chapter one. A section that has
+            left the main draft has no address, so its chapter is named only. */}
+        {place ? (
+          <>
+            <Link
+              href={place.path.replace(/\/\d+$/u, '')}
+              className="hover:text-ink hover:underline"
+            >
+              {place.chapterNumber}. {place.chapter}
+            </Link>
+            <span aria-hidden> · </span>
+            <Link href={place.path} className="text-pencil hover:underline">
+              Read it in the story
+            </Link>
+          </>
+        ) : (
+          <span>{request.section.chapter.title}</span>
+        )}
       </nav>
 
       <header>

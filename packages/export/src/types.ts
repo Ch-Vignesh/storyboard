@@ -49,6 +49,12 @@ export type ExportContributor = {
   role: string
   /** Where their contribution lives, so the claim can be checked (FR-9.6). */
   url?: string
+  /**
+   * Who this is, when two lines may be one person (a passage and an idea) or
+   * two people may share a name: the footer counts people by it (item 8.13).
+   * The name stands in when it is absent.
+   */
+  person?: string
 }
 
 export type Manuscript = {
@@ -81,6 +87,7 @@ export type AuthorshipProof = {
   /** sha256 of the section's text, as stored on the revision. */
   contentHash: string
   writtenAt: Date
+  /** The version's public record, where anyone can check this (item 8.12, D-11). */
   url: string
   exportedAt: Date
 }

@@ -5,32 +5,32 @@ record — every task, every exit criterion, every decision and why. This file i
 the short version: what is done, what is being worked on, and what is blocked on
 something that is not code.
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-24
 
 ---
 
 ## Now
 
-| What                                | State                    | Note                                                                                  |
-| ----------------------------------- | ------------------------ | ------------------------------------------------------------------------------------- |
-| Phases 0–9, the audit before deploy | pushed, live             | At draftboard-cyan.vercel.app since 2026-10-13                                        |
-| Phase 10 — fast in production       | deployed                 | Cold start 1.2–1.4 s (was 6.5 s); sign-up still to time                               |
-| The move to Singapore               | live                     | Functions and database in Singapore; Washington deleted after a clean week            |
-| Phase 11 — finish production        | pushed, live             | R2 live; nightly backup and weekly drill green; only the owner's walk-through left    |
-| Phase 12 — Draftboard               | in progress, uncommitted | The rename is done in code (decision 0035); then the audit and the screen-reader pass |
-| Phase 13                            | deliberately unplanned   | Drawn from real use, when there is some (was phase 10)                                |
+| What                                 | State                           | Note                                                                                  |
+| ------------------------------------ | ------------------------------- | ------------------------------------------------------------------------------------- |
+| Phases 0–12, the audit before deploy | pushed, live                    | At draftboard-cyan.vercel.app since 2026-10-13; the rename and the audit are pushed   |
+| Phase 10 — fast in production        | deployed                        | Cold start 1.2–1.4 s (was 6.5 s); sign-up still to time                               |
+| The move to Singapore                | live                            | Functions and database in Singapore; the Washington database is the owner's to delete |
+| Phase 11 — finish production         | pushed, live                    | R2 live; nightly backup and weekly drill green; only the owner's walk-through left    |
+| Phase 13                             | deliberately unplanned          | Drawn from real use, when there is some                                               |
+| Phase 14 — complete the product      | milestones 1–6 pushed (21b986a) | Milestones 7–10 built in the working tree on 2026-10-24, uncommitted; see the tracker |
 
 ## Blocked, and not on code
 
 These are the only things standing between the product and a launch. Every one
 of them needs an account, a DNS record, or a person — not a commit.
 
-| What                                       | Needs                                | Blocks                              |
-| ------------------------------------------ | ------------------------------------ | ----------------------------------- |
-| Push the rename, then seed production once | a commit                             | Draftboard on production            |
-| The owner's walk-through                   | a real sign-up and one import, timed | phase 11, phase 10's sign-up figure |
-| A screen-reader pass                       | an hour and a screen reader          | the WCAG 2.2 AA claim               |
-| A domain for Draftboard                    | a decision and a registrar           | nothing yet                         |
+| What                                   | Needs                                | Blocks                              |
+| -------------------------------------- | ------------------------------------ | ----------------------------------- |
+| Apply phase 14's migrations, then push | `pnpm db:deploy` against production  | everything built since 2026-10-18   |
+| The owner's walk-through               | a real sign-up and one import, timed | phase 11, phase 10's sign-up figure |
+| A screen-reader pass                   | an hour and a screen reader          | the WCAG 2.2 AA claim               |
+| A domain for Draftboard                | a decision and a registrar           | nothing yet                         |
 
 Vercel's Hobby tier runs a scheduled job at most once a day, and this product has
 one every ten minutes, so all six run from GitHub Actions instead (decision 0030).
@@ -55,7 +55,7 @@ committed; commit hashes are in `docs/04-phase-plan.md`.
 | 7 — Launch                 | 25 seeded public-domain works with 56 hand-written stuck points, the marketing page, the age policy, the community rules                    | pushed           |
 | Marketing page             | Seven sections on textured paper, a CSS-only example switcher, scroll-linked motion with no libraries                                       | committed        |
 | 8 — Into the world         | Everything below, plus phases 9–10 drafted                                                                                                  | pushed           |
-| 9 — The gaps we left       | Account deletion, `.epub`, Upstash, a Content-Security-Policy, Google sign-in, and the age gate removed                                     | uncommitted      |
+| 9 — The gaps we left       | Account deletion, `.epub`, Upstash, a Content-Security-Policy, Google sign-in, and the age gate removed                                     | pushed           |
 
 ### What phase 8 found
 

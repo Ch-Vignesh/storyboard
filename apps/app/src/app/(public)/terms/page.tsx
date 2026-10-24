@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     'Who may use Draftboard, who owns what, what a helper grants, and what moderation can do.',
 }
 
-const UPDATED = '18 October 2026'
+const UPDATED = '24 October 2026'
 
 /**
  * Phase 14, item 2.2 — the terms, in plain language. Every claim here is one
@@ -84,6 +84,16 @@ export default function TermsPage() {
           publish a spin-off elsewhere you need the permission of the authors of the words it
           carries over, because their licence was to the story&rsquo;s authors, not to everyone who
           copies the story.
+        </p>
+        {/* Phase 14, item 7b.5 (decision 0044, D-2) — publishing on Draftboard. */}
+        <p>
+          A story&rsquo;s owner may also publish it here, as an edition: the main draft as it stands
+          that day, which readers find at its own address while the working draft goes on changing.
+          An edition is never changed and is not taken back; publishing again makes the next one,
+          and the earlier ones stay readable. Editions are as private as the story: one made private
+          takes its editions with it. When a public spin-off publishes an edition, the authors of
+          the story it came from are told, and the edition names that story and its author.
+          Publishing on Draftboard is not permission to publish anywhere else.
         </p>
       </Section>
 

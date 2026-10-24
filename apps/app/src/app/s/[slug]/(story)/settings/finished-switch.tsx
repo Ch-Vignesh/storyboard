@@ -18,6 +18,9 @@ import { useTRPC } from '@/trpc/client'
  *
  * Reversible in one click, because a finished novel with a typo in it is the
  * most ordinary thing in publishing.
+ *
+ * In the story's settings since phase 14, item 8.10: it sat under "Take it
+ * out", where nobody looking for it would think to look.
  */
 export function FinishedSwitch({
   storyboardId,

@@ -7,7 +7,7 @@ import { env } from '@/env'
 
 import { authorizeCredentials } from './authorize'
 import { authConfig, sessionRefused } from './config'
-import { GOOGLE_SIGN_IN_OFF } from '@/lib/sign-in-error'
+import { GOOGLE_SIGN_IN_OFF, SIGN_UPS_PAUSED } from '@/lib/sign-in-error'
 
 import { googleConfigured, resolveGoogleUser, type GoogleProfile } from './google'
 
@@ -55,6 +55,12 @@ const callbacks: NextAuthConfig['callbacks'] = {
     // owns the address. A string here is where Auth.js sends them instead.
     if (outcome.reason === 'disconnected') {
       return `/signin?error=AccessDenied&code=${GOOGLE_SIGN_IN_OFF}`
+    }
+    // Item 9.4 (D-18) — new accounts are paused. Said plainly, as above: it
+    // tells whoever reads it only that this address has no account yet, and
+    // Google has just shown them to be its owner.
+    if (outcome.reason === 'paused') {
+      return `/signin?error=AccessDenied&code=${SIGN_UPS_PAUSED}`
     }
 
     // Auth.js turns `false` into a generic failure on the sign-in page, which

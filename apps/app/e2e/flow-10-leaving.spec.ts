@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 import { readFileSync } from 'node:fs'
 
-import { signUpAndOnboard } from './helpers'
+import { signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * Phase 9's exit criterion: a person can delete their account, and what happens
@@ -24,7 +24,7 @@ test('a writer deletes their account, and can stop it before it happens', async 
   await page.getByRole('button', { name: 'Fantasy', exact: true }).click()
   await page.getByRole('button', { name: /create and start writing/i }).click()
   await expect(page).toHaveURL(/\/s\/the-harbour-year-/u)
-  const storyboardPath = new URL(page.url()).pathname
+  const storyboardPath = storyPath(page)
 
   // ── Asking to be deleted ────────────────────────────────────────────────
   await page.goto('/settings')

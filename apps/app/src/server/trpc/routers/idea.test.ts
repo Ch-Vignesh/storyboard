@@ -297,6 +297,14 @@ describe.skipIf(!databaseUrl)('ideas only where ideas belong (FR-5.2, FR-6.9)', 
       select: { deletedAt: true },
     })
     expect(removed.deletedAt).toBeInstanceOf(Date)
+    // Its words are sent to nobody, its writer included; the row still stands.
+    const shownTo = async (who: typeof helper) =>
+      (await who.request.get({ publicId })).ideas.find((row) => row.id === idea.id)
+    for (const who of [helper, author, await as(await person('stranger'))]) {
+      const row = await shownTo(who)
+      expect(row?.deletedAt).toBeInstanceOf(Date)
+      expect(row?.body).toBe('')
+    }
     expect(await db.idea.count({ where: { parentId: idea.id } })).toBe(1)
     await expect(helper.idea.remove({ ideaId: idea.id })).rejects.toThrow()
 

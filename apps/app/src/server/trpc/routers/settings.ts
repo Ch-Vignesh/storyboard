@@ -19,6 +19,7 @@ import {
   RECENT_SIGN_IN_MINUTES,
 } from '@/lib/schemas/constants'
 import { afterResponse } from '@/server/after-response'
+import { recordEvent } from '@/server/audit'
 import { NotAnImage, shrinkAvatar } from '@/server/avatars'
 import { clientAddress } from '@/server/client-address'
 import { DAY_MS, enforce, HOUR_MS, key, whenToRetry } from '@/server/limits'
@@ -549,6 +550,12 @@ export const settingsRouter = createTRPCRouter({
       })
 
       logger.info({ event: 'account.deletion_requested', userId }, 'account deletion requested')
+      // Item 10.2 — stored as well as logged.
+      await recordEvent(ctx.db, {
+        event: 'account.deletion_requested',
+        actorId: userId,
+        target: { type: 'USER', id: userId },
+      })
       return { requestedAt, finishesAt }
     }),
 
@@ -586,7 +593,7 @@ export const settingsRouter = createTRPCRouter({
     // password to sign in with and nothing left to restore.
     // And never a banned account (decision 0043, item 2b.5): an administrator
     // started that deletion, and the way back is the support address.
-    await ctx.db.user.updateMany({
+    const kept = await ctx.db.user.updateMany({
       where: {
         id: ctx.session.user.id,
         status: 'ACTIVE',
@@ -595,6 +602,17 @@ export const settingsRouter = createTRPCRouter({
       },
       data: { deletionRequestedAt: null },
     })
+    // Item 10.2 (NFR-7) — a deletion called off is one of the moments kept,
+    // and it had no log line of its own. Only when one was called off.
+    if (kept.count === 1) {
+      const userId = ctx.session.user.id
+      logger.info({ event: 'account.deletion_cancelled', userId }, 'account deletion cancelled')
+      await recordEvent(ctx.db, {
+        event: 'account.deletion_cancelled',
+        actorId: userId,
+        target: { type: 'USER', id: userId },
+      })
+    }
     return { ok: true }
   }),
 })

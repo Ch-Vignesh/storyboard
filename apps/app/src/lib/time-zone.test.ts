@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   dayKeyInZone,
   formatInZone,
+  lastWrittenWords,
   TIME_ZONE_HEADER,
   timeZoneFromCookieHeader,
   timeZoneFromCookieValue,
@@ -64,5 +65,28 @@ describe('days in a zone', () => {
       ),
     ).toBe('Europe/Paris')
     expect(timeZoneFromHeaders(new Headers())).toBe('UTC')
+  })
+})
+
+/** Phase 14, item 7.6 — the prototype's words, with the year once it is not this one. */
+describe('last written', () => {
+  const now = new Date('2026-10-24T09:00:00Z')
+
+  it('gives the day and month this year', () => {
+    expect(lastWrittenWords(new Date('2026-09-09T12:00:00Z'), 'UTC', now)).toBe(
+      'last written on 9 September',
+    )
+  })
+
+  it('adds the year before this one', () => {
+    expect(lastWrittenWords(new Date('2025-09-09T12:00:00Z'), 'UTC', now)).toBe(
+      'last written on 9 September 2025',
+    )
+  })
+
+  it("counts the day in the reader's zone", () => {
+    expect(lastWrittenWords(new Date('2026-09-09T23:30:00Z'), 'Asia/Kolkata', now)).toBe(
+      'last written on 10 September',
+    )
   })
 })

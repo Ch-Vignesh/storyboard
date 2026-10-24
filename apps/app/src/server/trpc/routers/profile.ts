@@ -142,6 +142,19 @@ async function creditsPage(
     prose.map((credit) => credit.sectionLineage).filter((lineage): lineage is string => !!lineage),
   )
 
+  // Item 8.12 (FR-13.6) — the public record of the version each passage
+  // became, for the writer's own view; nobody else is handed the ids.
+  const proofs = new Map(
+    isSelf
+      ? (
+          await db.credit.findMany({
+            where: { id: { in: page.map((credit) => credit.id) }, type: 'PROSE' },
+            select: { id: true, revisionId: true },
+          })
+        ).map((credit) => [credit.id, credit.revisionId])
+      : [],
+  )
+
   const items = page.map(({ storyboard: { privateSpans, ...storyboard }, ...credit }) => {
     const sent = credit.suggestion?.submittedAt
     // Decision 0007: a contribution sent while its story was private is still
@@ -190,6 +203,7 @@ async function creditsPage(
       ...credit,
       storyboard,
       where,
+      proofRevisionId: proofs.get(credit.id) ?? null,
       suggestion:
         credit.suggestion && hiddenWords
           ? { ...credit.suggestion, contentText: HIDDEN_TEXT }
@@ -277,6 +291,8 @@ export const profileRouter = createTRPCRouter({
           isSeed: true,
           createdAt: true,
           requests: { where: { state: { in: ['OPEN', 'ANSWERED'] } }, select: { id: true } },
+          // Item 7b.3 (decision 0044) — its current edition, if it has one.
+          publications: { orderBy: { number: 'desc' }, take: 1, select: { number: true } },
           // Item 6.17 — whether anyone else has words in it.
           _count: { select: { credits: { where: { type: { not: 'COAUTHOR' } } } } },
         },
@@ -345,9 +361,10 @@ export const profileRouter = createTRPCRouter({
         ideas: ideaCount,
         spinOffs,
       },
-      authored: authored.map(({ _count, ...story }) => ({
+      authored: authored.map(({ _count, publications, ...story }) => ({
         ...story,
         ownShare: shares.get(story.id) ?? null,
+        edition: publications[0]?.number ?? null,
       })),
       // Item 6.10 — the first page of each; `profile.credits` and
       // `profile.passed` page on from the cursors.

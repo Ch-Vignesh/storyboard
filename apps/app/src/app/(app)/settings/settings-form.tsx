@@ -14,6 +14,7 @@ import {
   READING_TYPE_SCALE,
 } from '@/lib/schemas/constants'
 import { NOTIFICATIONS, NOTIFICATION_TYPES } from '@/lib/schemas/notifications'
+import { applyReading } from '@/lib/reading'
 import { useTRPC } from '@/trpc/client'
 
 import { DefaultVisibility } from './default-visibility'
@@ -46,7 +47,13 @@ export function SettingsForm() {
   )
   const setAllEmail = useMutation(trpc.settings.setAllEmail.mutationOptions({ onSuccess: refetch }))
   const setReading = useMutation(
-    trpc.user.setReadingPreferences.mutationOptions({ onSuccess: refetch }),
+    trpc.user.setReadingPreferences.mutationOptions({
+      onSuccess: (saved) => {
+        // Item 7.5 — this device's copy too, so the next page is drawn at it.
+        applyReading({ typeScale: saved.readingTypeScale, lineHeight: saved.readingLineHeight })
+        return refetch()
+      },
+    }),
   )
 
   const toggleGenre = (id: string) =>

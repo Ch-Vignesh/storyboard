@@ -17,6 +17,10 @@ test('a picture is set, shrunk, shown beside the name, and removed again', async
     .toBuffer()
 
   await page.goto('/settings')
+  // The file input's handler is attached when the page hydrates; a file set
+  // before then is never seen, which made the first attempt of this test
+  // fail now and then on a cold server (phase 14 closing runs, 2026-10-24).
+  await page.waitForLoadState('networkidle')
   // Nothing yet: initials in the header, no picture anywhere.
   await expect(page.locator('header img[src*="/avatar?v="]')).toHaveCount(0)
 

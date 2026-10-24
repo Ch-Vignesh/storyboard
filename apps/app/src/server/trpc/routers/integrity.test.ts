@@ -1293,18 +1293,25 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
    * on a suggestion withdrawn a moment before read "already been decided".
    */
   it('records a withdrawal, and tells the authors only if one had opened it', async () => {
-    const helper = await as(reader)
+    // A writer of its own: the shared reader is near FR-13.3's ten sends a
+    // day by now, depending on how earlier tests' timing went, and this test
+    // failed now and then on that limit rather than on what it checks.
+    const writer = await person('withdrawer')
+    const helper = await as(writer)
     const author = await as(owner)
-    // A clean slate for the per-story quota, whatever earlier tests left waiting.
-    await db.suggestion.updateMany({
-      where: { contributorId: reader.id, state: 'SUBMITTED', request: { storyboardId } },
-      data: { state: 'WITHDRAWN' },
-    })
+    const aDraftOfTheirs = async (requestId: string) => {
+      const draft = await helper.suggestion.startDraft({ requestId })
+      await helper.suggestion.saveDraft({
+        suggestionId: draft.id,
+        contentJson: prose('It was empty.'),
+      })
+      return draft.id
+    }
     const withdrawnTold = () =>
       db.notification.count({ where: { userId: owner.id, type: 'SUGGESTION_WITHDRAWN' } })
 
     // Unopened: recorded, and nobody told.
-    const first = await aDraft(await aRequest())
+    const first = await aDraftOfTheirs(await aRequest())
     await helper.suggestion.submit({ suggestionId: first })
     await helper.suggestion.withdraw({ suggestionId: first })
     const quiet = await db.suggestion.findUniqueOrThrow({
@@ -1317,7 +1324,7 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     expect(await withdrawnTold()).toBe(0)
 
     // Opened by an author, then withdrawn: recorded, and the authors told.
-    const second = await aDraft(await aRequest())
+    const second = await aDraftOfTheirs(await aRequest())
     const sent = await helper.suggestion.submit({ suggestionId: second })
     await author.suggestion.get({ publicId: sent.publicId })
     const opened = await db.suggestion.findUniqueOrThrow({
@@ -1443,10 +1450,11 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     expect(theirs.some((request) => request.id === requestId)).toBe(true)
 
     const call = await as(reader)
+    // A page of stories since item 9.1, with the count beside it.
     const novels = await call.browse.storyboards({ types: ['NOVEL'] })
-    expect(novels.some((story) => story.id === storyboardId)).toBe(true)
+    expect(novels.storyboards.some((story) => story.id === storyboardId)).toBe(true)
     const plays = await call.browse.storyboards({ types: ['STAGE_PLAY'] })
-    expect(plays.some((story) => story.id === storyboardId)).toBe(false)
+    expect(plays.storyboards.some((story) => story.id === storyboardId)).toBe(false)
   })
 
   /**

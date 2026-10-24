@@ -1,13 +1,20 @@
 import { toDocx } from './docx'
 import { toEpub } from './epub'
-import { fileNameFor } from './front-matter'
+import { fileNamesFor, type FileNames, type FileNaming } from './file-names'
 import { toFountain } from './fountain'
 import { toMarkdown } from './markdown'
 import { toAuthorshipProof, toPdf } from './pdf'
 import { EXPORT_FORMATS, MEDIA_TYPES, type ExportFormat, type Manuscript } from './types'
 
 export * from './types'
-export { fileNameFor, frontMatterLines, sourceLine } from './front-matter'
+export { footerLine, frontMatterLines, sourceLine } from './front-matter'
+export {
+  contentDisposition,
+  fileNameFor,
+  fileNamesFor,
+  type FileNames,
+  type FileNaming,
+} from './file-names'
 export { toDocx } from './docx'
 export { toEpub } from './epub'
 export { toFountain } from './fountain'
@@ -15,9 +22,9 @@ export { toMarkdown } from './markdown'
 export { toAuthorshipProof, toPdf } from './pdf'
 export { unzipFiles, zipFiles } from './zip'
 
-export type ExportedFile = {
+/** A file to hand over, by both its names (item 8.8, `file-names.ts`). */
+export type ExportedFile = FileNames & {
   body: Buffer
-  fileName: string
   mediaType: string
 }
 
@@ -29,44 +36,30 @@ export type ExportedFile = {
  * something half-right would be worse than saying plainly that it was missing.
  * `.fountain` is offered for screenplays only: a novel in Fountain would be a
  * screenplay-shaped file full of action lines, which helps nobody.
+ *
+ * Item 8.8 — the file is named for the day it was made, where the writer is,
+ * and for the chapter and version it holds when it is not the whole main
+ * draft: `naming` says which, and `exportedAt` is the day.
  */
 export async function exportManuscript(
   manuscript: Manuscript,
   format: ExportFormat,
+  naming: Omit<FileNaming, 'at'> = {},
 ): Promise<ExportedFile> {
   const mediaType = MEDIA_TYPES[format]
+  const names = fileNamesFor(manuscript.title, format, { ...naming, at: manuscript.exportedAt })
 
   switch (format) {
     case 'docx':
-      return {
-        body: await toDocx(manuscript),
-        fileName: fileNameFor(manuscript.title, 'docx'),
-        mediaType,
-      }
+      return { body: await toDocx(manuscript), ...names, mediaType }
     case 'pdf':
-      return {
-        body: await toPdf(manuscript),
-        fileName: fileNameFor(manuscript.title, 'pdf'),
-        mediaType,
-      }
+      return { body: await toPdf(manuscript), ...names, mediaType }
     case 'md':
-      return {
-        body: Buffer.from(toMarkdown(manuscript), 'utf8'),
-        fileName: fileNameFor(manuscript.title, 'md'),
-        mediaType,
-      }
+      return { body: Buffer.from(toMarkdown(manuscript), 'utf8'), ...names, mediaType }
     case 'epub':
-      return {
-        body: toEpub(manuscript),
-        fileName: fileNameFor(manuscript.title, 'epub'),
-        mediaType,
-      }
+      return { body: toEpub(manuscript), ...names, mediaType }
     case 'fountain':
-      return {
-        body: Buffer.from(toFountain(manuscript), 'utf8'),
-        fileName: fileNameFor(manuscript.title, 'fountain'),
-        mediaType,
-      }
+      return { body: Buffer.from(toFountain(manuscript), 'utf8'), ...names, mediaType }
   }
 }
 
@@ -76,7 +69,7 @@ export async function exportAuthorshipProof(
 ): Promise<ExportedFile> {
   return {
     body: await toAuthorshipProof(proof),
-    fileName: fileNameFor(`${proof.storyboardTitle}-${proof.sectionTitle}-proof`, 'pdf'),
+    ...fileNamesFor(`${proof.storyboardTitle} — ${proof.sectionTitle} — proof`, 'pdf'),
     mediaType: 'application/pdf',
   }
 }

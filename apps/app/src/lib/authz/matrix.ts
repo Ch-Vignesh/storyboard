@@ -42,6 +42,8 @@ export const MATRIX_ACTIONS = [
   'storyboard:spinOff',
   'storyboard:export',
   'report:create',
+  // Decision 0044 (phase 14, item 7b.1).
+  'storyboard:publish',
 ] as const
 
 export type MatrixAction = (typeof MATRIX_ACTIONS)[number]
@@ -67,6 +69,7 @@ export const ACTION_LABELS: Record<MatrixAction, string> = {
   'storyboard:spinOff': 'Write your own version of a story',
   'storyboard:export': 'Take the manuscript out as a file',
   'report:create': 'Report a person or a story',
+  'storyboard:publish': 'Publish an edition',
 }
 
 /**
@@ -99,6 +102,8 @@ export const MATRIX: Record<MatrixAction, Record<Role, boolean>> = {
   // to provide. Spinning off is the reader's route to the words.
   'storyboard:export': { owner: true, coauthor: true, reader: false, guest: false },
   'report:create': { owner: true, coauthor: true, reader: true, guest: false },
+  // Decision 0044 — an edition is the owner's to put out, as visibility is.
+  'storyboard:publish': { owner: true, coauthor: false, reader: false, guest: false },
 }
 
 /** Capabilities that change the work or the storyboard, as opposed to reading it. */

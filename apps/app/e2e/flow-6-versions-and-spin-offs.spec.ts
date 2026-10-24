@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-import { signUpAndOnboard } from './helpers'
+import { signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * Phase 4's exit criteria (docs/04-phase-plan.md):
@@ -22,9 +22,8 @@ async function writeAStoryboard(page: Page, title: string) {
   await page.getByRole('button', { name: 'Literary fiction', exact: true }).click()
   await page.getByRole('button', { name: /create and start writing/i }).click()
   await expect(page).toHaveURL(/\/s\//)
-  const path = new URL(page.url()).pathname
+  const path = storyPath(page)
 
-  await page.getByRole('link', { name: 'Edit' }).first().click()
   const editor = page.getByRole('textbox', { name: /section text/i })
   await editor.click()
   await editor.pressSequentially('The harbour had been empty for a year before she noticed.')
@@ -43,7 +42,7 @@ test('an author tries a different draft and makes it the main one', async ({ pag
   await expect(page).toHaveURL(/\/versions$/)
 
   // FR-2.2 — one version exists from the start, and it is the main draft.
-  const versions = page.getByRole('listitem')
+  const versions = page.getByRole('list', { name: 'Versions' }).getByRole('listitem')
   await expect(versions).toHaveCount(1)
   await expect(versions.first()).toContainText('Main draft')
   await expect(versions.first()).toContainText('11 words')
@@ -124,12 +123,19 @@ test('an author tries a different draft and makes it the main one', async ({ pag
   // Nothing was discarded: the draft it replaced is still listed, still readable.
   await expect(versions).toHaveCount(2)
   // The draft it replaced is still there, and is now the one addressed by
-  // name rather than by the storyboard's own address. It keeps the name its
-  // author gave it: renaming somebody's draft to tidy up an adjective would be
-  // worse than the momentary confusion of a version called 'Main draft'.
+  // name rather than by the storyboard's own address. "Main draft" was the
+  // name every story starts with, not one its author chose, so it is dated
+  // rather than left wearing the main draft's name (phase 14, item 7.10); a
+  // name an author chose is kept.
   await expect(
-    versions.filter({ hasText: '11 words' }).getByRole('link', { name: 'Main draft' }),
+    versions.filter({ hasText: '11 words' }).getByRole('link', { name: /^Main draft until / }),
   ).toHaveAttribute('href', /\?version=/)
+  // FR-10.2 — and the swap is recorded, with who made it.
+  await expect(
+    page
+      .getByRole('list', { name: 'Which draft was the main one' })
+      .getByText(/‘The other ending’ became the main draft, by /),
+  ).toBeVisible()
 
   await page.goto(path)
   await expect(page.getByText(/the harbour filled overnight/i)).toBeVisible()

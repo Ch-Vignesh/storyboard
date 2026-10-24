@@ -1,7 +1,7 @@
 import { grantAdmin, prisma } from '@storyboard/db'
 import { expect, test, type Page } from '@playwright/test'
 
-import { signIn, signUpAndOnboard } from './helpers'
+import { signIn, signUpAndOnboard, storyPath } from './helpers'
 
 /**
  * Phase 6's three exit criteria:
@@ -33,9 +33,8 @@ async function storyboardWithRequest(page: Page, title: string) {
   await page.getByRole('button', { name: 'Literary fiction', exact: true }).click()
   await page.getByRole('button', { name: /create and start writing/i }).click()
   await expect(page).toHaveURL(/\/s\//)
-  const path = new URL(page.url()).pathname
+  const path = storyPath(page)
 
-  await page.getByRole('link', { name: 'Edit' }).first().click()
   const editor = page.getByRole('textbox', { name: /section text/i })
   await editor.click()
   await editor.pressSequentially(
@@ -141,7 +140,7 @@ test('a private storyboard is 404 to a signed-in stranger, at every route and in
   await authorPage.getByRole('radio', { name: /private/i }).check()
   await authorPage.getByRole('button', { name: /create and start writing/i }).click()
   await expect(authorPage).toHaveURL(/\/s\/kept-to-myself-entirely-/)
-  const path = new URL(authorPage.url()).pathname
+  const path = storyPath(authorPage)
   const slug = path.split('/')[2] ?? ''
   await authorContext.close()
 
@@ -189,7 +188,7 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   await targetPage.getByRole('button', { name: 'Horror', exact: true }).click()
   await targetPage.getByRole('button', { name: /create and start writing/i }).click()
   await expect(targetPage).toHaveURL(/\/s\/a-story-under-review-/)
-  const targetPath = new URL(targetPage.url()).pathname
+  const targetPath = storyPath(targetPage)
   await targetContext.close()
 
   const targetUser = await prisma.user.findFirstOrThrow({
@@ -371,6 +370,34 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   const shownPage = await shownContext.newPage()
   expect((await shownPage.goto(targetPath))?.status()).toBe(200)
   await shownContext.close()
+
+  // Phase 14, item 10.2 (NFR-7) — everything just done about this person is
+  // kept, and the Events screen finds it by their username.
+  await adminPage.goto('/admin/events')
+  await expect(adminPage.getByRole('heading', { name: 'Events', exact: true })).toBeVisible()
+  await adminPage.getByLabel(/a username or email address/i).fill(target.username)
+  await adminPage.getByRole('button', { name: /show the events/i }).click()
+  await expect(adminPage.getByText(`By or about @${target.username}`)).toBeVisible()
+  for (const happened of [
+    /reported a story/i,
+    /upheld a report about a story/i,
+    /upheld a tenth report, which suspended the account/i,
+    /lifted a suspension/i,
+    /banned an account/i,
+    /lifted a ban/i,
+    /hid a story/i,
+    /showed a story again/i,
+  ]) {
+    await expect(adminPage.getByText(happened).first()).toBeVisible()
+  }
+
+  // Item 10.1 (D-10) — and the Errors screen, for whoever may read the log.
+  await adminPage.goto('/admin/errors')
+  await expect(adminPage.getByRole('heading', { name: 'Errors', exact: true })).toBeVisible()
+  await expect(screens.getByRole('link', { name: 'Errors' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
   await adminContext.close()
 
   // A non-admin gets 404 from the admin screen, not 403.
@@ -380,6 +407,10 @@ test('ten upheld reports suspend an account, and its work stays', async ({ brows
   await signIn(nosyPage, nosy.email)
   const adminResponse = await nosyPage.goto('/admin')
   expect(adminResponse?.status()).toBe(404)
+  // Items 10.1 and 10.2 — and so are the two screens that came after it.
+  for (const screen of ['/admin/events', '/admin/errors']) {
+    expect((await nosyPage.goto(screen))?.status(), screen).toBe(404)
+  }
   await nosyContext.close()
 })
 

@@ -92,3 +92,13 @@ const STYLES: Record<DateStyle, Intl.DateTimeFormatOptions> = {
 export function formatInZone(date: Date, style: DateStyle, timeZone: string): string {
   return date.toLocaleString('en-GB', { ...STYLES[style], timeZone })
 }
+
+/**
+ * Phase 14, item 7.6 — "last written on 9 September", as the prototype says
+ * it: the day and month this year, and the year as well before it.
+ */
+export function lastWrittenWords(date: Date, timeZone: string, now = new Date()): string {
+  const year = (value: Date) => value.toLocaleString('en-GB', { year: 'numeric', timeZone })
+  const style = year(date) === year(now) ? 'dayMonth' : 'long'
+  return `last written on ${formatInZone(date, style, timeZone)}`
+}

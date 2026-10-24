@@ -1,6 +1,6 @@
 # Deployment
 
-How Storyboard gets from a laptop to the public internet, and what has to be
+How Draftboard gets from a laptop to the public internet, and what has to be
 true before it should. Written to be followed once, in order, by somebody who
 has not deployed it before.
 
@@ -188,7 +188,7 @@ hours rather than minutes, which is why it is third rather than last.
 
 ```
 RESEND_API_KEY=re_…
-EMAIL_FROM="Storyboard <hello@your-domain>"
+EMAIL_FROM="Draftboard <hello@your-domain>"
 ```
 
 `EMAIL_FROM` must be on the domain you verified. The preflight rejects the
@@ -208,7 +208,7 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=465
 SMTP_USER=you@gmail.com
 SMTP_PASSWORD=abcdabcdabcdabcd
-EMAIL_FROM="Storyboard <you@gmail.com>"
+EMAIL_FROM="Draftboard <you@gmail.com>"
 ```
 
 `EMAIL_FROM` has to be the same address as `SMTP_USER`: Gmail sends as the
@@ -311,14 +311,14 @@ box where none of it matters. It should never be set on the real thing.
 
 Six jobs, in `.github/workflows/cron.yml` (decisions 0012 and 0030):
 
-| Job         | Schedule      | What it does                                                                                                                    |
-| ----------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `immediate` | every 10 min  | Decisions on your own work (FR-12.3)                                                                                            |
-| `hourly`    | hourly        | Everything that is not about your own work                                                                                      |
-| `weekly`    | Sundays 09:00 | The weekly digest (FR-12.3)                                                                                                     |
-| `nudge`     | daily 08:30   | The seven-day silence nudge (FR-12.4)                                                                                           |
-| `prune`     | daily 03:15   | Expired rate-limit rows, dead sign-in links, sign-ups never confirmed (item 3.12)                                               |
-| `purge`     | daily 03:45   | Requests open past their 30 days (decision 0050), storyboards past their 30 days, accounts past their 7, imports left for a day |
+| Job         | Schedule      | What it does                                                                                                                                                               |
+| ----------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `immediate` | every 10 min  | Decisions on your own work (FR-12.3)                                                                                                                                       |
+| `hourly`    | hourly        | Everything that is not about your own work, then an email to the administrators about any new kind of server error (item 10.1)                                             |
+| `weekly`    | Sundays 09:00 | The weekly digest (FR-12.3), to nobody sent one in the last 6 days (item 10.6)                                                                                             |
+| `nudge`     | daily 08:30   | The seven-day silence nudge (FR-12.4)                                                                                                                                      |
+| `prune`     | daily 03:15   | Expired rate-limit rows, dead sign-in links, sign-ups never confirmed (item 3.12), server errors past their 30 days (item 10.1), stored events past their year (item 10.2) |
+| `purge`     | daily 03:45   | Requests open past their 30 days (decision 0050), storyboards past their 30 days, accounts past their 7, imports left for a day                                            |
 
 Times are UTC. Each run sends `Authorization: Bearer $CRON_SECRET`, which is
 what `/api/cron/[job]` checks — with a constant-time comparison, so the secret
@@ -336,8 +336,25 @@ Without `APP_URL` every run is skipped, so a fork does nothing. To check a job,
 run it by hand: **Actions → Scheduled jobs → Run workflow**.
 
 Two things to know. GitHub starts scheduled runs late when it is busy, usually
-by minutes. And it stops scheduling them in a repository with no commit for 60
-days — it emails when it does, and the workflow has to be re-enabled.
+by minutes. And in a public repository it stops scheduling them after 60 days
+without activity, which would stop the digests, the purges and the backups
+together. `.github/workflows/keepalive.yml` runs on the 1st and the 15th of
+each month (item 10.3). It enables every scheduled workflow through GitHub's
+API, which brings back one already stopped for inactivity, and it fails on
+purpose once the default branch has had no commit for 40 days: GitHub's
+documentation does not say that enabling a workflow that is still running
+starts the 60 days again, and a commit is what certainly counts. When it
+fails, push a commit. A workflow you switched off by hand stays off.
+
+Whom GitHub tells when a scheduled run fails: in its own words,
+"notifications for scheduled workflows are sent to the user who last modified
+the cron syntax in the workflow file" — whoever last changed a `cron:` line in
+`cron.yml`, `backup.yml`, `excerpts.yml` or `keepalive.yml`, not the owner of
+the repository as such. And only as that person's settings allow: under
+**Settings → Notifications → System → Actions**, choose Email; "Only notify
+for failed workflows" is enough. If somebody else last changed a schedule,
+their failures go to that person; changing the line yourself makes them
+yours.
 
 The endpoint fails closed: no secret configured, no job runs, 503. That is the
 right behaviour for a public URL that sends email, and it is silent, which is
@@ -374,7 +391,8 @@ Free), so the backup is a workflow of our own, whatever the plan (decision
   `pnpm db:drill` runs against it. It fails if that backup is more than 36
   hours old, which is how a nightly job that quietly stopped gets noticed.
 
-GitHub emails you when a scheduled run fails.
+GitHub emails a failed scheduled run to whoever last changed the workflow's
+schedule, if their notification settings allow it (section 5).
 
 ### The bucket
 
@@ -566,6 +584,7 @@ So the rest is by hand, once, and it is the part no test can claim for you:
 | Uploads fail, console shows a CORS error           | The R2 CORS rule. `AllowedOrigins` is the app's origin                                                                                                                                                                                                                                                             |
 | Import works, then the parse cannot find the file  | R2 is not configured and instances do not share a disk                                                                                                                                                                                                                                                             |
 | No digest ever arrives                             | The Actions tab: a 401 means the two `CRON_SECRET`s differ                                                                                                                                                                                                                                                         |
+| "This scheduled workflow is disabled because…"     | Sixty days without activity (section 5). In the Actions tab, enable **Keep scheduled jobs running** from its banner and run it by hand: it enables the rest. Then push a commit                                                                                                                                    |
 | Migration hangs on an advisory lock                | It is running over the pooled URL. Use `DIRECT_DATABASE_URL`                                                                                                                                                                                                                                                       |
 | "cannot execute INSERT in a read-only transaction" | A session `SET` went through the pooled host. `RESET` it on each connection                                                                                                                                                                                                                                        |
 | "Transaction API error … expired transaction"      | Round trips too slow: the function region is not the database's                                                                                                                                                                                                                                                    |

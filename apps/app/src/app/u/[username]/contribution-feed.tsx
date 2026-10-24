@@ -92,6 +92,17 @@ export function ContributionFeed({
                 This writing is no longer in the main draft. The contribution stands.
               </p>
             ) : null}
+            {/* Item 8.12 (FR-13.6) — the record anyone can check, to its writer. */}
+            {credit.proofRevisionId ? (
+              <p className="mt-1.5 text-[12.5px]">
+                <Link
+                  href={`/proof/${credit.proofRevisionId}`}
+                  className="text-pencil hover:underline"
+                >
+                  Proof that you wrote this
+                </Link>
+              </p>
+            ) : null}
             {isSelf ? (
               <EraseCredit creditId={credit.id} storyboardTitle={credit.storyboard.title} />
             ) : null}
