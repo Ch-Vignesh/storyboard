@@ -80,6 +80,7 @@ export function RequestActions({
         title={wantsProse ? 'Close this without accepting?' : 'Close this request?'}
         confirmLabel="Close it"
         busy={close.isPending || closeImpact.isLoading}
+        error={close.error ?? closeImpact.error}
         onCancel={() => setConfirmClose(false)}
         onConfirm={() => close.mutate({ requestId })}
       >

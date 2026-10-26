@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import {
+  FREE_TEXT_CHARS_PER_WORD,
   IDEA_EDIT_MINUTES,
   IDEA_REPLY_WORDS,
   IDEA_WORDS,
@@ -43,9 +44,11 @@ export function countWords(text: string): number {
 
 /** A word-bounded block of plain text, with the message the writer should see. */
 function wordBounded(min: number, max: number, what: string) {
+  const chars = max * FREE_TEXT_CHARS_PER_WORD
   return z
     .string()
     .trim()
+    .max(chars, `Keep it under ${String(chars)} characters.`)
     .refine((value) => countWords(value) >= min, `Write at least ${String(min)} words ${what}.`)
     .refine((value) => countWords(value) <= max, `Keep it under ${String(max)} words.`)
 }

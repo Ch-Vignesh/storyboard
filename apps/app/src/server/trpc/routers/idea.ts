@@ -6,12 +6,13 @@ import { assertNotBlocked, loadStoryboard } from '@/lib/authz/guard'
 import { recordActivity } from '@/server/activity'
 import { timeZoneFromHeaders } from '@/lib/time-zone'
 import { afterCommit } from '@/server/after-commit'
+import { hasBlocked } from '@/server/blocks'
 import { notifyAuthors } from '@/server/notify-authors'
 import { logger } from '@/lib/logger'
 import { DAILY_LIMITS, IDEA_EDIT_MINUTES } from '@/lib/schemas/constants'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import { ideaBodySchema, ideaChangeCutoff, ideaReplySchema, ideaTakenNow } from '@/lib/schemas/help'
-import { AUTHORS_SELECT, authorsOf, isIdeaAnswer } from '@/server/answers'
+import { AUTHORS_SELECT, authorsOf, isIdeaAnswer, settleAnswered } from '@/server/answers'
 
 import { activeProcedure, actorFrom, createTRPCRouter } from '../init'
 
@@ -153,7 +154,9 @@ export const ideaRouter = createTRPCRouter({
       // answered them. An author who is that writer hears once, as the writer.
       const repliedTo = parent && parent.authorId !== userId ? parent : null
       await afterCommit('idea.post.notify', async () => {
-        if (repliedTo) {
+        // Decision 0046 — not to a writer who has blocked whoever replied, as
+        // `notifyAuthors` holds for the authors (2026-10-26 final pass).
+        if (repliedTo && !(await hasBlocked(ctx.db, repliedTo.authorId, userId))) {
           await ctx.db.notification.create({
             data: {
               userId: repliedTo.authorId,
@@ -202,9 +205,32 @@ export const ideaRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const idea = await ctx.db.idea.findFirst({
         where: { id: input.ideaId, authorId: ctx.session.user.id },
-        select: { parentId: true, markedHelpful: true, deletedAt: true, createdAt: true },
+        select: {
+          parentId: true,
+          markedHelpful: true,
+          deletedAt: true,
+          hiddenAt: true,
+          createdAt: true,
+          request: { select: { storyboardId: true } },
+        },
       })
       if (!idea) throw new TRPCError({ code: 'NOT_FOUND', message: 'That idea is not yours.' })
+      // Decision 0046 — a change is a post, and a writer an author blocked
+      // posts nothing on their stories (2026-10-26 final pass).
+      const actor = actorFrom(ctx.session, ctx.account)
+      const storyboard = await loadStoryboard(ctx.db, actor, { id: idea.request.storyboardId })
+      await assertNotBlocked(ctx.db, actor, storyboard.resource)
+      // Item 2.7 — hidden, or reported and waiting on a moderator, its words
+      // stay as they were reported; "show it again" would otherwise show words
+      // no moderator read. Its writer can see it was hidden, so that is said.
+      const underReview = () =>
+        new TRPCError({
+          code: 'CONFLICT',
+          message: idea.hiddenAt
+            ? 'This idea was hidden after a report, so it stays as it was.'
+            : "This idea can't change now.",
+        })
+      if (idea.hiddenAt) throw underReview()
       const schema = idea.parentId ? ideaReplySchema : ideaBodySchema
       const body = schema.safeParse(input.body)
       if (!body.success) {
@@ -213,17 +239,26 @@ export const ideaRouter = createTRPCRouter({
           message: body.error.issues[0]?.message ?? 'Say a little more.',
         })
       }
-      const { count } = await ctx.db.idea.updateMany({
-        where: {
-          id: input.ideaId,
-          authorId: ctx.session.user.id,
-          markedHelpful: false,
-          deletedAt: null,
-          createdAt: { gt: ideaChangeCutoff() },
-        },
-        data: { body: body.data, editedAt: new Date() },
+      const outcome = await ctx.db.$transaction(async (tx) => {
+        const reported = await tx.report.count({
+          where: { targetType: 'IDEA', targetId: input.ideaId, state: 'OPEN' },
+        })
+        if (reported > 0) return 'under review' as const
+        const { count } = await tx.idea.updateMany({
+          where: {
+            id: input.ideaId,
+            authorId: ctx.session.user.id,
+            markedHelpful: false,
+            deletedAt: null,
+            hiddenAt: null,
+            createdAt: { gt: ideaChangeCutoff() },
+          },
+          data: { body: body.data, editedAt: new Date() },
+        })
+        return count
       })
-      if (count === 0) {
+      if (outcome === 'under review') throw underReview()
+      if (outcome === 0) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: idea.markedHelpful
@@ -260,6 +295,12 @@ export const ideaRouter = createTRPCRouter({
           message: 'That idea is not yours to remove, or it was the one that helped.',
         })
       }
+      // The last idea from outside gone, a "help me think" request is open again.
+      const { requestId } = await ctx.db.idea.findUniqueOrThrow({
+        where: { id: input.ideaId },
+        select: { requestId: true },
+      })
+      await settleAnswered(ctx.db, requestId)
       log.info({ event: 'idea.remove', ideaId: input.ideaId }, 'idea removed by its writer')
       return { ok: true }
     }),
@@ -276,6 +317,7 @@ export const ideaRouter = createTRPCRouter({
           parentId: true,
           markedHelpful: true,
           hiddenAt: true,
+          deletedAt: true,
           request: {
             select: {
               id: true,
@@ -297,6 +339,13 @@ export const ideaRouter = createTRPCRouter({
           message: 'This idea was removed after a report, so it cannot be the one that helped.',
         })
       }
+      // Item 6.8 — words their writer took back earn no credit (2026-10-24 final pass).
+      if (idea.deletedAt) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Its writer removed this idea, so it cannot be the one that helped.',
+        })
+      }
       // FR-6.9, FR-9.1 (item 1.7; decision 0041) — a credit is for help from
       // outside the story: not a reply, and not an author's own idea. Both
       // were taken, and credited, until phase 14.
@@ -313,8 +362,9 @@ export const ideaRouter = createTRPCRouter({
           // Only the first of two at once. Marking the same idea twice set the
           // same flag twice, which the partial index does not see, and made
           // two credits (phase 12 audit).
+          // Nor one removed or hidden since it was read above.
           const flipped = await tx.idea.updateMany({
-            where: { id: idea.id, markedHelpful: false },
+            where: { id: idea.id, markedHelpful: false, deletedAt: null, hiddenAt: null },
             data: { markedHelpful: true },
           })
           if (flipped.count !== 1) return false

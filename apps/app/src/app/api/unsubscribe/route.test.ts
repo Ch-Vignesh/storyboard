@@ -75,6 +75,26 @@ describe.skipIf(!databaseUrl)('POST /api/unsubscribe (one click)', () => {
     expect(await emailOn(userId, 'IDEA_RECEIVED')).toBe(true)
   })
 
+  // The address an email carries is this endpoint's: it named the page, which
+  // takes no POST, so a mail program's one click turned nothing off (2026-10-26).
+  it('is the address every email carries in List-Unsubscribe', async () => {
+    const { unsubscribeUrlFor } = await import('@/server/mail/unsubscribe')
+    const { POST } = await import('./route')
+    const userId = await person()
+    const address = unsubscribeUrlFor('http://t', userId, ['SUGGESTION_RECEIVED'])
+    expect(new URL(address).pathname).toBe('/api/unsubscribe')
+
+    const response = await POST(
+      new NextRequest(address, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'List-Unsubscribe=One-Click',
+      }),
+    )
+    expect(response.status).toBe(200)
+    expect(await emailOn(userId, 'SUGGESTION_RECEIVED')).toBe(false)
+  })
+
   it('changes nothing on GET, or for a token that was changed', async () => {
     const { signUnsubscribe } = await import('@/server/mail/unsubscribe')
     const { GET, POST } = await import('./route')

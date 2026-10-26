@@ -120,6 +120,7 @@ export async function Reader({
             : null
         }
         edition={edition ?? null}
+        timeZone={timeZone}
         // Item 7b.2 — the working draft says when there is an edition to read.
         publishedNote={
           !edition && data.latestEdition

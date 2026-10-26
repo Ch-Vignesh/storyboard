@@ -53,8 +53,8 @@ export const browseFiltersSchema = z.object({
    * policy first. */
   query: z.string().trim().max(BROWSE_LIMITS.queryMaxChars).optional(),
   genreIds: z.array(z.string().min(1)).max(GENRE_SELECTION_MAX).optional(),
-  types: z.array(storyTypeSchema).max(9).optional(),
-  kinds: z.array(requestKindSchema).max(3).optional(),
+  types: z.array(storyTypeSchema).max(storyTypeSchema.options.length).optional(),
+  kinds: z.array(requestKindSchema).max(requestKindSchema.options.length).optional(),
   minWords: z.number().int().min(SUGGESTION_WORDS.floor).max(SUGGESTION_WORDS.ceiling).optional(),
   maxWords: z.number().int().min(SUGGESTION_WORDS.floor).max(SUGGESTION_WORDS.ceiling).optional(),
   age: ageFilterSchema.default('ANY'),

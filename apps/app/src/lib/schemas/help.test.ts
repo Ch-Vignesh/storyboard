@@ -51,3 +51,18 @@ describe('closesOn', () => {
     )
   })
 })
+
+// The 2026-10-26 final pass (the detective review): words were the only bound,
+// and a "word" is whatever sits between spaces.
+describe('free text is bounded in characters as well as words', () => {
+  it('refuses an idea of twenty enormous words', async () => {
+    const { ideaBodySchema } = await import('./help')
+    const { IDEA_WORDS, FREE_TEXT_CHARS_PER_WORD } = await import('./constants')
+    const huge = Array.from({ length: IDEA_WORDS.min }, () =>
+      'x'.repeat(IDEA_WORDS.max * FREE_TEXT_CHARS_PER_WORD),
+    ).join(' ')
+    expect(ideaBodySchema.safeParse(huge).success).toBe(false)
+    const ordinary = Array.from({ length: IDEA_WORDS.min }, () => 'harbour').join(' ')
+    expect(ideaBodySchema.safeParse(ordinary).success).toBe(true)
+  })
+})

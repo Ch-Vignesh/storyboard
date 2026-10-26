@@ -337,6 +337,41 @@ describe.skipIf(!databaseUrl)('purging a deleted account (decision 0024)', () =>
     await db.retiredUsername.delete({ where: { hash } })
   })
 
+  /**
+   * The 2026-10-26 final pass: the run reads its list once, then works down
+   * it. Somebody who pressed "Keep my account" while it was still on earlier
+   * accounts was erased anyway. Here the first of two is erased, and its last
+   * message is the moment the second keeps theirs.
+   */
+  it('keeps an account kept after the run listed it', async () => {
+    const one = await aPersonWhoHasWritten('raceone')
+    const two = await aPersonWhoHasWritten('racetwo')
+    const ids = [one.user.id, two.user.id]
+    await askAndAge(one.user.id)
+    await askAndAge(two.user.id)
+    const addresses = (
+      await db.user.findMany({ where: { id: { in: ids } }, select: { email: true } })
+    ).map((row) => row.email)
+
+    await purgeDeletedAccounts(db, new Date(), {
+      send: async (mail) => {
+        if (!addresses.includes(mail.to)) return
+        // "Keep my account", by whichever of the two is still waiting.
+        await db.user.updateMany({
+          where: { id: { in: ids }, status: { not: 'DELETED' } },
+          data: { deletionRequestedAt: null },
+        })
+      },
+    })
+
+    const after = await db.user.findMany({
+      where: { id: { in: ids } },
+      select: { status: true, username: true },
+    })
+    expect(after.map((row) => row.status).sort()).toEqual(['ACTIVE', 'DELETED'])
+    expect(after.find((row) => row.status === 'ACTIVE')?.username).not.toBeNull()
+  })
+
   it('ignores an account that never asked', async () => {
     const { user } = await aPersonWhoHasWritten('innocent')
 

@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     'What Draftboard keeps about you, who processes it and where, what is public, how long things are kept, and your rights.',
 }
 
-const UPDATED = '24 October 2026'
+const UPDATED = '26 October 2026'
 
 /**
  * Phase 14, item 2.1 — the privacy policy, in plain language. Every claim is
@@ -53,9 +53,10 @@ export default function PrivacyPage() {
       <Section title="What is kept">
         <p>
           <strong className="font-medium text-ink">Your account:</strong> your email address, a hash
-          of your password (never the password), your username, display name and bio, the genres you
-          pinned, your reading and email preferences, when your account was created and, to the
-          hour, when it was last active. If you sign in with Google, the address Google confirms.
+          of your password (never the password), your username, display name and bio, your profile
+          picture if you add one (shown to anyone on your profile), the genres you pinned, your
+          reading and email preferences, when your account was created and, to the hour, when it was
+          last active. If you sign in with Google, the address Google confirms.
         </p>
         <p>
           <strong className="font-medium text-ink">Your writing:</strong> your stories with every
@@ -119,9 +120,9 @@ export default function PrivacyPage() {
         <ul className="list-disc space-y-1 pl-5">
           <li>
             A deleted account is frozen at once and erased after {ACCOUNT_DELETION_GRACE_DAYS} days:
-            the address, the password, the name, the bio and every preference go. The writing stays,
-            shown as a former member&rsquo;s, because other people&rsquo;s accepted suggestions and
-            credits are in it. The username is never given to anyone else.
+            the address, the password, the name, the bio, the picture and every preference go. The
+            writing stays, shown as a former member&rsquo;s, because other people&rsquo;s accepted
+            suggestions and credits are in it. The username is never given to anyone else.
           </li>
           <li>
             A deleted story is kept for {SOFT_DELETE_GRACE_DAYS} days, in which its author can
@@ -151,7 +152,9 @@ export default function PrivacyPage() {
           <li>
             <strong className="font-medium text-ink">See and take your writing:</strong> every story
             you write can be exported, with its credits, from the story itself. For a copy of
-            everything on your account, write to us until the button for it exists.
+            everything on your account, use &ldquo;Download your data&rdquo; in your settings: one
+            zip of your profile, your stories and your own suggestions, ideas and credits. It is
+            there while a deletion is pending too.
           </li>
           <li>
             <strong className="font-medium text-ink">Correct:</strong> your name, bio, genres and
@@ -207,6 +210,11 @@ export default function PrivacyPage() {
 
       <Section title="Changes">
         <p>When this page changes, the date at the top changes and the change is described here.</p>
+        <p>
+          26 October 2026: the profile picture, under &ldquo;What is kept&rdquo; and &ldquo;How
+          long&rdquo;; and the copy of your data, which is now a button in your settings rather than
+          a letter to us.
+        </p>
         <p>
           24 October 2026: the record of what was done, and the notes of the server&rsquo;s own
           faults, under &ldquo;What is kept&rdquo; and &ldquo;How long&rdquo;.

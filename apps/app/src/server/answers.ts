@@ -1,4 +1,4 @@
-import type { Prisma } from '@storyboard/db'
+import type { Prisma, PrismaClient } from '@storyboard/db'
 
 /**
  * FR-5.9, FR-11.3, FR-12.4 — what counts as an answer to a request: a
@@ -33,12 +33,23 @@ export const ANSWERS = {
  * request's state carries the answer too: OPEN means none yet.
  */
 
-export type IdeaLike = { authorId: string; parentId: string | null; hiddenAt?: Date | null }
+export type IdeaLike = {
+  authorId: string
+  parentId: string | null
+  hiddenAt?: Date | null
+  deletedAt?: Date | null
+}
 export type AuthorsLike = { ownerId: string; coauthorIds: readonly string[] }
 
+/**
+ * Removed by its writer (item 6.8), an idea answers nothing: it kept counting,
+ * and could still be marked as the one that helped, until the 2026-10-24
+ * final pass found it.
+ */
 export function isIdeaAnswer(idea: IdeaLike, authors: AuthorsLike): boolean {
   return (
     (idea.hiddenAt ?? null) === null &&
+    (idea.deletedAt ?? null) === null &&
     idea.parentId === null &&
     idea.authorId !== authors.ownerId &&
     !authors.coauthorIds.includes(idea.authorId)
@@ -53,6 +64,7 @@ export function ideaAnswerWhere(authors: AuthorsLike): Prisma.IdeaWhereInput {
   return {
     parentId: null,
     hiddenAt: null,
+    deletedAt: null,
     authorId: { notIn: [authors.ownerId, ...authors.coauthorIds] },
   }
 }
@@ -71,9 +83,40 @@ export function authorsOf(story: AuthorsRow): AuthorsLike {
 
 /** What a list selects of each request's ideas: `TOP_LEVEL_IDEAS` keeps the replies out. */
 export const TOP_LEVEL_IDEAS = {
-  where: { parentId: null, hiddenAt: null },
+  where: { parentId: null, hiddenAt: null, deletedAt: null },
   select: { authorId: true },
 } satisfies Prisma.ContributionRequest$ideasArgs
+
+/**
+ * FR-5.9 — a request is ANSWERED while something answers it and OPEN again
+ * once nothing does. Called after an answer stops counting: an idea removed by
+ * its writer, or anything hidden after a report (and again when it is shown
+ * again). Until the 2026-10-24 final pass a "help me think" request whose only
+ * idea was removed stayed answered, and "Needs you" listed it with 0 ideas.
+ * Only OPEN and ANSWERED move; a resolved or closed request is left alone.
+ */
+export async function settleAnswered(
+  db: Pick<PrismaClient, 'contributionRequest' | 'idea' | 'suggestion'>,
+  requestId: string,
+): Promise<void> {
+  const request = await db.contributionRequest.findUnique({
+    where: { id: requestId },
+    select: { kind: true, state: true, storyboard: { select: AUTHORS_SELECT } },
+  })
+  if (!request || (request.state !== 'OPEN' && request.state !== 'ANSWERED')) return
+  const answered =
+    request.kind === 'UNBLOCK'
+      ? (await db.idea.count({
+          where: { requestId, ...ideaAnswerWhere(authorsOf(request.storyboard)) },
+        })) > 0
+      : (await db.suggestion.count({
+          where: { requestId, state: { in: ['SUBMITTED', 'STALE'] }, hiddenAt: null },
+        })) > 0
+  await db.contributionRequest.updateMany({
+    where: { id: requestId, state: answered ? 'OPEN' : 'ANSWERED' },
+    data: { state: answered ? 'ANSWERED' : 'OPEN' },
+  })
+}
 
 /**
  * A request row selected with `AUTHORS_SELECT` on its story and

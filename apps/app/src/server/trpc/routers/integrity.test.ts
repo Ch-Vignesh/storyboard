@@ -1536,6 +1536,15 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
       data: { visibility: 'PRIVATE', title: 'A new, private title' },
     })
 
+    // Nothing of the story is named. Their drafts on it stay listed, as
+    // drafts on a story they can no longer read, so they can be thrown away
+    // (2026-10-24 final pass).
+    const mine = await call.suggestion.listMine()
+    expect(mine.every((row) => row.unreadable && row.state === 'DRAFT')).toBe(true)
+    expect(JSON.stringify(mine)).not.toContain('A new, private title')
+    for (const row of mine) {
+      await call.suggestion.discardDraft({ suggestionId: row.id })
+    }
     expect(await call.suggestion.listMine()).toEqual([])
     const news = await call.request.withNews()
     expect(JSON.stringify(news)).not.toContain('A new, private title')
@@ -1732,6 +1741,7 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     ).rejects.toThrow(/not a draft of yours/u)
     expect(await helper.suggestion.discardDraft({ suggestionId: draftId })).toEqual({
       removed: true,
+      withdrawn: false,
     })
     expect(await db.suggestion.findUnique({ where: { id: draftId } })).toBeNull()
 
@@ -1743,6 +1753,17 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     await expect(helper.suggestion.discardDraft({ suggestionId: sentId })).rejects.toThrow(
       /withdrawn/u,
     )
+
+    // Sent once and taken back to update: withdrawn and kept, not deleted
+    // (2026-10-24 final pass).
+    await db.suggestion.update({ where: { id: sentId }, data: { state: 'DRAFT' } })
+    expect(await helper.suggestion.discardDraft({ suggestionId: sentId })).toEqual({
+      removed: false,
+      withdrawn: true,
+    })
+    expect(
+      await db.suggestion.findUniqueOrThrow({ where: { id: sentId }, select: { state: true } }),
+    ).toEqual({ state: 'WITHDRAWN' })
   })
 
   // Phase 14, item 6.6 — a draft started against old text can move its base;
@@ -1823,5 +1844,267 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     await expect(
       helper.suggestion.edit({ suggestionId: sentId, contentJson: prose('Too late.') }),
     ).rejects.toThrow(/started reading/u)
+  })
+
+  /**
+   * Decision 0013, the final pass's detective review (high): a contributor
+   * who erases the record of an accepted suggestion is named nowhere after.
+   * Only the credit line and the profile forgot them; the suggestion's page,
+   * the request page and the author's notification still named them.
+   */
+  it('names nobody once a contributor erases the record of an accepted suggestion', async () => {
+    await db.storyboard.update({ where: { id: storyboardId }, data: { visibility: 'PUBLIC' } })
+    const requestId = await aRequest()
+    const sent = await aSentSuggestion(requestId, 'erased', 'Words that stay in the draft.')
+    await (await as(owner)).suggestion.accept({ suggestionId: sent.suggestionId })
+    const credit = await db.credit.findFirstOrThrow({
+      where: { suggestionId: sent.suggestionId },
+      select: { id: true },
+    })
+    await sent.call.profile.eraseContribution({ creditId: credit.id })
+
+    const { createCallerFactory } = await import('../init')
+    const { appRouter } = await import('./_app')
+    const guest = createCallerFactory(appRouter)({
+      db,
+      session: null,
+      account: null,
+      headers: new Headers(),
+    })
+    const { publicId } = await db.suggestion.findUniqueOrThrow({
+      where: { id: sent.suggestionId },
+      select: { publicId: true },
+    })
+    const page = await guest.suggestion.get({ publicId })
+    expect(page.suggestion.contributor).toMatchObject({ username: null, displayName: null })
+    expect(JSON.stringify(page)).not.toContain(sent.writer.username)
+
+    const request = await db.contributionRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { publicId: true },
+    })
+    const listed = await guest.request.get({ publicId: request.publicId })
+    expect(JSON.stringify(listed)).not.toContain(sent.writer.username)
+
+    const received = await db.notification.findFirstOrThrow({
+      where: {
+        userId: owner.id,
+        type: 'SUGGESTION_RECEIVED',
+        payload: { path: ['suggestionId'], equals: sent.suggestionId },
+      },
+      select: { id: true, type: true, payload: true },
+    })
+    const { targetsFor } = await import('@/server/notification-targets')
+    expect((await targetsFor(db, owner.id, [received])).get(received.id)?.actor).toBeNull()
+  })
+
+  // Decision 0046 — somebody who blocked an owner gets no invitation from
+  // them, which came as a notification and an email (2026-10-26 final pass).
+  it('sends no invitation to somebody who has blocked the inviter', async () => {
+    const wary = await person('wary')
+    await (await as(wary)).block.set({ userId: owner.id, blocked: true })
+    await expect(
+      (await as(owner)).coauthor.invite({ storyboardId, username: wary.username }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(await db.collaborator.count({ where: { storyboardId, userId: wary.id } })).toBe(0)
+    expect(await db.notification.count({ where: { userId: wary.id } })).toBe(0)
+  })
+
+  /**
+   * The 2026-10-24 final pass on item 6.7. A change is a send, so a writer an
+   * author blocked cannot make one (decision 0046). A hidden or reported
+   * suggestion waits on a moderator, who must read what was reported. An
+   * author reading what they sent themselves has not opened it. And the
+   * conditional write itself refuses a row opened after its caller read it.
+   */
+  it('changes no suggestion that is blocked, hidden, reported, or opened since it was read', async () => {
+    await db.storyboard.update({ where: { id: storyboardId }, data: { visibility: 'PUBLIC' } })
+    const change = { contentJson: prose('The harbour had been empty for a year, and nobody came.') }
+    const textOf = async (id: string) =>
+      (await db.suggestion.findUniqueOrThrow({ where: { id }, select: { contentText: true } }))
+        .contentText
+
+    const blocked = await aSentSuggestion(await aRequest(), 'blocked', 'It was empty.')
+    await (await as(owner)).block.set({ userId: blocked.writer.id, blocked: true })
+    await expect(
+      blocked.call.suggestion.edit({ suggestionId: blocked.suggestionId, ...change }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(await textOf(blocked.suggestionId)).toBe('It was empty.')
+
+    const hidden = await aSentSuggestion(await aRequest(), 'hidden', 'It was empty.')
+    await db.suggestion.update({
+      where: { id: hidden.suggestionId },
+      data: { hiddenAt: new Date() },
+    })
+    await expect(
+      hidden.call.suggestion.edit({ suggestionId: hidden.suggestionId, ...change }),
+    ).rejects.toThrow(/can't change now/u)
+
+    const reported = await aSentSuggestion(await aRequest(), 'reported', 'It was empty.')
+    const reporter = await person('reporter')
+    await db.report.create({
+      data: {
+        reporterId: reporter.id,
+        targetType: 'SUGGESTION',
+        targetId: reported.suggestionId,
+        category: 'ABUSE',
+      },
+    })
+    await expect(
+      reported.call.suggestion.edit({ suggestionId: reported.suggestionId, ...change }),
+    ).rejects.toThrow(/can't change now/u)
+    expect(await textOf(reported.suggestionId)).toBe('It was empty.')
+
+    // The owner's own suggestion, read by the owner, stays unopened and theirs to change.
+    const ownRequest = await aRequest()
+    const author = await as(owner)
+    const draft = await author.suggestion.startDraft({ requestId: ownRequest })
+    await author.suggestion.saveDraft({ suggestionId: draft.id, contentJson: prose('Mine.') })
+    const sent = await author.suggestion.submit({ suggestionId: draft.id })
+    await author.suggestion.get({ publicId: sent.publicId })
+    await author.suggestion.edit({ suggestionId: draft.id, ...change })
+    expect(await textOf(draft.id)).toContain('nobody came')
+
+    // Read unopened, opened by an author, then written: nothing changes.
+    const raced = await aSentSuggestion(await aRequest(), 'raced', 'It was empty.')
+    await db.suggestion.update({
+      where: { id: raced.suggestionId },
+      data: { openedAt: new Date() },
+    })
+    const { applySuggestionEdit } = await import('./suggestion')
+    const { count } = await applySuggestionEdit(db, raced.suggestionId, raced.writer.id, {
+      contentText: 'Too late.',
+    })
+    expect(count).toBe(0)
+    expect(await textOf(raced.suggestionId)).toBe('It was empty.')
+  })
+
+  /**
+   * The 2026-10-26 final pass. Two chapters removed at once each counted the
+   * other as still there, and the version was left with none; and a chapter
+   * removed again from a stale tab took a new removal time, so bringing it
+   * back left its sections behind. In a version of its own, not the main draft.
+   */
+  it('keeps a version one chapter when two are removed at once, and removes a chapter once', async () => {
+    const author = await as(owner)
+    const versionWith = async (count: number) => {
+      const version = await db.version.create({
+        data: {
+          storyboardId,
+          name: `Removals ${String(count)}`,
+          isMain: false,
+          createdById: owner.id,
+        },
+        select: { id: true },
+      })
+      const chapters = []
+      for (let order = 0; order < count; order += 1) {
+        const chapter = await db.chapter.create({
+          data: {
+            versionId: version.id,
+            lineageId: randomUUID(),
+            order,
+            title: `C${String(order)}`,
+          },
+          select: { id: true },
+        })
+        await db.section.create({
+          data: { chapterId: chapter.id, lineageId: randomUUID(), order: 0, wordCount: 0 },
+        })
+        chapters.push(chapter)
+      }
+      return { versionId: version.id, chapters }
+    }
+
+    const pair = await versionWith(2)
+    const results = await Promise.allSettled(
+      pair.chapters.map((chapter) => author.chapter.delete({ chapterId: chapter.id })),
+    )
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(await db.chapter.count({ where: { versionId: pair.versionId, deletedAt: null } })).toBe(
+      1,
+    )
+
+    const three = await versionWith(3)
+    const target = three.chapters[0]!
+    await author.chapter.delete({ chapterId: target.id })
+    const removedAt = async () =>
+      (
+        await db.chapter.findUniqueOrThrow({
+          where: { id: target.id },
+          select: { deletedAt: true },
+        })
+      ).deletedAt
+    const first = await removedAt()
+    await expect(author.chapter.delete({ chapterId: target.id })).rejects.toThrow(
+      /removed already/u,
+    )
+    expect(await removedAt()).toEqual(first)
+  })
+
+  /**
+   * The 2026-10-26 final pass on item 5.3: the restore dialog's impact check
+   * takes the versions the restore does, the whole chain the text stands on.
+   * It took this row's own only, so in a copied version it failed for every
+   * version from before the copy, and the dialog never named anyone.
+   */
+  it('works out a restore’s impact for any version on the section’s chain', async () => {
+    const { sectionId, revisionId } = await aSection(70, 'Before the copy.')
+    const author = await as(owner)
+    const main = await db.version.findFirstOrThrow({
+      where: { storyboardId, isMain: true },
+      select: { id: true },
+    })
+    const alternate = await author.version.create({ baseVersionId: main.id, name: 'Chain' })
+    const { lineageId } = await db.section.findUniqueOrThrow({
+      where: { id: sectionId },
+      select: { lineageId: true },
+    })
+    const copy = await db.section.findFirstOrThrow({
+      where: { lineageId, chapter: { versionId: alternate.id } },
+      select: { id: true },
+    })
+    await expect(author.section.restoreImpact({ sectionId: copy.id, revisionId })).resolves.toEqual(
+      { told: [] },
+    )
+    await expect(
+      author.section.restoreImpact({ sectionId: copy.id, revisionId: 'not-on-the-chain' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  /**
+   * The 2026-10-26 final pass on item 1.1: an alternate deleted in one tab
+   * while another promotes it. `delete` read the version as an alternate and
+   * then wrote without that condition, so a promotion landing in between
+   * removed the new main draft. Its write is now conditional; this calls it
+   * on a version promoted after the read. Last in the file, and it puts the
+   * original main draft back, because it moves the shared story's main.
+   */
+  it('removes no version that became the main draft after it was read', async () => {
+    const author = await as(owner)
+    const { markAlternateRemoved } = await import('./version')
+    const mainNow = () =>
+      db.version.findFirstOrThrow({
+        where: { storyboardId, isMain: true },
+        select: { id: true },
+      })
+    const original = await mainNow()
+    const alternate = await author.version.create({ baseVersionId: original.id, name: 'Raced' })
+    try {
+      await author.version.promoteToMain({ versionId: alternate.id })
+      expect(await markAlternateRemoved(db, alternate.id, new Date())).toBe(false)
+      const promoted = await db.version.findUniqueOrThrow({
+        where: { id: alternate.id },
+        select: { isMain: true, deletedAt: true },
+      })
+      expect(promoted).toEqual({ isMain: true, deletedAt: null })
+      // Still an alternate, it goes as before.
+      await author.version.promoteToMain({ versionId: original.id })
+      expect(await markAlternateRemoved(db, alternate.id, new Date())).toBe(true)
+    } finally {
+      if ((await mainNow()).id !== original.id) {
+        await author.version.promoteToMain({ versionId: original.id })
+      }
+    }
   })
 })

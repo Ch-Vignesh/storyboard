@@ -12,7 +12,7 @@ import {
   visibleStoryboardsWhere,
 } from '@/lib/authz/guard'
 import { mainDraftOwnShare } from '@/server/own-share'
-import { DAILY_LIMITS, SOFT_DELETE_GRACE_DAYS } from '@/lib/schemas/constants'
+import { DAILY_LIMITS, SOFT_DELETE_GRACE_DAYS, STORY_BROWSE_PAGE } from '@/lib/schemas/constants'
 import { STORY_NOT_FOUND } from '@/lib/authz'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 import {
@@ -709,7 +709,18 @@ export const storyboardRouter = createTRPCRouter({
 
   /** Titles and authors only — FR-11.6 defers anything more than this. */
   browse: publicProcedure
-    .input(z.object({ take: z.number().int().min(1).max(50).default(20) }).optional())
+    .input(
+      z
+        .object({
+          take: z
+            .number()
+            .int()
+            .min(1)
+            .max(STORY_BROWSE_PAGE.max)
+            .default(STORY_BROWSE_PAGE.default),
+        })
+        .optional(),
+    )
     .query(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
       return ctx.db.storyboard.findMany({

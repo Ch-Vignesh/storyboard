@@ -133,6 +133,9 @@ test('closing, going private, passing, withdrawing, restoring, joining and remov
   )
   await dialog().getByRole('button', { name: 'Remove the chapter and 1 section' }).click()
   await expect(dialog()).toBeHidden()
+  // In the Removed list below at once, where the dialog said it would be; it
+  // appeared only after a reload (2026-10-26 final pass).
+  await expect(page.getByText(/^Chapter · 1 section/u)).toBeVisible()
   await page.goto(requestPath)
   await expect(page.getByRole('button', { name: /close this without accepting/i })).toHaveCount(0)
   // And not opened again on a section that is gone (found by this flow).

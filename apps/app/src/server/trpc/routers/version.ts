@@ -1,10 +1,14 @@
-import type { Prisma } from '@storyboard/db'
+import type { Prisma, PrismaClient } from '@storyboard/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 
 import { loadStoryboard, loadVersion } from '@/lib/authz/guard'
 import { logger } from '@/lib/logger'
-import { VERSION_EVENTS_SHOWN, VERSION_NAME_MAX_CHARS } from '@/lib/schemas/constants'
+import {
+  BULK_WRITE_TRANSACTION,
+  VERSION_EVENTS_SHOWN,
+  VERSION_NAME_MAX_CHARS,
+} from '@/lib/schemas/constants'
 import { formatInZone, timeZoneFromHeaders } from '@/lib/time-zone'
 import { recordEvent } from '@/server/audit'
 import { closeRequest, closeRequestsOnSections } from '@/server/close-requests'
@@ -130,9 +134,12 @@ export const versionRouter = createTRPCRouter({
           select: { id: true },
         })
 
+        // A whole manuscript, row by row, like a spin-off's copy, so with the
+        // same limits: under Prisma's default five seconds a long novel could
+        // never have an alternate version (2026-10-26 final pass).
         await copyTree(tx, versionId, version.id)
         return version
-      })
+      }, BULK_WRITE_TRANSACTION)
 
       log.info(
         { event: 'version.create', versionId: created.id, storyboardId, from: versionId },
@@ -322,7 +329,13 @@ export const versionRouter = createTRPCRouter({
         // The version itself is marked (phase 14, item 1.1). Without this it
         // stayed listed as "0 chapters", was offered in Compare, and could be
         // promoted.
-        await tx.version.update({ where: { id: versionId }, data: { deletedAt: now } })
+        if (!(await markAlternateRemoved(tx, versionId, now))) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'That version became the main draft a moment ago, so it cannot be removed. Promote another version first.',
+          })
+        }
         const chapters = await tx.chapter.findMany({
           where: { versionId, deletedAt: null },
           select: { id: true },
@@ -352,6 +365,25 @@ export const versionRouter = createTRPCRouter({
 })
 
 export { copyTree } from '@/server/tree'
+
+/**
+ * Item 1.1 — marks an alternate removed, only if it is still an alternate at
+ * the moment of writing. `delete` checked `isMain` before its transaction and
+ * then wrote unconditionally, so a promotion landing in between removed the
+ * new main draft (2026-10-26 final pass); `promoteToMain` already guarded the
+ * other order. False when it was promoted, or removed, in the meantime.
+ */
+export async function markAlternateRemoved(
+  db: Pick<PrismaClient, 'version'>,
+  versionId: string,
+  now: Date,
+): Promise<boolean> {
+  const { count } = await db.version.updateMany({
+    where: { id: versionId, isMain: false, deletedAt: null },
+    data: { deletedAt: now },
+  })
+  return count === 1
+}
 
 /**
  * FR-10.2 with FR-5.1 — the open requests on the draft that was main, moved

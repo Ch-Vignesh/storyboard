@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server'
 import type { Metadata } from 'next'
 import Link from '@/components/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 
 import { PASS_CHIPS, suggestionStateLabel, waitsOnClosedRequest } from '@/lib/schemas/help'
 import { CopyLink } from '@/components/copy-link'
@@ -37,6 +37,11 @@ export default async function SuggestionPage({ params }: Params) {
   }
 
   const { suggestion, permissions, proofRevisionId } = data
+  // At its own request's and story's address only, as the request page.
+  const own = suggestion.request
+  if (own.storyboard.slug !== slug || own.publicId !== requestPublicId) {
+    redirect(`/s/${own.storyboard.slug}/help/${own.publicId}/s/${suggestionPublicId}`)
+  }
   // Hidden after a report (item 2.7, decision 0045): no comparison for anyone
   // but the writer and a moderator; the page says what happened instead.
   const comparison = suggestion.redacted

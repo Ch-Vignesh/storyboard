@@ -6,6 +6,7 @@ import { loadStoryboard } from '@/lib/authz/guard'
 import { logger } from '@/lib/logger'
 import { COAUTHORS_MAX, DAILY_LIMITS, USERNAME_CHARS } from '@/lib/schemas/constants'
 import { afterCommit } from '@/server/after-commit'
+import { hasBlocked } from '@/server/blocks'
 import { DAY_MS, enforce, key, whenToRetry } from '@/server/limits'
 
 import { activeProcedure, actorFrom, createTRPCRouter, protectedProcedure } from '../init'
@@ -92,6 +93,15 @@ export const coauthorRouter = createTRPCRouter({
       }
       if (invitee.id === resource.ownerId) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'This is your own story.' })
+      }
+      // Decision 0046 — somebody who blocked the inviter hears nothing from
+      // them, and an invitation came by notification and email (2026-10-26
+      // final pass). Told plainly, as a blocked helper is on the story.
+      if (await hasBlocked(ctx.db, invitee.id, ownerId)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `@${input.username} isn't taking invitations from you.`,
+        })
       }
 
       const existing = await ctx.db.collaborator.findUnique({

@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
+import { readTimeZone } from '@/lib/dates'
 import { nameOf } from '@/lib/people'
 import { caller } from '@/trpc/server'
 
@@ -62,6 +63,7 @@ export default async function StoryboardSettingsPage({ params }: Params) {
         publicFrom={storyboard.publicFrom}
         finished={storyboard.state === 'FINISHED'}
         finishedAt={storyboard.finishedAt}
+        timeZone={await readTimeZone()}
         // What a co-author is told about the parts that are not theirs.
         owner={permissions.canSetVisibility ? null : nameOf(storyboard.owner)}
         // An erased contributor has no name to show in the confirmation, so

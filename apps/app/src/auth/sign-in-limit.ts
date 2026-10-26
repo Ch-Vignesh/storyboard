@@ -3,7 +3,7 @@ import 'server-only'
 import type { PrismaClient } from '@storyboard/db'
 
 import { AUTH_LIMITS, SIGN_IN_WINDOW_MINUTES } from '@/lib/schemas/constants'
-import { MINUTE_MS, consume, key } from '@/server/limits'
+import { HOUR_MS, MINUTE_MS, consume, key } from '@/server/limits'
 
 /**
  * FR-13.3 for sign-in, which had no limit at all until the phase 12 audit: a
@@ -34,5 +34,12 @@ export async function signInAllowed(
     limit: AUTH_LIMITS.signInsPerAddressAndClient,
     windowMs,
   })
-  return forAddress.ok
+  if (!forAddress.ok) return false
+  // One address from everywhere, so that guesses spread across many clients
+  // still meet a ceiling.
+  const toAddress = await consume(db, key.signInsTo(email), {
+    limit: AUTH_LIMITS.signInsPerAddressPerHour,
+    windowMs: HOUR_MS,
+  })
+  return toAddress.ok
 }

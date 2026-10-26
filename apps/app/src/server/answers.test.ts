@@ -29,11 +29,15 @@ describe('an idea answer (FR-5.9, FR-6.9)', () => {
       { authorId: 'another', parentId: null },
       // Hidden after a report (item 2.7): no longer an answer.
       { authorId: 'third', parentId: null, hiddenAt: new Date('2026-10-18T00:00:00Z') },
+      // Removed by its writer (item 6.8): no longer an answer either; it was
+      // counted until the 2026-10-24 final pass found it.
+      { authorId: 'fourth', parentId: null, deletedAt: new Date('2026-10-18T00:00:00Z') },
     ]
     expect(countIdeaAnswers(ideas, authors)).toBe(2)
     expect(ideaAnswerWhere(authors)).toEqual({
       parentId: null,
       hiddenAt: null,
+      deletedAt: null,
       authorId: { notIn: ['owner', 'co'] },
     })
   })

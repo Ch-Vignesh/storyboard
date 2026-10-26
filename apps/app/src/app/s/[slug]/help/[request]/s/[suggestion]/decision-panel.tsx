@@ -119,6 +119,7 @@ export function DecisionPanel({
             title="Go a different way?"
             confirmLabel="Pass on it"
             busy={pass.isPending}
+            error={pass.error}
             onCancel={() => setPassing(false)}
             onConfirm={() => pass.mutate({ suggestionId, reason: chip ?? undefined })}
           >

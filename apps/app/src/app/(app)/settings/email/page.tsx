@@ -26,9 +26,10 @@ export default async function ConfirmEmailPage({ searchParams }: Props) {
   const tokenValue = typeof token === 'string' ? token : ''
 
   let newEmail: string | null = null
+  let hasPassword = true
   if (tokenValue) {
     try {
-      newEmail = (await caller.auth.checkEmailChange({ token: tokenValue })).newEmail
+      ;({ newEmail, hasPassword } = await caller.auth.checkEmailChange({ token: tokenValue }))
     } catch (caught) {
       if (!(caught instanceof TRPCError)) throw caught
     }
@@ -59,8 +60,10 @@ export default async function ConfirmEmailPage({ searchParams }: Props) {
       </h1>
       <p className="mt-3 max-w-measure text-[15px] leading-relaxed text-ink-soft">
         It becomes the address you sign in with and the one we write to. Every device signed in to
-        the account is signed out, and you sign in again with the new address and the same password.
-        The old address is told.
+        the account is signed out, and the old address is told.{' '}
+        {hasPassword
+          ? 'You sign in again with the new address and the same password.'
+          : 'This account has no password: sign in again with Google if the new address is a Google account, or choose a password with “Forgot your password?” on the sign-in page.'}
       </p>
       <ConfirmEmailChange token={tokenValue} newEmail={newEmail} />
     </main>

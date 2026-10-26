@@ -174,16 +174,17 @@ test.describe('the reader at 120,000 words (NFR-1)', () => {
     await expect(page.getByRole('navigation', { name: 'Contents' })).toContainText('Chapter 24')
   })
 
-  test("first contentful paint under Chrome's Fast 3G preset is measured", async ({
+  test("first contentful paint under Chrome's Fast 3G preset is inside NFR-1's budget", async ({
     page,
     browserName,
   }) => {
     test.skip(browserName !== 'chromium', 'network throttling is a Chromium protocol')
     // NFR-1's stated condition. DevTools' "Fast 3G": 1.6 Mbit/s down and
-    // 750 kbit/s up at 90%, and 562.5 ms of added latency. Measured and
-    // reported, not asserted: item 7.4 asks for the budget to be asserted
-    // only once the build meets it, and never for the measurement to be
-    // weakened until it does.
+    // 750 kbit/s up at 90%, and 562.5 ms of added latency. Item 7.4 asked for
+    // the budget to be asserted once the build met it. It did on 2026-10-26,
+    // when the stylesheet moved into the page (`inlineCss` in next.config.ts):
+    // 1,504 ms before, 672 ms after, the page no longer waiting a second
+    // round trip for its styles.
     const session = await page.context().newCDPSession(page)
     await session.send('Network.enable')
     await session.send('Network.emulateNetworkConditions', {
@@ -202,7 +203,7 @@ test.describe('the reader at 120,000 words (NFR-1)', () => {
     test.info().annotations.push({ type: 'fcp-fast-3g-ms', description: String(Math.round(fcp)) })
     // Printed so every run shows the figure the tracker records.
     console.warn(`first contentful paint, Fast 3G: ${String(Math.round(fcp))} ms`)
-    expect(Number.isFinite(fcp)).toBe(true)
+    expect(fcp).toBeLessThan(1_200)
   })
 
   test('paints inside the NFR-1 budget and drops no frame when changing chapter', async ({

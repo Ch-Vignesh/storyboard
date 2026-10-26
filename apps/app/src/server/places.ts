@@ -35,14 +35,29 @@ export async function mainDraftPlaces(
   storyboardId: string,
   lineages: readonly string[],
 ): Promise<Map<string, Place>> {
-  return placesInMainDrafts(db, [storyboardId], lineages)
+  const places = await placesInMainDrafts(db, [storyboardId], lineages)
+  const byLineage = new Map<string, Place>()
+  for (const lineage of lineages) {
+    const place = places.get(placeKey(storyboardId, lineage))
+    if (place) byLineage.set(lineage, place)
+  }
+  return byLineage
+}
+
+/**
+ * The key `placesInMainDrafts` answers by. A lineage alone is not enough: a
+ * spin-off keeps its original's lineage ids (`copyTree`), so on a profile with
+ * credits on both, one map keyed by lineage linked both credits into one of
+ * the stories (2026-10-24 final pass).
+ */
+export function placeKey(storyboardId: string, lineageId: string): string {
+  return `${storyboardId}:${lineageId}`
 }
 
 /**
  * The same across several stories at once, in three queries however many
  * there are: a profile's page of credits spans many stories (item 6.10), and
- * asking each in turn would be three queries a story. Lineages are unique
- * across stories, so one map answers for all of them.
+ * asking each in turn would be three queries a story. Keyed by `placeKey`.
  */
 export async function placesInMainDrafts(
   db: PrismaClient,
@@ -76,7 +91,12 @@ export async function placesInMainDrafts(
     }),
     db.section.findMany({
       where: { chapter: inMainDraft, deletedAt: null, mergedIntoId: { not: null } },
-      select: { id: true, lineageId: true, mergedIntoId: true },
+      select: {
+        id: true,
+        lineageId: true,
+        mergedIntoId: true,
+        chapter: { select: { version: { select: { storyboardId: true } } } },
+      },
     }),
   ])
 
@@ -99,14 +119,15 @@ export async function placesInMainDrafts(
         path: `/s/${slug}/c/${String(chapterNumber)}/${String(sectionIndex + 1)}`,
       }
       byId.set(section.id, place)
-      places.set(section.lineageId, place)
+      places.set(placeKey(storyboardId, section.lineageId), place)
     }
   }
 
   const intoOf = new Map(joined.map((section) => [section.id, section.mergedIntoId]))
   const wanted = new Set(lineages)
   for (const section of joined) {
-    if (!wanted.has(section.lineageId) || places.has(section.lineageId)) continue
+    const key = placeKey(section.chapter.version.storyboardId, section.lineageId)
+    if (!wanted.has(section.lineageId) || places.has(key)) continue
     let into = section.mergedIntoId
     // A join can only point up the reading order, so the chain ends; the
     // bound is for data nobody meant to write.
@@ -114,7 +135,7 @@ export async function placesInMainDrafts(
       into = intoOf.get(into) ?? null
     }
     const place = into ? byId.get(into) : undefined
-    if (place) places.set(section.lineageId, place)
+    if (place) places.set(key, place)
   }
   return places
 }

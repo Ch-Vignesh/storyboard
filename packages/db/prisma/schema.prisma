@@ -906,14 +906,19 @@ model Credit {
 // ---------------------------------------------------------------- plumbing
 
 model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      NotificationType
-  payload   Json
-  readAt    DateTime?
-  emailedAt DateTime?
-  createdAt DateTime         @default(now())
+  id            String           @id @default(cuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type          NotificationType
+  payload       Json
+  readAt        DateTime?
+  emailedAt     DateTime?
+  /// FR-12.3 — sends of this row's email that failed. Past
+  /// `EMAIL_SEND_ATTEMPTS` it is given up (its in-app row is the delivery that
+  /// cannot fail), and the queue takes the fewest first, so a row that keeps
+  /// failing no longer stops every run behind it (2026-10-26 final pass).
+  emailAttempts Int              @default(0)
+  createdAt     DateTime         @default(now())
 
   @@index([userId, readAt])
   @@index([userId, createdAt])

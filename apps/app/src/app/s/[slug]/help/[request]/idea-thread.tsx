@@ -278,6 +278,7 @@ export function IdeaThread({
                 {/* OD-5 / decision 0010 — one per request. */}
                 {canDecide &&
                 !idea.hidden &&
+                !idea.deletedAt &&
                 !idea.markedHelpful &&
                 !hasHelpfulIdea &&
                 !authorIds.includes(idea.author.id) ? (
@@ -437,6 +438,7 @@ export function IdeaThread({
         confirmLabel="Remove it"
         destructive
         busy={remove.isPending}
+        error={remove.error}
         onCancel={() => setRemoving(null)}
         onConfirm={() => {
           if (removing) remove.mutate({ ideaId: removing.id })

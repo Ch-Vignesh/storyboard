@@ -13,21 +13,64 @@ export { detectSections, previewOf, HARD_SPLIT_WORDS } from './sections'
 export { countWords, isSceneBreakLine } from './extract/blocks'
 export { SuspiciousArchiveError, MAX_UNCOMPRESSED_BYTES } from './extract/zip-guard'
 
+/**
+ * A text file's characters, in the encoding it says it is in. Every text
+ * format was read as UTF-8, so a file Notepad saved as "Unicode" (UTF-16, a
+ * NUL beside every letter) reached the database, which refuses NULs, and the
+ * writer was told something went wrong on our side (2026-10-26 final pass,
+ * the detective review). UTF-16 is known by its byte-order mark, as Notepad
+ * writes it.
+ */
+export function decodeText(file: Buffer): string {
+  if (file[0] === 0xef && file[1] === 0xbb && file[2] === 0xbf) {
+    return file.subarray(3).toString('utf8')
+  }
+  if (file[0] === 0xff && file[1] === 0xfe) return file.subarray(2).toString('utf16le')
+  if (file[0] === 0xfe && file[1] === 0xff) {
+    // Big-endian: swapped into little-endian, which Node reads.
+    const body = Buffer.from(file.subarray(2, 2 + ((file.length - 2) & ~1)))
+    return body.swap16().toString('utf16le')
+  }
+  return file.toString('utf8')
+}
+
+const NUL = String.fromCharCode(0)
+
+/**
+ * NUL can be stored nowhere in Postgres, and is never part of a manuscript:
+ * an RTF Unicode escape or an FDX character reference of zero decodes to one.
+ * Taken out of every string in the extracted document.
+ */
+function withoutNul<T>(value: T): T {
+  if (typeof value === 'string') return value.replaceAll(NUL, '') as T
+  if (Array.isArray(value)) return value.map((item: unknown) => withoutNul(item)) as T
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, withoutNul(item)]),
+    ) as T
+  }
+  return value
+}
+
 /** Reads a file into the one shape everything downstream works on. */
 export async function extract(format: Format, file: Buffer): Promise<NormalisedDoc> {
+  return withoutNul(await extractRaw(format, file))
+}
+
+async function extractRaw(format: Format, file: Buffer): Promise<NormalisedDoc> {
   switch (format) {
     case 'docx':
       return extractDocx(file)
     case 'md':
-      return extractMarkdown(file.toString('utf8'))
+      return extractMarkdown(decodeText(file))
     case 'rtf':
-      return extractRtf(file.toString('utf8'))
+      return extractRtf(decodeText(file))
     case 'fountain':
-      return extractFountain(file.toString('utf8'))
+      return extractFountain(decodeText(file))
     case 'fdx':
-      return extractFdx(file.toString('utf8'))
+      return extractFdx(decodeText(file))
     case 'txt':
-      return extractPlainText(file.toString('utf8'))
+      return extractPlainText(decodeText(file))
   }
 }
 

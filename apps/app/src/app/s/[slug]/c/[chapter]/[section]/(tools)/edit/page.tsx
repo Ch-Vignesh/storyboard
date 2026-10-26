@@ -123,13 +123,6 @@ export default async function EditSectionPage({ params, searchParams }: Params) 
         returnHref={returnHref}
         previous={previous ? { href: previous.href, label: previous.label } : null}
         next={next ? { href: next.href, label: next.label } : null}
-        // Item 8.5 — what this opened on, so a newer copy on the device is offered back.
-        savedAt={
-          (draftIsBehind || !detail.draft
-            ? head?.createdAt
-            : detail.draft.updatedAt
-          )?.toISOString() ?? null
-        }
         contentsHref={`/s/${slug}/contents${suffix}`}
         // Item 8.5 — whose words the device keeps: on a shared computer the
         // next person to sign in is not offered them.

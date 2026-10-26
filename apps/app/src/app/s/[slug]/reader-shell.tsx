@@ -20,6 +20,7 @@ import { flavourForStoryType } from '@/lib/doc/schema'
 import { nameOf, type Person } from '@/lib/people'
 import type { Reading } from '@/lib/reading'
 import { REQUEST_KINDS } from '@/lib/schemas/help'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 import type { AppRouter } from '@/server/trpc/routers/_app'
 import type { inferRouterOutputs } from '@trpc/server'
@@ -60,6 +61,7 @@ export function ReaderShell({
   lastWritten,
   edition,
   publishedNote,
+  timeZone,
 }: {
   data: StoryboardData
   signedIn: boolean
@@ -83,6 +85,8 @@ export function ReaderShell({
   edition?: { line: string; note: string | null; base: string; current: boolean } | null
   /** Item 7b.2 — on the working draft, the published edition there is. */
   publishedNote?: { text: string; href: string } | null
+  /** Item 1.18 — the reader's zone, so the server and the browser draw the same days. */
+  timeZone: string
 }) {
   const trpc = useTRPC()
   const { storyboard, chapters, permissions, historyVisibleFrom, privateStretches, version } = data
@@ -219,20 +223,23 @@ export function ReaderShell({
       <header className="sticky top-0 z-10 border-b border-rule bg-paper/95 backdrop-blur print:hidden">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-6 py-3 min-[1100px]:max-w-[1360px]">
           {header}
-          <div className="flex items-center gap-3">
-            {/* Item 4.3 — below `md` everything but the one primary action
-                folds behind "More"; from `md` up this is the row it was. */}
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {/* Item 4.3 — below `xl` everything but the one primary action
+                folds behind "More"; from `xl` up this is the row it was. It
+                folded below `md`, and an author's row, a dozen buttons and
+                the account, scrolled a tablet and a 1024 px laptop sideways
+                (2026-10-26 final pass). It may wrap, too, beside a long title. */}
             {permissions.canOpenRequest && !quiet ? (
-              <Button asChild variant="ghost" size="sm" className="md:hidden">
+              <Button asChild variant="ghost" size="sm" className="xl:hidden">
                 <Link href={`/s/${storyboard.slug}/help/new`}>Ask for help</Link>
               </Button>
             ) : null}
             {!signedIn ? (
-              <Button asChild variant="primary" size="sm" className="md:hidden">
+              <Button asChild variant="primary" size="sm" className="xl:hidden">
                 <Link href={`/signin?next=/s/${storyboard.slug}`}>Sign in to help</Link>
               </Button>
             ) : null}
-            <HeaderMenu label="More" from="md">
+            <HeaderMenu label="More" from="xl">
               {/* NFR-5 (item 7.5) — for a guest too, kept on their device. */}
               <ReadingControls initial={reading} signedIn={signedIn} />
               <Button asChild variant="ghost" size="sm">
@@ -266,7 +273,7 @@ export function ReaderShell({
                 </Button>
               ) : null}
               {permissions.canOpenRequest && !quiet ? (
-                <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
+                <Button asChild variant="ghost" size="sm" className="hidden xl:inline-flex">
                   <Link href={`/s/${storyboard.slug}/help/new`}>Ask for help</Link>
                 </Button>
               ) : null}
@@ -290,7 +297,7 @@ export function ReaderShell({
               ) : null}
               {/* FR-1.2 — the account wall sits in front of helping, not reading. */}
               {!signedIn ? (
-                <Button asChild variant="primary" size="sm" className="hidden md:inline-flex">
+                <Button asChild variant="primary" size="sm" className="hidden xl:inline-flex">
                   <Link href={`/signin?next=/s/${storyboard.slug}`}>Sign in to help</Link>
                 </Button>
               ) : null}
@@ -427,7 +434,7 @@ export function ReaderShell({
           ) : null}
 
           {/* FR-10.4 to FR-10.6 — where this came from, and who took it on. */}
-          <LineageBanner storyboardId={storyboard.id} slug={storyboard.slug} />
+          <LineageBanner storyboardId={storyboard.id} slug={storyboard.slug} timeZone={timeZone} />
 
           {/* FR-14.5 — as the author wrote it, unverified and unendorsed. It
               was stored and exported and never shown, until the 2026-10-16
@@ -444,13 +451,8 @@ export function ReaderShell({
           {/* Decision 0007 — say so rather than letting history look incomplete. */}
           {historyVisibleFrom ? (
             <p className="mb-8 max-w-measure border-l-2 border-rule py-1 pl-4 text-[12.5px] leading-relaxed text-ink-faint">
-              This story was private until{' '}
-              {historyVisibleFrom.toLocaleDateString('en-GB', {
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric',
-              })}
-              . Versions written before then are visible to its authors only.
+              This story was private until {formatInZone(historyVisibleFrom, 'long', timeZone)}.
+              Versions written before then are visible to its authors only.
             </p>
           ) : null}
           {/* Decision 0039 — and so was what was written while it was private again. */}
@@ -460,7 +462,7 @@ export function ReaderShell({
               {privateStretches
                 .map(
                   (stretch) =>
-                    `from ${stretch.from.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} to ${stretch.to.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+                    `from ${formatInZone(stretch.from, 'long', timeZone)} to ${formatInZone(stretch.to, 'long', timeZone)}`,
                 )
                 .join(', and ')}
               . Versions written then are visible to its authors only.
@@ -472,11 +474,7 @@ export function ReaderShell({
             <p className="mb-8 max-w-measure text-[12.5px] leading-relaxed text-ink-faint">
               Finished
               {storyboard.finishedAt
-                ? ` ${storyboard.finishedAt.toLocaleDateString('en-GB', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })}`
+                ? ` ${formatInZone(storyboard.finishedAt, 'long', timeZone)}`
                 : ''}
               .
             </p>

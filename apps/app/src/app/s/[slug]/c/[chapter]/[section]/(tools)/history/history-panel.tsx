@@ -279,6 +279,7 @@ export function HistoryPanel({
         title="Restore this version?"
         confirmLabel="Restore this version"
         busy={restore.isPending || restoreImpact.isLoading}
+        error={restore.error ?? restoreImpact.error}
         onCancel={() => {
           setRestoring(null)
           setReason(null)

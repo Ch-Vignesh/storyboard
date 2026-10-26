@@ -6,7 +6,7 @@ import Link from '@/components/link'
 import { useRouter } from 'next/navigation'
 
 import { STORY_TYPE_LABELS } from '@/lib/schemas/storyboard'
-import { lastWrittenWords } from '@/lib/time-zone'
+import { formatInZone, lastWrittenWords } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
 /**
@@ -81,7 +81,7 @@ export function WritingRegion({ timeZone }: { timeZone: string }) {
         </ul>
       )}
 
-      <RecentlyDeleted />
+      <RecentlyDeleted timeZone={timeZone} />
     </section>
   )
 }
@@ -91,7 +91,7 @@ export function WritingRegion({ timeZone }: { timeZone: string }) {
  * 2026-10-16 spec review it vanished from here the moment it was deleted, and
  * nothing anywhere could bring it back. Shown only when there is one.
  */
-function RecentlyDeleted() {
+function RecentlyDeleted({ timeZone }: { timeZone: string }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const router = useRouter()
@@ -121,8 +121,7 @@ function RecentlyDeleted() {
                 {story.title}
               </span>
               <span className="mt-0.5 block text-[12.5px] text-ink-faint">
-                Removed for good after{' '}
-                {story.goneAfter.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}
+                Removed for good after {formatInZone(story.goneAfter, 'dayMonth', timeZone)}
               </span>
             </span>
             <Button

@@ -25,6 +25,7 @@ import {
 } from '@/lib/schemas/storyboard'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { requestsSentence } from '@/lib/impact-words'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
 import { FinishedSwitch } from './finished-switch'
@@ -47,6 +48,7 @@ export function SettingsForm({
   contributors,
   genres,
   genreIds: initialGenreIds,
+  timeZone,
 }: {
   storyboardId: string
   slug: string
@@ -70,6 +72,8 @@ export function SettingsForm({
   /** Every genre, and this story's (FR-2.1). */
   genres: Genre[]
   genreIds: string[]
+  /** Item 1.18 — the reader's zone, so the server and the browser draw the same days. */
+  timeZone: string
 }) {
   const trpc = useTRPC()
   const router = useRouter()
@@ -316,7 +320,7 @@ export function SettingsForm({
                 switch, not after. */}
             <p className="mt-3 text-[12.5px] leading-relaxed text-ink-faint">
               {publicFrom
-                ? `Versions written before ${publicFrom.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} stay visible to you and your co-authors only, and so does anything written while it is private: making it public again opens only what comes after.`
+                ? `Versions written before ${formatInZone(publicFrom, 'long', timeZone)} stay visible to you and your co-authors only, and so does anything written while it is private: making it public again opens only what comes after.`
                 : 'Everything you have written so far stays visible to you and your co-authors only. Only what you write after the switch becomes readable.'}
             </p>
 
@@ -343,6 +347,7 @@ export function SettingsForm({
               title="Make this story private?"
               confirmLabel="Make it private"
               busy={setVisibilityMutation.isPending || privacyImpact.isLoading}
+              error={setVisibilityMutation.error ?? privacyImpact.error}
               onCancel={() => setConfirmPrivate(false)}
               onConfirm={() =>
                 setVisibilityMutation.mutate(
@@ -377,6 +382,7 @@ export function SettingsForm({
             slug={slug}
             finished={finished}
             finishedAt={finishedAt}
+            timeZone={timeZone}
           />
         ) : (
           <p className="mt-3 text-[13.5px] leading-relaxed text-ink-soft">

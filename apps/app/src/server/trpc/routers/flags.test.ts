@@ -89,6 +89,25 @@ describe('a thrown switch refuses, in plain words, before anything happens', () 
     )
   })
 
+  // The 2026-10-26 final pass: a sign-up started before the pause could ask
+  // for a fresh link, or finish from one it had, and become an account.
+  it('pause-sign-ups refuses a fresh link and a first password too', async () => {
+    const guest = await call({
+      db: untouchable,
+      session: null,
+      account: null,
+      headers: new Headers(),
+    })
+    paused.add('pause-sign-ups')
+    const refused = { code: 'FORBIDDEN', message: PAUSED['pause-sign-ups'] }
+    await expect(
+      guest.auth.resendVerification({ email: 'someone@example.test' }),
+    ).rejects.toMatchObject(refused)
+    await expect(
+      guest.auth.setPassword({ token: 'a'.repeat(43), password: 'A fine password 1!' }),
+    ).rejects.toMatchObject(refused)
+  })
+
   it('pause-imports refuses to start an import', async () => {
     const someone = await call({ db: untouchable, ...writer })
     paused.add('pause-imports')

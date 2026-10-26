@@ -44,3 +44,13 @@ verification link. The stack names Auth.js v5 with credentials.
   (the cooldown alone does not stop enumeration by volume).
 - If pen names arrive (OD-2), `displayName` is already separate from
   `username`.
+
+## Amended 2026-10-18 (D-17, item 3.9), recorded 2026-10-26
+
+Point 5's last sentence no longer holds. The owner chose D-17: a password is
+10 to 128 characters and has a lower-case letter, a capital, a number and a
+symbol (`PASSWORD_RULES` in `apps/app/src/lib/schemas/auth.ts`; the bounds are
+`PASSWORD_CHARS` in `constants.ts`). There is still no list of common
+passwords. The forms show the rules as a checklist, and the server's refusal
+names the first one missing. Existing passwords keep working; the rules apply
+when one is set.

@@ -4,6 +4,7 @@ import { Button } from '@storyboard/ui/components/button'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from '@/components/link'
 
+import { REPORTS_TO_SUSPEND } from '@/lib/schemas/constants'
 import { useTRPC } from '@/trpc/client'
 
 /**
@@ -45,7 +46,7 @@ export function SuspendedPanel() {
             const name = user.displayName ?? user.username ?? 'An account with no name yet'
             const by = user.suspendedBy
               ? `by ${user.suspendedBy.displayName ?? user.suspendedBy.username ?? 'an administrator'}`
-              : 'by ten upheld reports'
+              : `by ${String(REPORTS_TO_SUSPEND)} upheld reports`
             return (
               <li key={user.id} className="flex items-start justify-between gap-4 py-3">
                 <div className="min-w-0">

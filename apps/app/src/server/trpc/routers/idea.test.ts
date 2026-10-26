@@ -215,6 +215,14 @@ describe.skipIf(!databaseUrl)('ideas only where ideas belong (FR-5.2, FR-6.9)', 
     expect(await told(reader.id, 'IDEA_REPLY')).toBe(2)
     expect(await told(owner.id, 'IDEA_RECEIVED')).toBe(3)
 
+    // Decision 0046 — a writer who has blocked the replier is not told
+    // (2026-10-26 final pass); the authors still are.
+    await (await as(reader)).block.set({ userId: other.id, blocked: true })
+    await (await as(other)).idea.post({ requestId, body: IDEA, parentId: idea.id })
+    expect(await told(reader.id, 'IDEA_REPLY')).toBe(2)
+    expect(await told(owner.id, 'IDEA_RECEIVED')).toBe(4)
+    await (await as(reader)).block.set({ userId: other.id, blocked: false })
+
     // The reply leads to the request, at the thread.
     const list = (await (await as(reader)).notification.list({})).items
     const reply = list.find((row) => row.type === 'IDEA_REPLY')
@@ -313,5 +321,97 @@ describe.skipIf(!databaseUrl)('ideas only where ideas belong (FR-5.2, FR-6.9)', 
     await author.idea.markHelpful({ ideaId: kept.id })
     await expect(helper.idea.edit({ ideaId: kept.id, body: IDEA })).rejects.toThrow(/helped/u)
     await expect(helper.idea.remove({ ideaId: kept.id })).rejects.toThrow(/helped/u)
+  })
+
+  // The 2026-10-26 final pass (the detective review): Postgres stores no NUL,
+  // and one in any free text reached the person as a fault of ours.
+  it('says plainly when text holds a character that cannot be saved', async () => {
+    const requestId = await aRequest('UNBLOCK')
+    const helper = await as(await person('nul'))
+    const body = `${IDEA} With a${String.fromCharCode(0)}null in it.`
+    await expect(helper.idea.post({ requestId, body })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringMatching(/invisible character/u),
+    })
+  })
+
+  // The 2026-10-26 final pass: a reported or hidden idea stays as it was
+  // reported, for the moderator; and a writer an author blocked changes nothing.
+  it('changes no idea that is reported or hidden, nor one by a writer an author blocked', async () => {
+    const writer = await person('changer')
+    const helper = await as(writer)
+    const requestId = await aRequest('UNBLOCK')
+    const changed = `${IDEA} And then the other way round.`
+
+    const reported = await helper.idea.post({ requestId, body: IDEA })
+    const reporter = await person('reporter')
+    await db.report.create({
+      data: {
+        reporterId: reporter.id,
+        targetType: 'IDEA',
+        targetId: reported.id,
+        category: 'ABUSE',
+      },
+    })
+    await expect(helper.idea.edit({ ideaId: reported.id, body: changed })).rejects.toThrow(
+      /can't change now/u,
+    )
+
+    const hidden = await helper.idea.post({ requestId, body: IDEA })
+    await db.idea.update({ where: { id: hidden.id }, data: { hiddenAt: new Date() } })
+    await expect(helper.idea.edit({ ideaId: hidden.id, body: changed })).rejects.toThrow(
+      /hidden after a report/u,
+    )
+
+    const later = await helper.idea.post({ requestId, body: IDEA })
+    await (await as(owner)).block.set({ userId: writer.id, blocked: true })
+    await expect(helper.idea.edit({ ideaId: later.id, body: changed })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    })
+    const bodies = await db.idea.findMany({
+      where: { id: { in: [reported.id, hidden.id, later.id] } },
+      select: { body: true },
+    })
+    expect(bodies.every((row) => row.body === IDEA)).toBe(true)
+  })
+
+  // The 2026-10-24 final pass on item 6.8: an idea its writer removed, or one
+  // hidden after a report, answers nothing and earns no credit.
+  it('counts no removed or hidden idea as an answer, and marks none as the one that helped', async () => {
+    const helper = await as(await person('remover'))
+    const author = await as(owner)
+    const requestId = await aRequest('UNBLOCK')
+    const stateOf = async () =>
+      (
+        await db.contributionRequest.findUniqueOrThrow({
+          where: { id: requestId },
+          select: { state: true },
+        })
+      ).state
+
+    // What the reader's margin and the request lists count (`TOP_LEVEL_IDEAS`).
+    const counted = async () =>
+      (await author.request.listForStoryboard({ storyboardId })).find((row) => row.id === requestId)
+        ?._count.ideas
+
+    const idea = await helper.idea.post({ requestId, body: IDEA })
+    expect(await stateOf()).toBe('ANSWERED')
+    expect(await counted()).toBe(1)
+    await helper.idea.remove({ ideaId: idea.id })
+    expect(await stateOf()).toBe('OPEN')
+    expect(await counted()).toBe(0)
+    await expect(author.idea.markHelpful({ ideaId: idea.id })).rejects.toThrow(/removed this idea/u)
+    expect(await db.credit.count({ where: { ideaId: idea.id } })).toBe(0)
+
+    // Hidden after a report, then shown again: open, then answered again.
+    const second = await helper.idea.post({ requestId, body: IDEA })
+    expect(await stateOf()).toBe('ANSWERED')
+    const { setHiddenState } = await import('@/server/hidden')
+    const target = { type: 'IDEA' as const, id: second.id }
+    await setHiddenState(db, target, { hidden: true, byId: owner.id, reason: 'SPAM' })
+    expect(await stateOf()).toBe('OPEN')
+    expect(await counted()).toBe(0)
+    await setHiddenState(db, target, { hidden: false, byId: owner.id, reason: null })
+    expect(await stateOf()).toBe('ANSWERED')
   })
 })

@@ -3,6 +3,7 @@ import Link from '@/components/link'
 
 import { REQUEST_KINDS, closesOn } from '@/lib/schemas/help'
 import { formatInZone } from '@/lib/time-zone'
+import { REQUEST_CARD_ASK_CHARS } from '@/lib/schemas/constants'
 
 type Request = {
   id: string
@@ -33,7 +34,10 @@ type Request = {
 export function RequestCard({ request, timeZone }: { request: Request; timeZone: string }) {
   const kind = REQUEST_KINDS.find((option) => option.value === request.kind)
   const answers = request.kind === 'UNBLOCK' ? request._count.ideas : request._count.suggestions
-  const ask = request.ask.length > 200 ? `${request.ask.slice(0, 200).trimEnd()}…` : request.ask
+  const ask =
+    request.ask.length > REQUEST_CARD_ASK_CHARS
+      ? `${request.ask.slice(0, REQUEST_CARD_ASK_CHARS).trimEnd()}…`
+      : request.ask
 
   return (
     <Link

@@ -70,6 +70,19 @@ export const publicationRouter = createTRPCRouter({
       let publication: { id: string; number: number; versionId: string }
       try {
         publication = await ctx.db.$transaction(async (tx) => {
+          // Still the main draft, and kept so while it is copied: another
+          // version promoted in between made the edition of a draft that had
+          // just stopped being main, though the confirmation promised "the
+          // main draft as it stands" (2026-10-26 final pass).
+          const [still] = await tx.$queryRaw<Array<{ isMain: boolean }>>`
+            select "isMain" from "Version" where id = ${main.id} for share
+          `
+          if (!still?.isMain) {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: 'The main draft changed a moment ago. Look at it, then publish again.',
+            })
+          }
           const last = await tx.publication.findFirst({
             where: { storyboardId },
             orderBy: { number: 'desc' },

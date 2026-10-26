@@ -18,7 +18,11 @@
 import { diffWordsWithSpace } from 'diff'
 
 import { align } from './align'
-import { REWRITE_ALIGNMENT_THRESHOLD } from './constants'
+import {
+  MAX_ALIGNED_PARAGRAPHS,
+  MAX_MARKED_CHARACTERS,
+  REWRITE_ALIGNMENT_THRESHOLD,
+} from './constants'
 import { toParagraphs } from './paragraphs'
 
 export {
@@ -103,6 +107,16 @@ function statsFor(rows: readonly ComparisonRow[]): ComparisonStats {
 export function compare(base: string, target: string): ComparisonResult {
   const left = toParagraphs(base)
   const right = toParagraphs(target)
+
+  // Too long to align in reasonable time: both texts, whole, as a rewrite.
+  if (left.length > MAX_ALIGNED_PARAGRAPHS || right.length > MAX_ALIGNED_PARAGRAPHS) {
+    const rows: ComparisonRow[] = [
+      ...left.map((paragraph) => ({ kind: 'removed' as const, left: { text: paragraph.text } })),
+      ...right.map((paragraph) => ({ kind: 'added' as const, right: { text: paragraph.text } })),
+    ]
+    return { mode: 'rewrite', rows, stats: statsFor(rows) }
+  }
+
   const alignments = align(left, right)
 
   /**
@@ -137,7 +151,7 @@ export function compare(base: string, target: string): ComparisonResult {
       case 'changed': {
         const before = left[alignment.left]!.text
         const after = right[alignment.right]!.text
-        if (isRewrite) {
+        if (isRewrite || before.length + after.length > MAX_MARKED_CHARACTERS) {
           return { kind: 'changed', left: { text: before }, right: { text: after } }
         }
         const marks = markWords(before, after)

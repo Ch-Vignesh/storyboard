@@ -56,13 +56,19 @@ export function readUnsubscribe(token: string, secret: string): UnsubscribeScope
   }
 }
 
-/** The link an email carries, for this person and the kinds of email it is. */
+/**
+ * The link an email carries, for this person and the kinds of email it is.
+ * The endpoint, not the page: a mail program's one-click "Unsubscribe" POSTs
+ * to the `List-Unsubscribe` address (RFC 8058), and only the endpoint takes a
+ * POST. A person following it is sent on to the page by the endpoint's GET.
+ * It named the page until 2026-10-26, so one-click turned nothing off.
+ */
 export function unsubscribeUrlFor(
   appUrl: string,
   userId: string,
   types: readonly NotificationType[] | 'all',
 ): string {
-  return `${appUrl}/unsubscribe?t=${encodeURIComponent(signUnsubscribe({ userId, types }, env.AUTH_SECRET))}`
+  return `${appUrl}/api/unsubscribe?t=${encodeURIComponent(signUnsubscribe({ userId, types }, env.AUTH_SECRET))}`
 }
 
 /** What the page and the one-click endpoint show: the kinds of email a token covers. */

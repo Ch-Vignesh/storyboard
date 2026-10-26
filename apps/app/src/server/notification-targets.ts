@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from '@storyboard/db'
 
 import { publicIdOfSlug, visibleStoryboardsWhere } from '@/lib/authz/guard'
 import { nameOf } from '@/lib/people'
+import { ERASED_RECORD } from '@/server/hidden'
 import type { NotificationType, Standing } from '@/lib/schemas/notifications'
 
 /*
@@ -51,6 +52,8 @@ export type Target = {
   chapter: number | null
   /** REQUEST_REOPENED — where this person's own suggestion on it stands. */
   standing: Standing | null
+  /** REQUEST_CLOSED — the nightly close (item 6.15) closed it, not a person. */
+  automatic?: boolean
   /** FR-15.3 (phase 14, item 7.7) — the story it leads into is a seeded example. */
   example?: boolean
 }
@@ -109,12 +112,14 @@ export async function targetsFor(
         contributorId: true,
         state: true,
         decidedById: true,
+        // Decision 0013 — erased, its writer is named nowhere.
+        credits: ERASED_RECORD,
       },
     }),
     // Ideas and the replies under them are one table.
     db.idea.findMany({
       where: { id: { in: [...all('ideaId'), ...all('replyId')] } },
-      select: { id: true, requestId: true, authorId: true },
+      select: { id: true, requestId: true, authorId: true, credits: ERASED_RECORD },
     }),
     db.section.findMany({
       where: { id: { in: all('sectionId') } },
@@ -246,6 +251,11 @@ export async function targetsFor(
     const person = id ? personById.get(id) : undefined
     return person ? nameOf(person) : null
   }
+  /** Who wrote a suggestion or an idea, unless they erased its record (decision 0013). */
+  const writer = (
+    row: { credits: readonly unknown[] } | undefined,
+    id: string | undefined,
+  ): string | null => (row && row.credits.length > 0 ? null : name(id))
 
   const suggestionById = new Map(suggestions.map((suggestion) => [suggestion.id, suggestion]))
   const ideaById = new Map(ideas.map((idea) => [idea.id, idea]))
@@ -296,7 +306,7 @@ export async function targetsFor(
         // was decided on; whoever accepted another when this one went stale.
         const actor =
           row.type === 'SUGGESTION_RECEIVED' || row.type === 'SUGGESTION_WITHDRAWN'
-            ? name(suggestion?.contributorId)
+            ? writer(suggestion, suggestion?.contributorId)
             : row.type === 'SUGGESTION_STALE'
               ? name(request.suggestions[0]?.decidedById)
               : name(suggestion?.decidedById)
@@ -317,7 +327,9 @@ export async function targetsFor(
             ...NOWHERE,
             path: thread ? `${requestPath}#idea-${thread}` : requestPath,
             title: request.title,
-            actor: name(get(ideaById, text(data, 'replyId'))?.authorId),
+            actor: ((reply) => writer(reply, reply?.authorId))(
+              get(ideaById, text(data, 'replyId')),
+            ),
             chapter,
           }
         }
@@ -329,7 +341,7 @@ export async function targetsFor(
             ...NOWHERE,
             path: requestPath,
             title: request.title,
-            actor: name(idea?.authorId),
+            actor: writer(idea, idea?.authorId),
             chapter,
           }
         }
@@ -348,6 +360,7 @@ export async function targetsFor(
             chapter,
             standing:
               row.type === 'REQUEST_REOPENED' ? (standingByRequest.get(request.id) ?? null) : null,
+            automatic: row.type === 'REQUEST_CLOSED' && typeof data.after === 'number',
           }
         }
         break

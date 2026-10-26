@@ -1,7 +1,7 @@
 'use client'
 
 import { Button } from '@storyboard/ui/components/button'
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 /**
  * Phase 14, item 5.1 — the one confirmation dialog, on the native `<dialog>`
@@ -22,6 +22,7 @@ export function ConfirmDialog({
   cancelLabel = 'Keep it as it is',
   destructive = false,
   busy = false,
+  error = null,
   onConfirm,
   onCancel,
 }: {
@@ -33,6 +34,12 @@ export function ConfirmDialog({
   destructive?: boolean
   /** The confirm is on its way: both buttons wait. */
   busy?: boolean
+  /**
+   * Why the confirm, or working out its consequences, failed. Shown in the
+   * dialog: the callers put it on the page behind it, where nobody saw it and
+   * no screen reader said it (2026-10-26 final pass).
+   */
+  error?: { message: string } | null
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -40,6 +47,15 @@ export function ConfirmDialog({
   const safe = useRef<HTMLButtonElement>(null)
   const titleId = useId()
   const bodyId = useId()
+  // A caller's mutation keeps its last failure: the one there when the dialog
+  // opened belongs to an earlier attempt, and is not said again.
+  const [earlier, setEarlier] = useState<{ message: string } | null>(null)
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) setEarlier(error ?? null)
+  }
+  const shown = error && error !== earlier ? error.message : null
 
   useEffect(() => {
     const element = dialog.current
@@ -52,6 +68,14 @@ export function ConfirmDialog({
     }
   }, [open])
 
+  // A dialog that opens busy, working out its consequences, has both buttons
+  // disabled, and a disabled button takes no focus: the safe one gets it
+  // once the dialog is ready, unless the person has moved it themselves.
+  useEffect(() => {
+    if (!open || busy) return
+    if (!dialog.current?.contains(document.activeElement)) safe.current?.focus()
+  }, [open, busy])
+
   return (
     <dialog
       ref={dialog}
@@ -61,6 +85,14 @@ export function ConfirmDialog({
         // Escape: the browser would close it; the caller's state must agree.
         event.preventDefault()
         if (!busy) onCancel()
+      }}
+      onClose={() => {
+        // Some browsers close on a second Escape whatever `onCancel` says.
+        // Still open as far as the caller knows: open again while busy, else
+        // tell the caller, so no dialog is stranded shut (2026-10-26).
+        if (!open) return
+        if (busy) dialog.current?.showModal()
+        else onCancel()
       }}
       className="m-auto w-[min(92vw,28rem)] rounded-control border border-rule bg-paper p-6 text-ink shadow-lift backdrop:bg-ink/40"
     >
@@ -74,6 +106,11 @@ export function ConfirmDialog({
           <div id={bodyId} className="mt-3 space-y-2 text-[14px] leading-relaxed text-ink-soft">
             {children}
           </div>
+          {shown ? (
+            <p role="alert" className="mt-3 text-[13.5px] leading-relaxed text-crimson">
+              {shown}
+            </p>
+          ) : null}
           <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
             <Button ref={safe} type="button" variant="ghost" disabled={busy} onClick={onCancel}>
               {cancelLabel}

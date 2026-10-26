@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import { nameOf } from '@/lib/people'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
 type Coauthor = {
@@ -24,6 +25,7 @@ export function CoauthorManager({
   canInvite,
   max,
   coauthors,
+  timeZone,
 }: {
   storyboardId: string
   slug: string
@@ -31,6 +33,8 @@ export function CoauthorManager({
   canInvite: boolean
   max: number
   coauthors: Coauthor[]
+  /** Item 1.18 — the reader's zone, so the server and the browser draw the same day. */
+  timeZone: string
 }) {
   const trpc = useTRPC()
   const router = useRouter()
@@ -75,7 +79,7 @@ export function CoauthorManager({
                   </span>
                   <span className="mt-0.5 block text-[12.5px] text-ink-faint">
                     {coauthor.acceptedAt
-                      ? `Co-author since ${coauthor.acceptedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`
+                      ? `Co-author since ${formatInZone(coauthor.acceptedAt, 'long', timeZone)}`
                       : 'Invited, and not yet answered'}
                   </span>
                 </span>

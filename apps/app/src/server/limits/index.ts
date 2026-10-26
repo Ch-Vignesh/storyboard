@@ -195,6 +195,8 @@ export const key = {
   // Sign-in attempts: an address from one client, and one client in all.
   signIn: (email: string, client: string) => `auth:signin:${client}:${addressDigest(email)}`,
   signInsFrom: (client: string) => `auth:signin-from:${client}`,
+  // ...and one address from every client together (2026-10-26 final pass).
+  signInsTo: (email: string) => `auth:signin-to:${addressDigest(email)}`,
   // Item 3.1: tries at changing a password, per account and per client.
   passwordChange: (userId: string) => `auth:change:${userId}`,
   passwordChangesFrom: (client: string) => `auth:change-from:${client}`,

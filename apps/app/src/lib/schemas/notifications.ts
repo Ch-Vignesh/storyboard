@@ -204,6 +204,8 @@ export type Facts = {
   chapter?: number | null
   /** REQUEST_REOPENED — where the recipient's own suggestion on the request stands. */
   standing?: Standing | null
+  /** REQUEST_CLOSED — it closed by itself after `REQUEST_OPEN_DAYS` (item 6.15), not by anyone. */
+  automatic?: boolean
 }
 
 /** The two names `nameOf` gives an absent person open a sentence with a capital. */
@@ -254,6 +256,10 @@ export function sentenceFor(type: NotificationType, facts: Facts = {}): string {
     case 'REQUEST_AUTO_CLOSED':
       return `The passage you opened for help${inChapter} was open for ${String(REQUEST_OPEN_DAYS)} days, so it closed. Open it again if you still want help.`
     case 'REQUEST_CLOSED':
+      // Closed by nobody: helpers were told "The author closed it" (2026-10-24 final pass).
+      if (facts.automatic) {
+        return `The passage you were answering${inChapter} was open for ${String(REQUEST_OPEN_DAYS)} days, so it closed by itself. Any suggestion you sent stays on your profile.`
+      }
       return facts.actor
         ? `${opening(facts.actor)} closed the passage you were answering${inChapter}. Any suggestion you sent stays on your profile.`
         : NOTIFICATIONS.REQUEST_CLOSED.sentence

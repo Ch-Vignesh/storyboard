@@ -2,29 +2,32 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 
-type Breakpoint = 'sm' | 'md' | 'lg'
+type Breakpoint = 'sm' | 'md' | 'lg' | 'xl'
 
 /** Full class names, because Tailwind only ships the strings it can read. */
 const BUTTON_HIDDEN_FROM: Record<Breakpoint, string> = {
   sm: 'sm:hidden',
   md: 'md:hidden',
   lg: 'lg:hidden',
+  xl: 'xl:hidden',
 }
 const WIDE_ROW: Record<Breakpoint, string> = {
   sm: 'sm:contents',
   md: 'md:contents',
   lg: 'lg:contents',
+  xl: 'xl:contents',
 }
 const WIDE_HIDDEN: Record<Breakpoint, string> = {
   sm: 'sm:hidden',
   md: 'md:hidden',
   lg: 'lg:hidden',
+  xl: 'xl:hidden',
 }
 
 /**
  * Phase 14, items 4.2 and 4.3 — links folded behind one button below a
  * breakpoint. The site header folds below `sm` behind "Menu"; the reader's
- * actions fold below `md` behind "More", and its chapter list opens below
+ * actions fold below `xl` behind "More", and its chapter list opens below
  * `lg` behind "Chapters".
  *
  * From the breakpoint up the wrapper is either `contents`, so the children

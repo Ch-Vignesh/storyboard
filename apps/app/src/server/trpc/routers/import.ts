@@ -193,7 +193,11 @@ export const importRouter = createTRPCRouter({
       }
 
       if (proposal.tooLong) {
-        await fail(ctx.db, job.id, 'That manuscript is longer than 300,000 words.')
+        await fail(
+          ctx.db,
+          job.id,
+          `That manuscript is longer than ${IMPORT_LIMITS.words.toLocaleString('en-GB')} words.`,
+        )
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: `That manuscript is ${proposal.wordCount.toLocaleString('en-GB')} words. The limit is ${IMPORT_LIMITS.words.toLocaleString('en-GB')}.`,

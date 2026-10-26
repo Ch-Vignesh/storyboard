@@ -252,6 +252,73 @@ describe.skipIf(!databaseUrl)('credits say where (item 6.10)', () => {
     })
   })
 
+  // A spin-off keeps its original's lineage ids (`copyTree`), so a credit on
+  // each must still lead into its own story (2026-10-24 final pass).
+  it('leads credits on an original and its spin-off each into their own story', async () => {
+    const helper = await person('both')
+    const lineageId = randomUUID()
+    const made: string[] = []
+    // The shared lineage is the first section of the story's last chapter.
+    const storyWith = async (label: string, chapters: number) => {
+      const story = await db.storyboard.create({
+        data: {
+          publicId: `${label}${run}`,
+          slug: `${label}-${run}`,
+          title: label,
+          type: 'NOVEL',
+          visibility: 'PUBLIC',
+          publicFrom: new Date(Date.now() - 60_000),
+          ownerId: owner.id,
+        },
+        select: { id: true, slug: true },
+      })
+      made.push(story.id)
+      const version = await db.version.create({
+        data: { storyboardId: story.id, name: 'Main draft', isMain: true, createdById: owner.id },
+        select: { id: true },
+      })
+      for (let order = 0; order < chapters; order += 1) {
+        const chapter = await db.chapter.create({
+          data: { versionId: version.id, lineageId: randomUUID(), order, title: `C${order}` },
+          select: { id: true },
+        })
+        await db.section.create({
+          data: {
+            chapterId: chapter.id,
+            lineageId: order === chapters - 1 ? lineageId : randomUUID(),
+            order: 0,
+            wordCount: 0,
+          },
+        })
+      }
+      await db.credit.create({
+        data: {
+          storyboardId: story.id,
+          contributorId: helper.id,
+          type: 'PROSE',
+          sectionLineage: lineageId,
+        },
+      })
+      return story
+    }
+    try {
+      const original = await storyWith('orig', 1)
+      const spinOff = await storyWith('spun', 2)
+      const { credits } = await (await as(null)).profile.byUsername({ username: helper.username })
+      expect(credits.map((credit) => credit.where?.path).sort()).toEqual(
+        [`/s/${original.slug}/c/1/1`, `/s/${spinOff.slug}/c/2/1`].sort(),
+      )
+    } finally {
+      await db.credit.deleteMany({ where: { storyboardId: { in: made } } })
+      await db.section.deleteMany({
+        where: { chapter: { version: { storyboardId: { in: made } } } },
+      })
+      await db.chapter.deleteMany({ where: { version: { storyboardId: { in: made } } } })
+      await db.version.deleteMany({ where: { storyboardId: { in: made } } })
+      await db.storyboard.deleteMany({ where: { id: { in: made } } })
+    }
+  })
+
   it('pages credits past PROFILE_LISTS, by a cursor of their own', async () => {
     const start = Date.now() - 60 * 60 * 1000
     await db.credit.createMany({

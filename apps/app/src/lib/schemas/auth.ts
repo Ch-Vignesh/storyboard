@@ -1,12 +1,12 @@
 import { z } from 'zod'
 
-import { PASSWORD_CHARS, USERNAME_CHARS } from './constants'
+import { EMAIL_MAX_CHARS, PASSWORD_CHARS, USERNAME_CHARS } from './constants'
 
 export const emailSchema = z
   .string()
   .trim()
   .toLowerCase()
-  .max(254, 'That email address is too long.')
+  .max(EMAIL_MAX_CHARS, 'That email address is too long.')
   .pipe(z.email('Enter a valid email address.'))
 
 /**
@@ -121,6 +121,15 @@ const RESERVED_USERNAMES = new Set([
   'reset-password',
   's',
   'u',
+  // Top-level routes added since item 3.7: the public record (item 8.12) and
+  // the files the framework serves at the root (2026-10-26 final pass).
+  'proof',
+  'opengraph-image',
+  'apple-icon',
+  'icon',
+  'manifest',
+  'sitemap',
+  'robots',
   // The seed's own accounts (packages/db/prisma/seed), and the platform
   // account's name before the rename. A person who took one of these would
   // make every later seed run fail on it, or wear the name that signs the

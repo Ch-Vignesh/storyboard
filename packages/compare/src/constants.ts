@@ -39,3 +39,19 @@ export const REWRITE_ALIGNMENT_THRESHOLD = 0.3
  * Exported so the performance test states the budget rather than inventing one.
  */
 export const COMPARISON_BUDGET_MS = 400
+
+/**
+ * Past this many paragraphs on either side, two texts are shown whole, side
+ * by side, without being aligned. Alignment is quadratic in paragraphs, in time
+ * and memory, and a section can be a whole imported novel; a public call could
+ * hold a function for its whole duration (2026-10-26 final pass, the detective
+ * review). A 2,000-word section is perhaps 40 paragraphs.
+ */
+export const MAX_ALIGNED_PARAGRAPHS = 1500
+
+/**
+ * Past this many characters between its two sides, a changed paragraph is
+ * shown without word marks, which cost more the more two long paragraphs
+ * differ. A paragraph of prose is a few hundred characters.
+ */
+export const MAX_MARKED_CHARACTERS = 20_000

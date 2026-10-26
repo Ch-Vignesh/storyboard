@@ -6,11 +6,11 @@ import { writtenWhilePrivate } from '@/lib/authz'
 import { PUBLICLY_LISTED } from '@/lib/authz/guard'
 import { logger } from '@/lib/logger'
 import { PROFILE_LISTS, USERNAME_CHARS } from '@/lib/schemas/constants'
-import { timeZoneFromHeaders } from '@/lib/time-zone'
+import { formatInZone, timeZoneFromHeaders } from '@/lib/time-zone'
 import { activityCalendar } from '@/server/activity'
 import { HIDDEN_TEXT } from '@/server/hidden'
 import { mainDraftOwnShares } from '@/server/own-share'
-import { placesInMainDrafts } from '@/server/places'
+import { placeKey, placesInMainDrafts } from '@/server/places'
 
 import { activeProcedure, actorFrom, createTRPCRouter, publicProcedure } from '../init'
 
@@ -170,7 +170,9 @@ async function creditsPage(
     // writer's alone to see.
     const hiddenWords = !isSelf && Boolean(credit.suggestion?.hiddenAt ?? credit.idea?.hiddenAt)
     const story = `/s/${storyboard.slug}`
-    const place = credit.sectionLineage ? places.get(credit.sectionLineage) : undefined
+    const place = credit.sectionLineage
+      ? places.get(placeKey(credit.storyboardId, credit.sectionLineage))
+      : undefined
     const where = (() => {
       if (credit.type === 'PROSE') {
         if (place) {
@@ -539,12 +541,10 @@ export const profileRouter = createTRPCRouter({
       const name = user.displayName ?? user.username ?? 'Unknown'
       const role = { PROSE: 'contributing writer', IDEA: 'story consultant', COAUTHOR: 'co-author' }
 
+      // Item 1.18 — the day as the person asking counts it, not the server's UTC one.
+      const timeZone = timeZoneFromHeaders(ctx.headers)
       const lines = credits.map((credit) => {
-        const date = credit.createdAt.toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric',
-        })
+        const date = formatInZone(credit.createdAt, 'long', timeZone)
         return `${name} — ${role[credit.type]} on “${credit.storyboard.title}” by ${
           credit.storyboard.owner.displayName ?? credit.storyboard.owner.username
         }, ${date}. ${base}/s/${credit.storyboard.slug}`

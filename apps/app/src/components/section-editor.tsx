@@ -51,12 +51,6 @@ type Props = {
   /** Item 8.1 — the sections before and after this one, across chapters. */
   previous?: Neighbour | null
   next?: Neighbour | null
-  /**
-   * Item 8.5 — when the text this opened on was saved (the draft's time, or
-   * the version's), so a copy kept on this device is offered back only when
-   * it is newer.
-   */
-  savedAt?: string | null
   /** Item 8.6 — where to go when this section has left the story. */
   contentsHref: string
   /** Item 8.5 — the person writing, so the device keeps each person's words apart. */
@@ -108,7 +102,6 @@ export function SectionEditor({
   returnHref,
   previous = null,
   next = null,
-  savedAt = null,
   contentsHref,
   writerId,
   startsUnsaved = false,
@@ -194,13 +187,16 @@ export function SectionEditor({
     // keystroke: FR-2.5's over-2000 note has to show on a long section at once.
     onCreate: ({ editor: instance }) => {
       setWords(countWordsIn(instance.getText()))
-      // Item 8.5 — words kept on this device from an earlier visit, newer
-      // than the text this opened on and different from it, are offered back.
+      // Item 8.5 — words kept on this device that differ from the text this
+      // opened on are offered back; the writer chooses. A save clears the
+      // copy, so one that differs was never saved. It was offered only if
+      // newer than the server's save, by this device's clock against the
+      // server's, and deleted otherwise: a slow clock lost offline words
+      // (2026-10-26 final pass).
       const kept = readLocalCopy(localKey)
       if (!kept) return
-      const openedOn = savedAt ? Date.parse(savedAt) : 0
       const differs = JSON.stringify(kept.contentJson) !== JSON.stringify(instance.getJSON())
-      if (kept.at > openedOn && differs) setRecovered(kept)
+      if (differs) setRecovered(kept)
       else forgetLocalCopy(localKey)
     },
     onUpdate: ({ editor: instance }) => {
@@ -839,7 +835,10 @@ function ToolbarButton({
       type="button"
       title={`${label} (${shortcut})`}
       aria-label={label}
-      aria-keyshortcuts={shortcut.replace('⌘', 'Meta').replaceAll(' ', '+')}
+      aria-keyshortcuts={shortcut
+        .replace('⌘', 'Meta')
+        .replace('Ctrl', 'Control')
+        .replaceAll(' ', '+')}
       aria-pressed={active}
       // Keeps the editor focused. A click that blurred it saved a version
       // first, so typing and then pressing Italic put two near-identical

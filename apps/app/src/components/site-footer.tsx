@@ -11,7 +11,9 @@ import { usePathname } from 'next/navigation'
  */
 export function SiteFooter() {
   const pathname = usePathname()
-  if (pathname.endsWith('/edit')) return null
+  // The section editor's own page only, which is all writing. Any path that
+  // ended in /edit lost it, a request's edit page among them (2026-10-26).
+  if (/\/c\/\d+\/\d+\/edit$/u.test(pathname)) return null
 
   return (
     <footer className="mt-16 border-t border-rule print:hidden">

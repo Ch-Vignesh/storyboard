@@ -67,6 +67,11 @@ export default function Error({
         <a href="/" className="text-[13.5px]">
           Go to your dashboard
         </a>
+        {/* Item 4.10 — and a way out for a guest, whom the dashboard sends to
+            sign in (2026-10-26 final pass). */}
+        <a href="/browse" className="text-[13.5px]">
+          Browse stories
+        </a>
       </div>
 
       {error.digest ? (

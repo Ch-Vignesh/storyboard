@@ -199,18 +199,33 @@ export function quietRequestMail(options: {
   requestUrl: string
   /** Item 6.16 — the request's edit page, where the word range is changed. */
   editUrl: string
+  /**
+   * A "help me think" request has no word range to widen, and the email told
+   * its author to change one (2026-10-24 final pass): it is told to sharpen
+   * the ask instead, which is what its edit page offers.
+   */
+  helpMeThink?: boolean
   appUrl: string
   unsubscribeUrl: string
 }): Mail {
   const foot = footer({ ...options, types: ['REQUEST_QUIET_SEVEN_DAYS'] })
+  const fix = options.helpMeThink
+    ? {
+        why: 'An ask that says exactly where you are stuck, and what you have tried, gives people something to answer.',
+        link: 'Change the ask',
+      }
+    : {
+        why: 'If it asks for a narrow range of words, a wider one lets more people fit it in.',
+        link: 'Change the word range',
+      }
 
   const text = [
     `Nobody has answered "${options.requestTitle}" yet.`,
     '',
     'That is common, and it is not a verdict on the request. It is still open, and helpers looking for something nobody has answered find it under "No answers yet" in Browse.',
     '',
-    'If it asks for a narrow range of words, a wider one lets more people fit it in.',
-    `Change the word range: ${options.editUrl}`,
+    fix.why,
+    `${fix.link}: ${options.editUrl}`,
     '',
     options.requestUrl,
     '',
@@ -223,7 +238,7 @@ export function quietRequestMail(options: {
       options.requestTitle,
     )}</a> yet.</p>`,
     `<p>That is common, and it is not a verdict on the request. It is still open, and helpers looking for something nobody has answered find it under “No answers yet” in Browse.</p>`,
-    `<p>If it asks for a narrow range of words, a wider one lets more people fit it in. <a href="${options.editUrl}">Change the word range</a>.</p>`,
+    `<p>${escapeHtml(fix.why)} <a href="${options.editUrl}">${fix.link}</a>.</p>`,
     foot.html,
     `</div>`,
   ].join('\n')

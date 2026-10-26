@@ -12,9 +12,12 @@ import {
 import {
   DIGEST_FAILURES_BEFORE_STOPPING,
   DIGEST_RUN_BUDGET_SECONDS,
+  EMAIL_QUEUE_BATCH,
+  EMAIL_SEND_ATTEMPTS,
   QUIET_REQUEST_NUDGE_DAYS,
   WEEKLY_DIGEST_DAYS,
   WEEKLY_DIGEST_MIN_GAP_DAYS,
+  WEEKLY_DIGEST_REQUESTS,
 } from '@/lib/schemas/constants'
 import { PUBLICLY_LISTED } from '@/lib/authz/guard'
 import { closeStaleRequests } from '@/server/close-requests'
@@ -136,20 +139,34 @@ async function pendingOfTypes(
 ): Promise<{ pending: Pending[]; unreachable: string[] }> {
   const rows = await db.notification.findMany({
     where: { emailedAt: null, type: { in: [...types] } },
-    orderBy: { createdAt: 'asc' },
-    take: 500,
-    select: { id: true, type: true, payload: true, user: { select: RECIPIENT } },
+    // Fewest failed sends first: a row that keeps failing goes behind the
+    // ones that have not been tried, rather than leading every run.
+    orderBy: [{ emailAttempts: 'asc' }, { createdAt: 'asc' }],
+    take: EMAIL_QUEUE_BATCH,
+    select: {
+      id: true,
+      type: true,
+      payload: true,
+      emailAttempts: true,
+      user: { select: RECIPIENT },
+    },
   })
+  // An account erased between the two reads Prisma makes here comes back as
+  // no user at all, and reading it threw and stopped the whole run (seen when
+  // a purge ran beside it, 2026-10-26). Its rows can never be sent.
+  const sendable = (row: (typeof rows)[number]) => {
+    const user = row.user as (typeof rows)[number]['user'] | null
+    // Tried enough: given up, and marked with the rows that cannot be sent.
+    return user !== null && reachable(user) && row.emailAttempts < EMAIL_SEND_ATTEMPTS
+  }
   return {
-    pending: rows
-      .filter((row) => reachable(row.user))
-      .map((row) => ({
-        id: row.id,
-        type: row.type,
-        payload: row.payload,
-        user: { id: row.user.id, email: row.user.email },
-      })),
-    unreachable: rows.filter((row) => !reachable(row.user)).map((row) => row.id),
+    pending: rows.filter(sendable).map((row) => ({
+      id: row.id,
+      type: row.type,
+      payload: row.payload,
+      user: { id: row.user.id, email: row.user.email },
+    })),
+    unreachable: rows.filter((row) => !sendable(row)).map((row) => row.id),
   }
 }
 
@@ -190,6 +207,15 @@ function deliveryRun(mailer: Mailer) {
       }
     },
   }
+}
+
+/** A send that failed, counted against `EMAIL_SEND_ATTEMPTS`. */
+async function countFailure(db: Db, ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return
+  await db.notification.updateMany({
+    where: { id: { in: [...ids] } },
+    data: { emailAttempts: { increment: 1 } },
+  })
 }
 
 async function markEmailed(db: Db, ids: readonly string[]): Promise<void> {
@@ -245,6 +271,8 @@ export async function runImmediate(db: Db, options: RunOptions = {}): Promise<Ru
       // Marked the moment it went, so nothing after this can send it twice.
       await markEmailed(db, [row.id])
       sent += 1
+    } else {
+      await countFailure(db, [row.id])
     }
   }
 
@@ -312,6 +340,11 @@ export async function runHourlyDigest(db: Db, options: RunOptions = {}): Promise
         allowed.map((row) => row.id),
       )
       sent += 1
+    } else {
+      await countFailure(
+        db,
+        allowed.map((row) => row.id),
+      )
     }
   }
 
@@ -351,6 +384,11 @@ export async function runWeeklyDigest(
       pinnedGenres: { some: {} },
       OR: [{ weeklyDigestSentAt: null }, { weeklyDigestSentAt: { lt: sentBefore } }],
     },
+    // Longest without one first. In the database's own order the same first
+    // readers came first every Sunday, and whoever a run's budget never
+    // reached never got one; with the Sunday's later runs (cron.yml) this
+    // works down the list (2026-10-26 final pass, the detective review).
+    orderBy: [{ weeklyDigestSentAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
     select: {
       id: true,
       email: true,
@@ -381,7 +419,7 @@ export async function runWeeklyDigest(
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: 10,
+      take: WEEKLY_DIGEST_REQUESTS,
       select: {
         publicId: true,
         title: true,
@@ -457,6 +495,7 @@ export async function runQuietNudge(
       id: true,
       publicId: true,
       title: true,
+      kind: true,
       openedById: true,
       storyboard: { select: { slug: true } },
       openedBy: { select: RECIPIENT },
@@ -507,6 +546,7 @@ export async function runQuietNudge(
           requestUrl,
           // Item 6.16 — the fix, where it is made (item 6.1).
           editUrl: `${requestUrl}/edit`,
+          helpMeThink: request.kind === 'UNBLOCK',
           appUrl,
           unsubscribeUrl: unsubscribeUrlFor(appUrl, request.openedById, [
             'REQUEST_QUIET_SEVEN_DAYS',
@@ -526,13 +566,20 @@ export async function runQuietNudge(
 
 export const CRON_JOBS = {
   immediate: runImmediate,
-  hourly: async (db: Db) => ({
-    ...(await runHourlyDigest(db)),
+  hourly: async (db: Db) => {
     // Phase 14, item 10.1 (D-10) — and the administrators hear of any new
     // kind of server error, after the digest so a fault here costs nobody
-    // their email.
-    errors: await alertNewServerErrors(db as PrismaClient),
-  }),
+    // their email. Whatever the digest did: one that threw every hour stopped
+    // every alert, its own fault's included (2026-10-26 final pass).
+    let digest: RunResult
+    try {
+      digest = await runHourlyDigest(db)
+    } catch (error) {
+      await alertNewServerErrors(db as PrismaClient)
+      throw error
+    }
+    return { ...digest, errors: await alertNewServerErrors(db as PrismaClient) }
+  },
   weekly: (db: Db) => runWeeklyDigest(db),
   nudge: (db: Db) => runQuietNudge(db),
   // Not mail, but the same runner: one scheduler is easier to reason about

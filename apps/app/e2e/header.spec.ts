@@ -90,3 +90,34 @@ test('at phone width the header folds into a menu that opens, closes on Escape a
   await expect(menu).toBeHidden()
   await expect(header.getByRole('link', { name: 'Create an account' })).toBeVisible()
 })
+
+/**
+ * The 2026-10-26 final pass on item 4.3. An author's actions on the reader
+ * are a dozen buttons and the account, and from `md` up they sat in one row
+ * that never wrapped: a portrait tablet and a 1024 px laptop scrolled the
+ * page sideways. Below `xl` they fold behind "More", as on a phone.
+ */
+test('an author’s reader fits a tablet and a small laptop, with its actions behind More', async ({
+  page,
+}) => {
+  await signUpAndOnboard(page)
+  await page.goto('/new')
+  await page.getByLabel('Title').fill('A story read on a tablet')
+  await page.getByRole('button', { name: 'Literary fiction', exact: true }).click()
+  await page.getByRole('button', { name: /create and start writing/i }).click()
+  await expect(page).toHaveURL(/\/s\//)
+  const story = storyPath(page)
+
+  for (const width of [834, 1024, 1279]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(story)
+    const fits = await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+    )
+    expect(fits, `${String(width)} px scrolls sideways`).toBe(true)
+    const more = page.locator('header').first().getByRole('button', { name: 'More' })
+    await expect(more, `${String(width)} px`).toBeVisible()
+    await more.click()
+    await expect(page.getByRole('link', { name: 'Versions' })).toBeVisible()
+  }
+})

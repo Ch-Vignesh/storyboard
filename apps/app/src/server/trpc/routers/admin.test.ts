@@ -392,6 +392,10 @@ describe.skipIf(!databaseUrl)('sub-admins (decision 0043)', () => {
     const call = await asTheAdmin(admin)
     const row = () => db.user.findUniqueOrThrow({ where: { id: who.id } })
 
+    // Item 2b.5 — a suspension says why (2026-10-26 final pass).
+    await expect(
+      call.admin.setUserStatus({ userId: who.id, status: 'SUSPENDED' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' })
     await call.admin.setUserStatus({
       userId: who.id,
       status: 'SUSPENDED',
@@ -430,9 +434,14 @@ describe.skipIf(!databaseUrl)('sub-admins (decision 0043)', () => {
     const call = await asTheAdmin(admin)
     sent.length = 0
 
+    // Confirmed on the server too, by the name typed (2026-10-26 final pass).
+    await expect(
+      call.admin.deleteAccount({ userId: who.id, note: 'Impersonation.', confirm: 'someone' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' })
     const { finishesAt } = await call.admin.deleteAccount({
       userId: who.id,
       note: 'Impersonation.',
+      confirm: who.username,
     })
     const row = await db.user.findUniqueOrThrow({ where: { id: who.id } })
     expect(row.status).toBe('SUSPENDED')
@@ -459,6 +468,19 @@ describe.skipIf(!databaseUrl)('sub-admins (decision 0043)', () => {
       status: 'ACTIVE',
       bannedAt: null,
       deletionRequestedAt: null,
+    })
+
+    // A deletion the person asked for before a ban is theirs, and lifting
+    // the ban leaves it, and leaves them able to keep the account (2026-10-26).
+    const leaving = await person('leaving')
+    const asked = new Date(Date.now() - 60 * 60 * 1000)
+    await db.user.update({ where: { id: leaving.id }, data: { deletionRequestedAt: asked } })
+    await call.admin.ban({ userId: leaving.id, note: 'Spam.' })
+    await call.admin.unban({ userId: leaving.id })
+    expect(await db.user.findUniqueOrThrow({ where: { id: leaving.id } })).toMatchObject({
+      status: 'ACTIVE',
+      bannedAt: null,
+      deletionRequestedAt: asked,
     })
   })
 
@@ -495,7 +517,7 @@ describe.skipIf(!databaseUrl)('sub-admins (decision 0043)', () => {
     expect((await db.user.findUniqueOrThrow({ where: { id: other.id } })).status).toBe('ACTIVE')
 
     // The admin may act on a sub-admin, and a sub-admin may act on a member.
-    await call.admin.setUserStatus({ userId: other.id, status: 'SUSPENDED' })
+    await call.admin.setUserStatus({ userId: other.id, status: 'SUSPENDED', note: 'Spam.' })
     expect((await db.user.findUniqueOrThrow({ where: { id: other.id } })).status).toBe('SUSPENDED')
     const member = await person('member9')
     await asSub.admin.ban({ userId: member.id, note: 'Spam.' })

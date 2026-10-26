@@ -240,7 +240,7 @@ function AccountCard({
             } else if (open === 'ban') {
               ban.mutate({ userId: account.id, note: note5 })
             } else if (confirm === confirmWith) {
-              remove.mutate({ userId: account.id, note: note5 })
+              remove.mutate({ userId: account.id, note: note5, confirm })
             }
           }}
         >

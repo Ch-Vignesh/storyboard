@@ -43,7 +43,11 @@ export async function POST(request: Request, context: { params: Promise<{ job: s
   }
 
   const { job } = await context.params
-  const run = CRON_JOBS[job as CronJob] as ((db: typeof prisma) => Promise<unknown>) | undefined
+  // Own names only: indexing with the address's segment also reached what
+  // every object inherits, `constructor` among them (2026-10-26 final pass).
+  const run = Object.hasOwn(CRON_JOBS, job)
+    ? (CRON_JOBS[job as CronJob] as (db: typeof prisma) => Promise<unknown>)
+    : undefined
   if (!run) return new NextResponse('No such job', { status: 404 })
 
   try {

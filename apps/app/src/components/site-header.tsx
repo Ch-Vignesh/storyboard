@@ -6,6 +6,7 @@ import { DeletionBanner } from '@/components/deletion-banner'
 import Link from '@/components/link'
 import { UserAvatar } from '@/components/user-avatar'
 import { adminHome } from '@/lib/admin-screens'
+import { BADGE_MAX } from '@/lib/schemas/constants'
 import { loadAdminActor } from '@/server/admin-actor'
 import { caller } from '@/trpc/server'
 
@@ -132,7 +133,7 @@ export async function SiteHeader({ session: given }: { session?: Session | null 
 function Badge({ count, label }: { count: number; label: string }) {
   return (
     <span className="ml-1.5 rounded-full bg-pencil px-1.5 py-px text-[11px] text-paper tabular-nums">
-      {count > 99 ? '99+' : count}
+      {count > BADGE_MAX ? `${String(BADGE_MAX)}+` : count}
       <span className="sr-only"> {label}</span>
     </span>
   )

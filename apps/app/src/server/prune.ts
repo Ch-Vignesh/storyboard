@@ -58,6 +58,9 @@ export async function pruneUnconfirmedAccounts(
   const { count } = await db.user.deleteMany({
     where: {
       createdAt: { lt: before },
+      // Never the row an erasure leaves (decision 0024), which has no
+      // password, address or name either (2026-10-26 final pass).
+      status: 'ACTIVE',
       emailVerifiedAt: null,
       passwordHash: null,
       username: null,
@@ -68,6 +71,10 @@ export async function pruneUnconfirmedAccounts(
       collaborations: { none: {} },
       invitationsSent: { none: {} },
       versionsCreated: { none: {} },
+      // Added since the filter was written (items 7.10, 7b.1, 3.13).
+      versionEvents: { none: {} },
+      publications: { none: {} },
+      avatar: { is: null },
       revisionsAuthored: { none: {} },
       revisionsAccepted: { none: {} },
       drafts: { none: {} },

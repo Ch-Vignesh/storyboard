@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { PasswordInput } from '@/components/password-input'
 import { PasswordRules } from '@/components/password-rules'
 import { PASSWORD_CHARS } from '@/lib/schemas/constants'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
 /**
@@ -19,7 +20,7 @@ import { useTRPC } from '@/trpc/client'
  * again with the new one behind the scenes, so the person who just changed
  * it is not thrown out by it. "Sign out on every device" includes this one.
  */
-export function AccountSecurity() {
+export function AccountSecurity({ timeZone }: { timeZone: string }) {
   const trpc = useTRPC()
   const { data: settings } = useSuspenseQuery(trpc.settings.get.queryOptions())
 
@@ -53,6 +54,7 @@ export function AccountSecurity() {
         hasPassword={settings.user.hasPassword}
         googleLinkedAt={settings.user.googleLinkedAt}
         googleDisconnectedAt={settings.user.googleDisconnectedAt}
+        timeZone={timeZone}
       />
 
       <h2 className="mt-12 text-[12px] font-medium tracking-wide text-ink-faint uppercase">
@@ -287,11 +289,14 @@ function SignInMethods({
   hasPassword,
   googleLinkedAt,
   googleDisconnectedAt,
+  timeZone,
 }: {
   email: string
   hasPassword: boolean
   googleLinkedAt: Date | null
   googleDisconnectedAt: Date | null
+  /** Item 1.18 — the reader's zone, so the server and the browser draw the same day. */
+  timeZone: string
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -300,8 +305,7 @@ function SignInMethods({
       onSuccess: () => queryClient.invalidateQueries(trpc.settings.get.queryFilter()),
     }),
   )
-  const day = (date: Date) =>
-    date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  const day = (date: Date) => formatInZone(date, 'long', timeZone)
 
   return (
     <dl className="mt-3 space-y-3 text-[13.5px]">

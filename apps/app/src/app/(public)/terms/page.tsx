@@ -1,7 +1,11 @@
 import type { Metadata } from 'next'
 import Link from '@/components/link'
 
-import { ACCOUNT_DELETION_GRACE_DAYS, SUGGESTION_QUOTA } from '@/lib/schemas/constants'
+import {
+  ACCOUNT_DELETION_GRACE_DAYS,
+  REPORTS_TO_SUSPEND,
+  SUGGESTION_QUOTA,
+} from '@/lib/schemas/constants'
 import { contactAddress } from '@/lib/site'
 
 export const metadata: Metadata = {
@@ -109,11 +113,11 @@ export default function TermsPage() {
         <p>
           Anyone can report a story, a suggestion, an idea or an account. A person reads every
           report. An upheld report can hide what it was about, so that it reads as removed to
-          everyone but its writer; nothing is deleted, and credit already earned stays. Ten upheld
-          reports suspend an account: the person can no longer sign in or write, and their work
-          stays readable. A suspension can be lifted, and an account can be banned or closed by an
-          administrator. You can block a person yourself: they can still read your stories, and they
-          cannot send you suggestions or ideas.
+          everyone but its writer; nothing is deleted, and credit already earned stays.{' '}
+          {REPORTS_TO_SUSPEND} upheld reports suspend an account: the person can no longer sign in
+          or write, and their work stays readable. A suspension can be lifted, and an account can be
+          banned or closed by an administrator. You can block a person yourself: they can still read
+          your stories, and they cannot send you suggestions or ideas.
         </p>
         <p>
           A helper may have at most {SUGGESTION_QUOTA.contributor} suggestions waiting on any one
@@ -149,6 +153,7 @@ export default function TermsPage() {
           When these terms change, the date at the top changes and the change is described on this
           page. Using Draftboard after that is agreeing to the new terms.
         </p>
+        <p>24 October 2026: section 4, on what publishing an edition of a story means.</p>
       </Section>
 
       <p className="mt-10 text-[13.5px] text-ink-faint">

@@ -111,7 +111,16 @@ test('flow 3 — a guest reads, signs in, and sends a suggestion', async ({ brow
     'That was the whole of it, and she knew it.',
   ])
 
+  // A note typed and left at once is kept: a three-second timer was its only
+  // save, and the link did not wait for it (2026-10-26 final pass).
+  const composer = helperPage.url()
   await helperPage.getByLabel(/a note to the author/i).fill('Made the omission the event.')
+  await helperPage.getByRole('link', { name: /leave it as a draft/i }).click()
+  await expect(helperPage).not.toHaveURL(composer)
+  await helperPage.goto(composer)
+  await expect(helperPage.getByLabel(/a note to the author/i)).toHaveValue(
+    'Made the omission the event.',
+  )
   const send = helperPage.getByRole('button', { name: /send this to the author/i })
   await expect(send).toBeEnabled()
   await send.click()

@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient, ReportCategory } from '@storyboard/db'
 
 import type { Actor } from '@/lib/authz'
+import { settleAnswered } from '@/server/answers'
 
 type Db = PrismaClient | Prisma.TransactionClient
 
@@ -75,6 +76,23 @@ export function redactSuggestionText<
   }
 }
 
+/**
+ * Decision 0013 — a contribution whose record its writer erased names nobody:
+ * the words stay where they were accepted, and the person goes. Selected as
+ * `credits: ERASED_RECORD` beside the person, on a suggestion or an idea.
+ * Until 2026-10-26 only the credit line and the profile forgot them; the
+ * suggestion's page, its title, the request page and the notifications still
+ * named them (the final pass's detective review, high).
+ */
+export const ERASED_RECORD = {
+  where: { erasedAt: { not: null } },
+  select: { id: true },
+  take: 1,
+} as const
+
+/** Who an erased record shows: `nameOf` reads it as "a former contributor", with no profile and no picture. */
+export const ERASED_PERSON = { id: '', username: null, displayName: null, avatar: null } as const
+
 export type HiddenTarget = { type: 'STORYBOARD' | 'SUGGESTION' | 'IDEA'; id: string }
 
 /**
@@ -90,11 +108,19 @@ export async function setHiddenState(
     ? { hiddenAt: new Date(), hiddenById: change.byId, hiddenReason: change.reason }
     : { hiddenAt: null, hiddenById: null, hiddenReason: null }
   const where = { id: target.id }
+  if (target.type === 'STORYBOARD') {
+    return (await db.storyboard.updateMany({ where, data })).count > 0
+  }
   const result =
-    target.type === 'STORYBOARD'
-      ? await db.storyboard.updateMany({ where, data })
-      : target.type === 'SUGGESTION'
-        ? await db.suggestion.updateMany({ where, data })
-        : await db.idea.updateMany({ where, data })
-  return result.count > 0
+    target.type === 'SUGGESTION'
+      ? await db.suggestion.updateMany({ where, data })
+      : await db.idea.updateMany({ where, data })
+  if (result.count === 0) return false
+  // Hidden, it answers nothing; shown again, it answers again (FR-5.9).
+  const row =
+    target.type === 'SUGGESTION'
+      ? await db.suggestion.findUnique({ where, select: { requestId: true } })
+      : await db.idea.findUnique({ where, select: { requestId: true } })
+  if (row) await settleAnswered(db, row.requestId)
+  return true
 }

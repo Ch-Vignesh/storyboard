@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { ACCOUNT_DELETION_GRACE_DAYS } from '@/lib/schemas/constants'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
 /**
@@ -30,9 +31,12 @@ import { useTRPC } from '@/trpc/client'
 export function DeleteAccount({
   username,
   deletionRequestedAt,
+  timeZone,
 }: {
   username: string | null
   deletionRequestedAt: Date | null
+  /** Item 1.18 — the reader's zone, so the server and the browser draw the same day. */
+  timeZone: string
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -66,18 +70,17 @@ export function DeleteAccount({
         <div className="border-ochre-edge mt-3 border bg-ochre-wash p-4">
           <p className="max-w-measure text-[14px] leading-relaxed text-ink">
             It will be erased on{' '}
-            <strong className="font-medium">
-              {finishesAt.toLocaleDateString('en-GB', {
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric',
-              })}
-            </strong>
-            . Until then you can read, and you cannot write. Your profile is already hidden.
+            <strong className="font-medium">{formatInZone(finishesAt, 'long', timeZone)}</strong>.
+            Until then you can read, and you cannot write. Your profile is already hidden.
           </p>
           <p className="mt-2 max-w-measure text-[13.5px] leading-relaxed text-ink-soft">
             If you did not do this, somebody else is in your account. Stop the deletion and change
             your password.
+          </p>
+          {/* Item 3.14 — the copy stays on offer through the grace period, as the
+              download itself does; it was offered only before asking (2026-10-26). */}
+          <p className="mt-2 max-w-measure text-[13.5px] leading-relaxed text-ink-soft">
+            Want a copy of everything before then? <DownloadData />
           </p>
           <Button
             variant="primary"
@@ -131,8 +134,9 @@ export function DeleteAccount({
           <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 text-[13.5px] leading-relaxed">
             <dt className="text-crimson">Erased</dt>
             <dd className="text-ink-soft">
-              Your name, username, email, biography and password. Your notifications, your reading
-              settings, and any manuscript you uploaded but never turned into a story.
+              Your name, username, email, profile picture, biography and password. Your
+              notifications, your reading settings, and any manuscript you uploaded but never turned
+              into a story.
             </dd>
             <dt className="text-moss">Kept</dt>
             <dd className="text-ink-soft">

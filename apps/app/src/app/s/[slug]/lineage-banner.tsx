@@ -4,9 +4,8 @@ import { useQuery } from '@tanstack/react-query'
 import Link from '@/components/link'
 
 import { nameOf } from '@/lib/people'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
-
-const DATE = { day: 'numeric', month: 'short', year: 'numeric' } as const
 
 /**
  * FR-10.4 and FR-10.5 — where this storyboard came from, and where it went.
@@ -17,7 +16,16 @@ const DATE = { day: 'numeric', month: 'short', year: 'numeric' } as const
  * why chapter 12 is missing, the second is the visible half of FR-10.6's
  * promise that an author cannot make a spin-off disappear.
  */
-export function LineageBanner({ storyboardId, slug }: { storyboardId: string; slug: string }) {
+export function LineageBanner({
+  storyboardId,
+  slug,
+  timeZone,
+}: {
+  storyboardId: string
+  slug: string
+  /** Item 1.18 — the reader's zone, so the server and the browser draw the same day. */
+  timeZone: string
+}) {
   const trpc = useTRPC()
   const lineage = useQuery(trpc.spinOff.lineage.queryOptions({ storyboardId }))
   const spinOffs = useQuery(trpc.spinOff.listFor.queryOptions({ storyboardId }))
@@ -43,7 +51,7 @@ export function LineageBanner({ storyboardId, slug }: { storyboardId: string; sl
               by {nameOf(origin.owner)}
             </>
           )}
-          {origin.forkedAt ? ` on ${origin.forkedAt.toLocaleDateString('en-GB', DATE)}` : ''}
+          {origin.forkedAt ? ` on ${formatInZone(origin.forkedAt, 'short', timeZone)}` : ''}
           {/* FR-10.4 — said only when true, and said plainly when it is. */}
           {origin.continuedSince ? ' — that story has continued since.' : '.'}
           {/* FR-14.5 — the original's note on rights, as its author wrote it. */}

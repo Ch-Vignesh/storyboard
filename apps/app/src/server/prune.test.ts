@@ -25,6 +25,7 @@ describe.skipIf(!databaseUrl)('the daily prune of what signing in leaves behind'
     emailVerifiedAt?: Date | null
     passwordHash?: string | null
     username?: string | null
+    status?: 'ACTIVE' | 'DELETED'
   }): Promise<string> {
     const row = await db.user.create({
       data: { email: `prune-${randomUUID().slice(0, 8)}@example.test`, ...data },
@@ -94,14 +95,22 @@ describe.skipIf(!databaseUrl)('the daily prune of what signing in leaves behind'
     // Has a password but never confirmed — not a state sign-up can produce,
     // and exactly why the filter asks for every condition rather than one.
     const odd = await user({ createdAt: daysAgo(stale), passwordHash: 'not-a-real-hash' })
+    // What an erasure leaves (decision 0024): no password, address or name,
+    // and still not a sign-up to tidy away (2026-10-26 final pass).
+    const erased = await user({ createdAt: daysAgo(stale * 3), status: 'DELETED' })
+    // A picture is something (item 3.13), however the row got here.
+    const pictured = await user({ createdAt: daysAgo(stale) })
+    await db.userAvatar.create({
+      data: { userId: pictured, bytes: Buffer.from('not really webp'), contentType: 'image/webp' },
+    })
 
     await pruneUnconfirmedAccounts(db)
 
     const left = await db.user.findMany({
-      where: { id: { in: [abandoned, recent, google, odd] } },
+      where: { id: { in: [abandoned, recent, google, odd, erased, pictured] } },
       select: { id: true },
     })
-    expect(left.map((row) => row.id).sort()).toEqual([recent, google, odd].sort())
+    expect(left.map((row) => row.id).sort()).toEqual([recent, google, odd, erased, pictured].sort())
     // Its links went with it.
     expect(await db.emailVerificationToken.count({ where: { userId: abandoned } })).toBe(0)
   })

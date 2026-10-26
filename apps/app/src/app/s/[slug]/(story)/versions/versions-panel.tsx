@@ -17,8 +17,6 @@ import type { inferRouterOutputs } from '@trpc/server'
 type Version = inferRouterOutputs<AppRouter>['version']['list']['versions'][number]
 type VersionEvent = inferRouterOutputs<AppRouter>['version']['list']['events'][number]
 
-const DATE = { day: 'numeric', month: 'short', year: 'numeric' } as const
-
 /**
  * FR-10.1 and FR-10.2 — versions of one storyboard.
  *
@@ -175,7 +173,7 @@ export function VersionsPanel({
                       </span>
                       {' · started by '}
                       {nameOf(version.createdBy)} on{' '}
-                      {version.createdAt.toLocaleDateString('en-GB', DATE)}
+                      {formatInZone(version.createdAt, 'short', timeZone)}
                     </p>
                   </>
                 )}

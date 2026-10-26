@@ -33,6 +33,14 @@ const nextConfig: NextConfig = {
   transpilePackages: ['@storyboard/ui', '@storyboard/db', '@storyboard/compare'],
   // Native and worker-thread modules stay outside the server bundle.
   serverExternalPackages: ['pg', '@node-rs/argon2', 'pino'],
+  experimental: {
+    // NFR-1: the stylesheet in the page itself, not a request after it. On
+    // the 3G profile every request costs half a second before a byte arrives,
+    // and the page could not paint until its stylesheet had made that trip
+    // (2026-10-26 final pass). The policy already allows inline styles
+    // (`lib/csp.ts`), where the strict part is the scripts.
+    inlineCss: true,
+  },
   headers() {
     return Promise.resolve([{ source: '/(.*)', headers: securityHeaders }])
   },

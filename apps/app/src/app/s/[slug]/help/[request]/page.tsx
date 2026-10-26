@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server'
 import type { Metadata } from 'next'
 import Link from '@/components/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 
 import { auth } from '@/auth'
 import { CopyLink } from '@/components/copy-link'
@@ -42,6 +42,10 @@ export default async function RequestPage({ params }: Params) {
   const data = await load(publicId)
   const session = await auth()
   const { request, permissions, place } = data
+  // At its own story's address only. Under another story's, the page framed
+  // somebody's request as that story's, the example label included (the
+  // 2026-10-26 final pass); a renamed story's old address lands here too.
+  if (request.storyboard.slug !== slug) redirect(`/s/${request.storyboard.slug}/help/${publicId}`)
 
   const kind = REQUEST_KINDS.find((option) => option.value === request.kind)!
   const flavour = flavourForStoryType(request.storyboard.type)
@@ -246,6 +250,7 @@ export default async function RequestPage({ params }: Params) {
           requestState={request.state}
           canDecide={permissions.canOpenRequest}
           viewerId={session?.user.id ?? null}
+          timeZone={timeZone}
         />
       ) : (
         <IdeaThread

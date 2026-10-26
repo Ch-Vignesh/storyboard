@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { env } from '@/env'
 import { EMAIL_CHANGE_LINK_LIFETIME } from '@/lib/email-change'
+import { maskEmail } from '@/lib/mask-email'
 import { hashPassword, verifyPassword } from '@/auth/password'
 import { createEmailChangeToken } from '@/auth/tokens'
 import { logger } from '@/lib/logger'
@@ -17,6 +18,7 @@ import {
   AVATAR,
   PASSWORD_CHARS,
   RECENT_SIGN_IN_MINUTES,
+  TYPED_ACCOUNT_MAX_CHARS,
 } from '@/lib/schemas/constants'
 import { afterResponse } from '@/server/after-response'
 import { recordEvent } from '@/server/audit'
@@ -25,7 +27,7 @@ import { clientAddress } from '@/server/client-address'
 import { DAY_MS, enforce, HOUR_MS, key, whenToRetry } from '@/server/limits'
 import { getMailer } from '@/server/mail/mailer'
 import { deletionRequestedMail } from '@/server/mail/templates/account-deletion'
-import { emailChangeMail } from '@/server/mail/templates/email-change'
+import { emailChangeMail, emailChangeRequestedMail } from '@/server/mail/templates/email-change'
 import { passwordChangedMail } from '@/server/mail/templates/password-changed'
 import { formatInZone, timeZoneFromCookieHeader } from '@/lib/time-zone'
 
@@ -235,7 +237,7 @@ export const settingsRouter = createTRPCRouter({
         if (Date.now() - signedInAt > RECENT_SIGN_IN_MINUTES * 60 * 1000) {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: 'Sign in again to change your address.',
+            message: 'Sign out, then sign in again with Google, to change your address.',
           })
         }
       }
@@ -270,6 +272,23 @@ export const settingsRouter = createTRPCRouter({
           logger.error(
             { event: 'settings.email.link_failed', userId, error: String(error) },
             'address change link not sent',
+          )
+        }
+        // And the address it would leave, while the move can still be
+        // stopped (2026-10-26 final pass).
+        try {
+          await mailer.send(
+            emailChangeRequestedMail({
+              to: user.email,
+              newEmailMasked: maskEmail(input.newEmail),
+              lifetime: EMAIL_CHANGE_LINK_LIFETIME,
+              resetUrl: `${env.NEXT_PUBLIC_APP_URL}/forgot-password`,
+            }),
+          )
+        } catch (error) {
+          logger.error(
+            { event: 'settings.email.warning_failed', userId, error: String(error) },
+            'address change warning not sent',
           )
         }
       })
@@ -492,7 +511,7 @@ export const settingsRouter = createTRPCRouter({
    * to choose.
    */
   requestDeletion: accountProcedure
-    .input(z.object({ confirm: z.string().trim().min(1).max(320) }))
+    .input(z.object({ confirm: z.string().trim().min(1).max(TYPED_ACCOUNT_MAX_CHARS) }))
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id
       const user = await ctx.db.user.findUniqueOrThrow({

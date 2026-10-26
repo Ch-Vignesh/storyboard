@@ -15,6 +15,10 @@ export type OwnSuggestion = {
   publicId: string
   wordCount: number
   updatedAt: Date
+  /** Set when it was sent once and taken back to update: then it is withdrawn, not deleted. */
+  submittedAt: Date | null
+  /** On a story its writer can no longer read: nothing of it is shown, and it can only go. */
+  unreadable?: boolean
   request: { title: string; publicId: string; storyboard: { slug: string; title: string } }
 }
 
@@ -71,9 +75,13 @@ export function DraftsAndStale({
                 className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-4"
               >
                 <div className="min-w-0">
-                  <p className="font-manuscript text-[17px] text-ink">{draft.request.title}</p>
+                  <p className="font-manuscript text-[17px] text-ink">
+                    {draft.unreadable
+                      ? 'A draft on a story you can no longer read'
+                      : draft.request.title}
+                  </p>
                   <p className="mt-1 text-[12.5px] text-ink-faint">
-                    {draft.request.storyboard.title}
+                    {draft.unreadable ? 'Private now, or gone' : draft.request.storyboard.title}
                     {' · '}
                     {draft.wordCount.toLocaleString('en-GB')} words
                     {' · saved '}
@@ -81,9 +89,11 @@ export function DraftsAndStale({
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button asChild size="sm">
-                    <Link href={composerPath(draft)}>Continue</Link>
-                  </Button>
+                  {draft.unreadable ? null : (
+                    <Button asChild size="sm">
+                      <Link href={composerPath(draft)}>Continue</Link>
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" onClick={() => setDiscarding(draft)}>
                     Throw away
                   </Button>
@@ -138,16 +148,24 @@ export function DraftsAndStale({
 
       <ConfirmDialog
         open={discarding !== null}
-        title="Throw this draft away?"
-        confirmLabel="Throw it away"
+        title={discarding?.submittedAt ? 'Take this back for good?' : 'Throw this draft away?'}
+        confirmLabel={discarding?.submittedAt ? 'Take it back' : 'Throw it away'}
         destructive
         busy={discard.isPending}
+        error={discard.error}
         onCancel={() => setDiscarding(null)}
         onConfirm={() => {
           if (discarding) discard.mutate({ suggestionId: discarding.id })
         }}
       >
-        <p>Its words go for good. Nobody has read it, and nobody is told.</p>
+        {discarding?.submittedAt ? (
+          <p>
+            You sent it once, before taking it back to update it. It is withdrawn, as a waiting
+            suggestion is, and it stays in your list as withdrawn. Nobody is told.
+          </p>
+        ) : (
+          <p>Its words go for good. Nobody has read it, and nobody is told.</p>
+        )}
       </ConfirmDialog>
     </>
   )

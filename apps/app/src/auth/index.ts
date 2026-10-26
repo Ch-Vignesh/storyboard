@@ -4,6 +4,7 @@ import Credentials from 'next-auth/providers/credentials'
 import Google from 'next-auth/providers/google'
 
 import { env } from '@/env'
+import { logger } from '@/lib/logger'
 
 import { authorizeCredentials } from './authorize'
 import { authConfig, sessionRefused } from './config'
@@ -92,16 +93,30 @@ const callbacks: NextAuthConfig['callbacks'] = {
     // `null` makes Auth.js treat it as signed out and clear its cookie. One
     // lookup by primary key; skipped at sign-in, when the token is brand new.
     if (!params.user && typeof token.id === 'string') {
-      const account = await prisma.user.findUnique({
-        where: { id: token.id },
-        select: {
-          passwordChangedAt: true,
-          sessionsEndedAt: true,
-          username: true,
-          onboardedAt: true,
-          status: true,
-        },
-      })
+      // A database that does not answer is not a refused session. Auth.js
+      // clears the cookie on anything thrown here, so a few seconds of
+      // trouble signed out whoever came back to their tab then (2026-10-26
+      // final pass, the detective review). The token stands until the
+      // database answers; every write reads the account again anyway.
+      let account
+      try {
+        account = await prisma.user.findUnique({
+          where: { id: token.id },
+          select: {
+            passwordChangedAt: true,
+            sessionsEndedAt: true,
+            username: true,
+            onboardedAt: true,
+            status: true,
+          },
+        })
+      } catch (error) {
+        logger.warn(
+          { event: 'auth.session.check_failed', error: String(error) },
+          'session not checked: the database did not answer',
+        )
+        return token
+      }
       // An erased account (decision 0024) has nobody left to be signed in.
       if (!account || account.status === 'DELETED') return null
       // ...nor is one that signed out everywhere, or is older than D-15

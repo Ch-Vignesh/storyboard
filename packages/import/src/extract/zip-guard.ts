@@ -1,4 +1,4 @@
-import { Unzip, UnzipInflate, UnzipPassThrough, unzipSync } from 'fflate'
+import { Inflate, unzipSync } from 'fflate'
 
 /**
  * What a `.docx` claims it will expand to, before anything expands it.
@@ -15,12 +15,58 @@ import { Unzip, UnzipInflate, UnzipPassThrough, unzipSync } from 'fflate'
 export const MAX_UNCOMPRESSED_BYTES = 80 * 1024 * 1024
 
 export class SuspiciousArchiveError extends Error {
-  constructor(declared: number) {
+  constructor(declared: number | null) {
     super(
-      `That file says it holds ${String(Math.round(declared / 1024 / 1024))} MB inside a much smaller archive, which is not what a manuscript looks like.`,
+      declared === null
+        ? 'That file is put together in a way a manuscript is not, so it was not opened.'
+        : `That file says it holds ${String(Math.round(declared / 1024 / 1024))} MB inside a much smaller archive, which is not what a manuscript looks like.`,
     )
     this.name = 'SuspiciousArchiveError'
   }
+}
+
+const LOCAL_HEADER = 0x04034b50
+const CENTRAL_HEADER = 0x02014b50
+const END_OF_DIRECTORY = 0x06054b50
+
+type Member = { method: number; compressedSize: number; dataStart: number }
+
+/**
+ * The members as JSZip, which `mammoth` uses, reads them: the method and the
+ * compressed size from the central directory, and the data where the local
+ * header says it starts. Null when there is no directory to read, which JSZip
+ * cannot open either.
+ */
+function membersAsJsZipReadsThem(file: Buffer): Member[] | null {
+  const floor = Math.max(0, file.length - 22 - 0xffff)
+  let end = -1
+  for (let at = file.length - 22; at >= floor; at -= 1) {
+    if (file.readUInt32LE(at) === END_OF_DIRECTORY) {
+      end = at
+      break
+    }
+  }
+  if (end < 0) return null
+
+  const count = file.readUInt16LE(end + 10)
+  const directoryAt = file.readUInt32LE(end + 16)
+  // ZIP64, which no manuscript needs and whose sizes this does not read.
+  if (count === 0xffff || directoryAt === 0xffffffff) throw new SuspiciousArchiveError(null)
+
+  const members: Member[] = []
+  let at = directoryAt
+  for (let index = 0; index < count; index += 1) {
+    if (at + 46 > file.length || file.readUInt32LE(at) !== CENTRAL_HEADER) return null
+    const localAt = file.readUInt32LE(at + 42)
+    if (localAt + 30 > file.length || file.readUInt32LE(localAt) !== LOCAL_HEADER) return null
+    members.push({
+      method: file.readUInt16LE(at + 10),
+      compressedSize: file.readUInt32LE(at + 20),
+      dataStart: localAt + 30 + file.readUInt16LE(localAt + 26) + file.readUInt16LE(localAt + 28),
+    })
+    at += 46 + file.readUInt16LE(at + 28) + file.readUInt16LE(at + 30) + file.readUInt16LE(at + 32)
+  }
+  return members
 }
 
 /**
@@ -32,8 +78,13 @@ export class SuspiciousArchiveError extends Error {
  * giant. But they are written by whoever made the archive, so a member can
  * declare a kilobyte and inflate to gigabytes, and the libraries after this
  * one inflate first and notice later (phase 12 audit). So every member is also
- * inflated here, as a stream, counted, and dropped: nothing is kept, and it
- * stops at the cap rather than at the end.
+ * inflated here, counted and dropped, stopping at the cap.
+ *
+ * Inflated as JSZip will inflate it, from the central directory: the guard
+ * read the local headers, and an archive whose two headers disagree passed
+ * it, then inflated in full inside `mammoth` (2026-10-26 final pass, the
+ * detective review). A member this cannot inflate is refused rather than
+ * waved through, since the library after it might manage more of it.
  */
 export function assertReasonableArchive(file: Buffer): void {
   let declared = 0
@@ -54,21 +105,27 @@ export function assertReasonableArchive(file: Buffer): void {
 
   if (declared > MAX_UNCOMPRESSED_BYTES) throw new SuspiciousArchiveError(declared)
 
+  const members = membersAsJsZipReadsThem(file)
+  if (!members) return
+
   let actual = 0
-  const unzip = new Unzip((entry) => {
-    entry.ondata = (error, chunk) => {
-      if (error) throw error
-      actual += chunk.length
-      if (actual > MAX_UNCOMPRESSED_BYTES) throw new SuspiciousArchiveError(actual)
+  const count = (bytes: number) => {
+    actual += bytes
+    if (actual > MAX_UNCOMPRESSED_BYTES) throw new SuspiciousArchiveError(actual)
+  }
+  for (const member of members) {
+    const data = file.subarray(member.dataStart, member.dataStart + member.compressedSize)
+    if (member.method === 0) {
+      count(data.length)
+    } else if (member.method === 8) {
+      try {
+        const inflater = new Inflate((chunk) => count(chunk.length))
+        inflater.push(new Uint8Array(data), true)
+      } catch (error) {
+        if (error instanceof SuspiciousArchiveError) throw error
+        throw new SuspiciousArchiveError(null)
+      }
     }
-    entry.start()
-  })
-  unzip.register(UnzipInflate)
-  unzip.register(UnzipPassThrough)
-  try {
-    unzip.push(new Uint8Array(file), true)
-  } catch (error) {
-    if (error instanceof SuspiciousArchiveError) throw error
-    // Damaged rather than dangerous; `mammoth` will say so in its own words.
+    // Any other method JSZip cannot read either, and `mammoth` will say so.
   }
 }

@@ -21,7 +21,7 @@ on:
   schedule:
     - cron: '*/10 * * * *' # immediate
     - cron: '0 * * * *' # hourly
-    - cron: '0 9 * * 0' # weekly
+    - cron: '0 9-12 * * 0' # weekly: four runs, each taking whoever the last did not reach
     - cron: '30 8 * * *' # nudge
     - cron: '15 3 * * *' # prune
     - cron: '45 3 * * *' # purge
@@ -41,7 +41,7 @@ permissions: {}
 # phase 12 audit, the two were different groups and could send the same mail
 # at once.
 concurrency:
-  group: cron-${{ github.event.schedule == '*/10 * * * *' && 'immediate' || github.event.schedule == '0 * * * *' && 'hourly' || github.event.schedule == '0 9 * * 0' && 'weekly' || github.event.schedule == '30 8 * * *' && 'nudge' || github.event.schedule == '15 3 * * *' && 'prune' || github.event.schedule == '45 3 * * *' && 'purge' || inputs.job }}
+  group: cron-${{ github.event.schedule == '*/10 * * * *' && 'immediate' || github.event.schedule == '0 * * * *' && 'hourly' || github.event.schedule == '0 9-12 * * 0' && 'weekly' || github.event.schedule == '30 8 * * *' && 'nudge' || github.event.schedule == '15 3 * * *' && 'prune' || github.event.schedule == '45 3 * * *' && 'purge' || inputs.job }}
   cancel-in-progress: false
 
 jobs:
@@ -62,7 +62,7 @@ jobs:
           case "$SCHEDULE" in
             '*/10 * * * *') job=immediate ;;
             '0 * * * *') job=hourly ;;
-            '0 9 * * 0') job=weekly ;;
+            '0 9-12 * * 0') job=weekly ;;
             '30 8 * * *') job=nudge ;;
             '15 3 * * *') job=prune ;;
             '45 3 * * *') job=purge ;;

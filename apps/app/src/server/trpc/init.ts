@@ -105,8 +105,27 @@ const timedProcedure = t.procedure.use(async ({ path, type, next }) => {
   if (ms >= SLOW_PROCEDURE_MS) {
     logger.warn({ event: 'trpc.slow', path, type, ms, ok: result.ok }, 'slow procedure')
   }
+  if (!result.ok && refusedNul(result.error.cause)) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: NUL_REFUSED, cause: result.error })
+  }
   return result
 })
+
+/**
+ * Postgres stores no NUL character, in text (22021) or in JSON (22P05). One
+ * pasted from somewhere, or sent on purpose, reached the person as a fault of
+ * ours from every field that takes free text (2026-10-26 final pass, the
+ * detective review). Said once here, for all of them.
+ */
+const NUL_REFUSED =
+  'That text has an invisible character in it that cannot be saved. Paste it as plain text and try again.'
+
+function refusedNul(error: unknown): boolean {
+  const code = (
+    error as { meta?: { driverAdapterError?: { cause?: { originalCode?: unknown } } } } | null
+  )?.meta?.driverAdapterError?.cause?.originalCode
+  return code === '22021' || code === '22P05'
+}
 
 /**
  * The session as `lib/authz` wants it. A guest is `null`, which is the only

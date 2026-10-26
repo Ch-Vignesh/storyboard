@@ -21,6 +21,7 @@ describe.skipIf(!databaseUrl)('sign-in attempts (FR-13.3, phase 12 audit)', () =
   let clients = 0
   const aClient = () => `${prefix}:${String((clients += 1))}`
   const anAddress = () => `signin-${randomUUID().slice(0, 8)}@example.test`
+  const addresses: string[] = []
 
   beforeAll(() => {
     db = createPrismaClient({ log: [] })
@@ -35,6 +36,10 @@ describe.skipIf(!databaseUrl)('sign-in attempts (FR-13.3, phase 12 audit)', () =
           { key: { startsWith: 'auth:signin:unknown:' } },
         ],
       },
+    })
+    const { key } = await import('@/server/limits')
+    await db.rateLimitHit.deleteMany({
+      where: { key: { in: addresses.map((address) => key.signInsTo(address)) } },
     })
     await db.$disconnect()
   })
@@ -59,6 +64,21 @@ describe.skipIf(!databaseUrl)('sign-in attempts (FR-13.3, phase 12 audit)', () =
       expect(await signInAllowed(db, anAddress(), script)).toBe(true)
     }
     expect(await signInAllowed(db, anAddress(), script)).toBe(false)
+  })
+
+  // The 2026-10-26 final pass (the detective review): guesses at one address
+  // spread across many clients met no ceiling at all.
+  it('stops guesses at one address however many clients they come from', async () => {
+    const email = anAddress()
+    addresses.push(email)
+    const perClient = 5
+    for (let attempt = 0; attempt < AUTH_LIMITS.signInsPerAddressPerHour; attempt += perClient) {
+      const client = aClient()
+      for (let tries = 0; tries < perClient; tries += 1) {
+        expect(await signInAllowed(db, email, client)).toBe(true)
+      }
+    }
+    expect(await signInAllowed(db, email, aClient())).toBe(false)
   })
 
   it('still counts per address when there is no client address to key on', async () => {

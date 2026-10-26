@@ -5,6 +5,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
 /**
@@ -27,11 +28,14 @@ export function FinishedSwitch({
   slug,
   finished,
   finishedAt,
+  timeZone,
 }: {
   storyboardId: string
   slug: string
   finished: boolean
   finishedAt: Date | null
+  /** Item 1.18 — the reader's zone, so the server and the browser draw the same day. */
+  timeZone: string
 }) {
   const trpc = useTRPC()
   const router = useRouter()
@@ -51,14 +55,7 @@ export function FinishedSwitch({
       <div className="mt-3">
         <p className="max-w-measure text-[14px] leading-relaxed text-ink-soft">
           Marked finished
-          {finishedAt
-            ? ` on ${finishedAt.toLocaleDateString('en-GB', {
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric',
-              })}`
-            : ''}
-          . Its{' '}
+          {finishedAt ? ` on ${formatInZone(finishedAt, 'long', timeZone)}` : ''}. Its{' '}
           <a href={`/s/${slug}`} className="text-pencil hover:underline">
             reading page
           </a>{' '}

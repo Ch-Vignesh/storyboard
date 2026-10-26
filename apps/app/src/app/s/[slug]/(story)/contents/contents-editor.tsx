@@ -20,7 +20,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { Button } from '@storyboard/ui/components/button'
 import { Input } from '@storyboard/ui/components/input'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from '@/components/link'
 import { useRouter } from 'next/navigation'
 import { useId, useState } from 'react'
@@ -84,7 +84,14 @@ export function ContentsEditor({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  const refresh = () => router.refresh()
+  const queryClient = useQueryClient()
+  // The page's own list comes back with the refresh; the Removed list below is
+  // a query of its own, cached, so a removal the dialog said would be "below"
+  // was not there until a reload (2026-10-26 final pass).
+  const refresh = () => {
+    void queryClient.invalidateQueries(trpc.chapter.removed.queryFilter())
+    router.refresh()
+  }
 
   const reorderChapters = useMutation(trpc.chapter.reorder.mutationOptions({ onSuccess: refresh }))
   const reorderSections = useMutation(trpc.section.reorder.mutationOptions({ onSuccess: refresh }))
@@ -219,6 +226,12 @@ export function ContentsEditor({
           deleteSection.isPending ||
           joinSection.isPending ||
           impactLoading
+        }
+        error={
+          deleteChapter.error ??
+          deleteSection.error ??
+          joinSection.error ??
+          (pending?.kind === 'chapter' ? chapterImpact.error : sectionImpact.error)
         }
         onCancel={() => setPending(null)}
         onConfirm={() => {

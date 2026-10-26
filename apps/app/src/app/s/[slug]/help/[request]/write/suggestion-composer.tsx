@@ -57,7 +57,6 @@ export function SuggestionComposer({
   requestTitle,
   backHref,
   initialNote,
-  savedAt = null,
 }: {
   suggestionId: string
   flavour: DocFlavour
@@ -82,8 +81,6 @@ export function SuggestionComposer({
   maxWords: number
   requestTitle: string
   backHref: string
-  /** Item 8.5 — when the draft was last saved, so a newer copy on the device is offered back. */
-  savedAt?: string | null
 }) {
   const trpc = useTRPC()
   const [words, setWords] = useState(0)
@@ -134,11 +131,12 @@ export function SuggestionComposer({
       setWords(countWords(instance.getText()))
       // Item 8.5 — a newer, different copy kept on this device is offered back.
       if (change) return
+      // Offered whenever it differs, not by this device's clock against the
+      // server's: a slow clock lost offline words (2026-10-26 final pass).
       const kept = readLocalCopy(localKey)
       if (!kept) return
-      const openedOn = savedAt ? Date.parse(savedAt) : 0
       const differs = JSON.stringify(kept.contentJson) !== JSON.stringify(instance.getJSON())
-      if (kept.at > openedOn && differs) setRecovered(kept)
+      if (differs) setRecovered(kept)
       else forgetLocalCopy(localKey)
     },
     onUpdate: ({ editor: instance }) => {
@@ -202,6 +200,18 @@ export function SuggestionComposer({
   useEffect(() => {
     persistRef.current = persist
   }, [persist])
+
+  // With anything unsaved, the browser asks before the page goes: closing the
+  // tab, going back, or a save that failed (2026-10-26 final pass). Not when
+  // changing a sent suggestion, where leaving without saving is the choice.
+  useEffect(() => {
+    if (change) return
+    const onLeave = (event: BeforeUnloadEvent) => {
+      if (edits.current !== persisted.current) event.preventDefault()
+    }
+    window.addEventListener('beforeunload', onLeave)
+    return () => window.removeEventListener('beforeunload', onLeave)
+  }, [change])
 
   // Item 8.5 — back online, try at once.
   useEffect(() => {
@@ -391,14 +401,21 @@ export function SuggestionComposer({
               >
                 {showChange ? 'Hide what changed' : 'What changed'}
               </button>
-              <button
-                type="button"
-                className="text-pencil hover:underline disabled:text-ink-faint"
-                disabled={rebase.isPending}
-                onClick={() => rebase.mutate({ suggestionId })}
-              >
-                Update my draft to the new text
-              </button>
+              {/* A sent suggestion being changed stays against the text it
+                  was sent for: the server moves only drafts, and refused the
+                  button this offered (2026-10-24 final pass). */}
+              {change ? (
+                <span className="text-ink-soft">Yours stays against the text it was sent for.</span>
+              ) : (
+                <button
+                  type="button"
+                  className="text-pencil hover:underline disabled:text-ink-faint"
+                  disabled={rebase.isPending}
+                  onClick={() => rebase.mutate({ suggestionId })}
+                >
+                  Update my draft to the new text
+                </button>
+              )}
             </div>
             {rebase.isError ? (
               <p role="alert" className="mt-2 text-[13px] text-crimson">
@@ -520,6 +537,10 @@ export function SuggestionComposer({
               if (timer.current) clearTimeout(timer.current)
               timer.current = setTimeout(() => void persist(), AUTOSAVE_IDLE_MS)
             }}
+            // Saved on leaving the box too, as the prose is: the timer alone
+            // lost a note typed in the three seconds before "Leave it as a
+            // draft" (2026-10-26 final pass).
+            onBlur={() => void persist()}
           />
           <p
             className={
@@ -544,7 +565,7 @@ export function SuggestionComposer({
             size="lg"
             disabled={!canSend}
             onClick={() => {
-              if (behind) setConfirmBehind(true)
+              if (behind && !change) setConfirmBehind(true)
               else void send()
             }}
           >
@@ -556,7 +577,17 @@ export function SuggestionComposer({
                 ? 'Sending'
                 : 'Send this to the author'}
           </Button>
-          <a href={backHref} className="text-[13.5px] text-pencil hover:underline">
+          <a
+            href={backHref}
+            className="text-[13.5px] text-pencil hover:underline"
+            onClick={(event) => {
+              if (change) return
+              // A draft is left once it is saved. If the save fails, leaving
+              // meets the browser's own question below rather than losing it.
+              event.preventDefault()
+              void persistRef.current().then(() => window.location.assign(backHref))
+            }}
+          >
             {change ? 'Back without changing it' : 'Leave it as a draft'}
           </a>
         </div>
@@ -565,6 +596,7 @@ export function SuggestionComposer({
           title="Send it against the new text?"
           confirmLabel="Send it anyway"
           busy={submit.isPending}
+          error={submit.error}
           onCancel={() => setConfirmBehind(false)}
           onConfirm={() => {
             setConfirmBehind(false)

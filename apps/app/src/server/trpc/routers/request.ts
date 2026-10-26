@@ -17,9 +17,10 @@ import {
   AUTHORS_SELECT,
   authorsOf,
   ideaAnswerWhere,
+  TOP_LEVEL_IDEAS,
   withIdeaAnswers,
 } from '@/server/answers'
-import { redactIdea, redactSuggestionLine } from '@/server/hidden'
+import { ERASED_PERSON, ERASED_RECORD, redactIdea, redactSuggestionLine } from '@/server/hidden'
 import { closeRequest } from '@/server/close-requests'
 import { requestImpact } from '@/server/impact'
 import { excerpt } from '@/lib/excerpt'
@@ -28,6 +29,7 @@ import { logger } from '@/lib/logger'
 import {
   BROWSE_LIMITS,
   CONTINUE_TARGET_MAX_WORDS,
+  DASHBOARD_NEWS,
   GENRE_SELECTION_MAX,
   MARGIN_ASK_CHARS,
   NEEDS_YOU,
@@ -272,6 +274,8 @@ export const requestRouter = createTRPCRouter({
               avatar: { select: { updatedAt: true } },
             },
           },
+          // Decision 0013 — erased by its writer, it is shown without a name.
+          credits: ERASED_RECORD,
         },
       })
 
@@ -296,6 +300,7 @@ export const requestRouter = createTRPCRouter({
               avatar: { select: { updatedAt: true } },
             },
           },
+          credits: ERASED_RECORD,
         },
       })
 
@@ -312,9 +317,17 @@ export const requestRouter = createTRPCRouter({
         readingList,
         // Hidden after a report (item 2.7): read as removed by everyone but
         // the writer and a moderator.
-        suggestions: suggestions.map((suggestion) => redactSuggestionLine(suggestion, actor)),
-        ideas: ideas.map((idea) => ({
-          ...redactIdea(idea, actor),
+        suggestions: suggestions.map(({ credits, ...suggestion }) =>
+          redactSuggestionLine(
+            credits.length > 0 ? { ...suggestion, contributor: { ...ERASED_PERSON } } : suggestion,
+            actor,
+          ),
+        ),
+        ideas: ideas.map(({ credits, ...idea }) => ({
+          ...redactIdea(
+            credits.length > 0 ? { ...idea, author: { ...ERASED_PERSON } } : idea,
+            actor,
+          ),
           // Item 6.8 — removed by its writer: the row stays in the thread and
           // its words are sent to nobody. The page only hid them, and they
           // were in its data for any reader (phase 14 final pass).
@@ -363,7 +376,7 @@ export const requestRouter = createTRPCRouter({
           ask: true,
           _count: { select: { suggestions: { where: ANSWERS } } },
           // Idea answers are counted in code (item 1.12): see `answers.ts`.
-          ideas: { where: { parentId: null }, select: { authorId: true } },
+          ideas: TOP_LEVEL_IDEAS,
           storyboard: { select: AUTHORS_SELECT },
         },
       })
@@ -437,7 +450,7 @@ export const requestRouter = createTRPCRouter({
           },
           _count: { select: { suggestions: { where: ANSWERS } } },
           // Idea answers are counted in code (item 1.12): see `answers.ts`.
-          ideas: { where: { parentId: null }, select: { authorId: true } },
+          ideas: TOP_LEVEL_IDEAS,
         },
       })
       return rows.map(withIdeaAnswers)
@@ -465,7 +478,7 @@ export const requestRouter = createTRPCRouter({
         request: { storyboard: visibleStoryboardsWhere(actor) },
       },
       orderBy: [{ decidedAt: 'desc' }, { submittedAt: 'desc' }],
-      take: 12,
+      take: DASHBOARD_NEWS,
       select: {
         id: true,
         publicId: true,
@@ -634,8 +647,11 @@ export const requestRouter = createTRPCRouter({
       throw new TRPCError({ code: 'BAD_REQUEST', message: PRE_CONTEXT_TOO_SHORT })
     }
 
-    const updated = await ctx.db.contributionRequest.update({
-      where: { id: request.id },
+    // Still open or answered at the moment of writing: closed by the nightly
+    // job, or by another tab, it was changed while closed (2026-10-24 final pass).
+    const editedAt = new Date()
+    const { count } = await ctx.db.contributionRequest.updateMany({
+      where: { id: request.id, state: { in: ['OPEN', 'ANSWERED'] } },
       data: {
         title: input.title,
         ask: input.ask,
@@ -646,8 +662,17 @@ export const requestRouter = createTRPCRouter({
         readingList: input.readingList ?? [],
         minWords: input.minWords,
         maxWords: input.maxWords,
-        editedAt: new Date(),
+        editedAt,
       },
+    })
+    if (count !== 1) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'This request closed a moment ago, so it was not changed. Open it again first.',
+      })
+    }
+    const updated = await ctx.db.contributionRequest.findUniqueOrThrow({
+      where: { id: request.id },
       select: { id: true, publicId: true, editedAt: true },
     })
     log.info({ event: 'request.update', requestId: request.id }, 'request changed')

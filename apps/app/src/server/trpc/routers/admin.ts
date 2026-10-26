@@ -10,10 +10,12 @@ import {
   AUDIT_LOG,
   FEATURE_FLAG_DESCRIPTIONS,
   FEATURE_FLAG_KEYS,
+  REPORT_EXCERPT_CHARS,
   REPORT_QUEUE_PAGE,
   REPORTS_TO_SUSPEND,
   SEED_TARGETS,
   STANDING_NOTE_MAX_CHARS,
+  TYPED_ACCOUNT_MAX_CHARS,
 } from '@/lib/schemas/constants'
 import { reportCategorySchema } from '@/lib/schemas/report'
 import { nameOf } from '@/lib/people'
@@ -163,13 +165,22 @@ export const adminRouter = createTRPCRouter({
       })
       if (!report) throw new TRPCError({ code: 'NOT_FOUND', message: 'No such report.' })
 
-      await ctx.db.report.update({
-        where: { id: report.id },
+      // Only from the state read above: two moderators on lists of different
+      // ages each wrote over the other, and the last one won (2026-10-26
+      // final pass).
+      const { count } = await ctx.db.report.updateMany({
+        where: { id: report.id, state: report.state },
         data:
           input.decision === 'OPEN'
             ? { state: 'OPEN', resolvedAt: null, resolvedById: null }
             : { state: input.decision, resolvedAt: new Date(), resolvedById: adminId },
       })
+      if (count !== 1) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'Another moderator decided this report a moment ago. Look at it again.',
+        })
+      }
 
       // Item 2.7 (decision 0045) — hidden with the report's category as the
       // reason, until "Show it again". Never a person: an account is
@@ -214,7 +225,10 @@ export const adminRouter = createTRPCRouter({
           if (suspendsForReports(user)) {
             await ctx.db.user.update({
               where: { id: subject },
-              data: { status: 'SUSPENDED', suspendedAt: new Date(), suspendedById: adminId },
+              // By the count, not by whoever decided the last report: the
+              // screens say "by upheld reports" for a suspension nobody made
+              // (2026-10-26 final pass).
+              data: { status: 'SUSPENDED', suspendedAt: new Date(), suspendedById: null },
             })
             suspended = true
             log.warn(
@@ -272,6 +286,14 @@ export const adminRouter = createTRPCRouter({
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'That account is banned. Lift the ban instead.',
+        })
+      }
+      // Item 2b.5 — a suspension says why, for whoever looks next. It could be
+      // made with no note at all (2026-10-26 final pass).
+      if (input.status === 'SUSPENDED' && !input.note) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Say why in the note. The People screen shows it to whoever looks next.',
         })
       }
 
@@ -352,15 +374,23 @@ export const adminRouter = createTRPCRouter({
       if (!target.bannedAt) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'That account is not banned.' })
       }
+      // An administrator's deletion is a ban and a deletion request made
+      // together, and lifting the ban takes it back. A request the person
+      // made themselves, before the ban, is theirs and stays: every unban
+      // cleared it until 2026-10-26, and their account was kept unasked.
+      const ownRequest =
+        target.deletionRequestedAt !== null && target.deletionRequestedAt < target.bannedAt
       const user = await ctx.db.user.update({
         where: { id: target.id },
         data: {
+          // Active either way: a pending request of their own leaves the
+          // account active, which is what lets them keep it from Settings.
           status: 'ACTIVE',
           suspendedAt: null,
           suspendedById: null,
           bannedAt: null,
           standingNote: null,
-          deletionRequestedAt: null,
+          ...(ownRequest ? {} : { deletionRequestedAt: null }),
         },
         select: { id: true, username: true, displayName: true, status: true },
       })
@@ -385,11 +415,22 @@ export const adminRouter = createTRPCRouter({
       z.object({
         userId: z.string().min(1),
         note: noteSchema,
+        /** The account's username, or its address without one, typed to confirm. */
+        confirm: z.string().trim().max(TYPED_ACCOUNT_MAX_CHARS).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const adminId = ctx.session.user.id
       const target = await touchable(ctx, input.userId)
+      // Confirmed here as well as on the screen, as a person's own deletion
+      // is (item 1.5): it was the panel alone that asked (2026-10-26).
+      const expected = (target.username ?? target.email).toLowerCase()
+      if ((input.confirm ?? '').toLowerCase() !== expected) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Type the account’s username, or its address if it has none, to confirm.',
+        })
+      }
       const now = new Date()
       // A deletion the person had already asked for keeps its earlier date.
       const requestedAt = target.deletionRequestedAt ?? now
@@ -454,7 +495,7 @@ export const adminRouter = createTRPCRouter({
    * is not one.
    */
   findAccount: adminProcedure('accounts.suspend')
-    .input(z.object({ query: z.string().trim().min(1).max(320) }))
+    .input(z.object({ query: z.string().trim().min(1).max(TYPED_ACCOUNT_MAX_CHARS) }))
     .query(async ({ ctx, input }) => {
       const query = input.query.replace(/^@/u, '')
       const match = await ctx.db.user.findFirst({
@@ -875,6 +916,7 @@ async function touchable(ctx: AdminContext, userId: string) {
       role: true,
       status: true,
       email: true,
+      username: true,
       suspendedAt: true,
       bannedAt: true,
       deletionRequestedAt: true,
@@ -962,7 +1004,7 @@ async function describe(
       return {
         label: 'a suggestion',
         href: null,
-        excerpt: suggestion.contentText.slice(0, 300),
+        excerpt: suggestion.contentText.slice(0, REPORT_EXCERPT_CHARS),
         hidden: suggestion.hiddenAt !== null,
       }
     }
@@ -975,7 +1017,7 @@ async function describe(
       return {
         label: 'an idea',
         href: null,
-        excerpt: idea.body.slice(0, 300),
+        excerpt: idea.body.slice(0, REPORT_EXCERPT_CHARS),
         hidden: idea.hiddenAt !== null,
       }
     }

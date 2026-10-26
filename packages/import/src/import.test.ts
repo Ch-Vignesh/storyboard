@@ -431,6 +431,28 @@ describe('a zip that is not a manuscript', () => {
     expect(() => assertReasonableArchive(archive)).toThrow(/not what a manuscript looks like/iu)
   })
 
+  /**
+   * The 2026-10-26 final pass (the detective review). JSZip, inside mammoth,
+   * reads the central directory; the guard's second reading followed the
+   * local headers. A member whose local header says "stored, ten bytes"
+   * while the directory says "deflated" passed the guard and inflated in
+   * full inside mammoth.
+   */
+  it('refuses an archive whose two headers disagree about a member', SLOW, async () => {
+    const { assertReasonableArchive } = await import('./extract/zip-guard')
+    const { zipSync } = await import('fflate')
+    const archive = Buffer.from(
+      zipSync({ 'word/document.xml': new Uint8Array(MEMBERS * FILLER_BYTES) }, { level: 9 }),
+    )
+    lieAboutSizes(archive, 1024)
+    // The local header: stored, with ten bytes.
+    archive.writeUInt16LE(0, 8)
+    archive.writeUInt32LE(10, 18)
+    archive.writeUInt32LE(10, 22)
+
+    expect(() => assertReasonableArchive(archive)).toThrow(/manuscript/iu)
+  })
+
   it('lets an ordinary archive through', async () => {
     const { assertReasonableArchive } = await import('./extract/zip-guard')
     const { zipSync } = await import('fflate')
@@ -520,5 +542,35 @@ describe('a file built to make the reader work for ever', () => {
     const starts = readPageStarts(file)
     expect(performance.now() - started).toBeLessThan(1000)
     expect(starts).toEqual(['chapter two'])
+  })
+})
+
+/**
+ * The 2026-10-26 final pass (the detective review). Every text format was
+ * read as UTF-8, so a file Notepad saved as "Unicode" became a NUL beside
+ * every letter, which the database refuses; and an FDX reference to
+ * character zero decoded to one.
+ */
+describe('characters a manuscript never holds', () => {
+  it('reads a UTF-16 text file by its byte-order mark', async () => {
+    const text = 'Chapter One\n\nThe harbour had been empty for a year.'
+    const little = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')])
+    const big = Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, 'utf16le').swap16()])
+    for (const file of [little, big]) {
+      const proposal = await analyse('txt', file)
+      expect(JSON.stringify(proposal)).toContain('The harbour had been empty for a year.')
+      expect(JSON.stringify(proposal)).not.toContain('\u0000')
+    }
+  })
+
+  it('takes a NUL out of whatever a file decodes to', async () => {
+    const fdx = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<FinalDraft DocumentType="Script" Version="5"><Content>',
+      '<Paragraph Type="Action"><Text>Rain&#0; against the glass.</Text></Paragraph>',
+      '</Content></FinalDraft>',
+    ].join('\n')
+    const proposal = await analyse('fdx', Buffer.from(fdx, 'utf8'))
+    expect(JSON.stringify(proposal)).not.toContain('\u0000')
   })
 })

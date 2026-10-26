@@ -10,6 +10,7 @@ import type { AppRouter } from '@/server/trpc/routers/_app'
 import { useTRPC } from '@/trpc/client'
 
 import { EraseCredit } from './erase-credit'
+import { PREVIEW_DESCRIPTION_CHARS } from '@/lib/schemas/constants'
 
 type Page = inferRouterOutputs<AppRouter>['profile']['credits']
 
@@ -51,7 +52,9 @@ export function ContributionFeed({
   const credits = (feed.data?.pages ?? [initial]).flatMap((page) => page.items)
 
   const excerptOf = (text: string | null | undefined) =>
-    text && text.length > 160 ? `${text.slice(0, 160).trimEnd()}…` : text
+    text && text.length > PREVIEW_DESCRIPTION_CHARS
+      ? `${text.slice(0, PREVIEW_DESCRIPTION_CHARS).trimEnd()}…`
+      : text
 
   if (credits.length === 0) {
     return (

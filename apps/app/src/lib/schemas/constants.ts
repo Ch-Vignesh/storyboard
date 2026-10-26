@@ -33,6 +33,15 @@ export const SUGGESTION_WORDS = {
 export const SUGGESTION_NOTE_MAX_WORDS = 200
 
 /**
+ * Characters allowed per word a free-text field allows, so a field bounded in
+ * words is bounded in size too: a "word" is whatever sits between spaces, and
+ * one of 100,000 characters counted as one, so a twenty-word idea could put
+ * megabytes on a page every reader downloads (2026-10-26 final pass, the
+ * detective review). English prose runs about six to a word, spaces included.
+ */
+export const FREE_TEXT_CHARS_PER_WORD = 12
+
+/**
  * FR-6.2 — the note's column holds 1500 characters. Words alone did not bound
  * it: Chinese or Japanese has no spaces, so 3000 characters counted as a few
  * words, Postgres refused the row, and the refusal had already cost a send
@@ -128,6 +137,14 @@ export const AUTH_LIMITS = {
   signInsPerAddressAndClient: 10,
   /** Sign-in attempts from one client, whatever addresses it tries. */
   signInsPerClient: 30,
+  /**
+   * Sign-in attempts at one address in an hour, from every client together.
+   * The two counts above let guesses at one person's password go on without
+   * end from new addresses (2026-10-26 final pass, the detective review). High,
+   * because reaching it keeps the owner out too until the hour turns; the
+   * reset link still works.
+   */
+  signInsPerAddressPerHour: 60,
 } as const
 
 /** The window `AUTH_LIMITS`' sign-in counts are taken over. */
@@ -177,6 +194,14 @@ export const DIGEST_RUN_BUDGET_SECONDS = 240
  * everything (a daily quota, an outage), and hammering it helps nobody.
  */
 export const DIGEST_FAILURES_BEFORE_STOPPING = 3
+
+/**
+ * FR-12.3 — the runs a notification's email is tried before it is given up.
+ * Its in-app row has already been delivered; the email is the extra. A send
+ * that always failed was retried first on every run, for ever, and three of
+ * them in a row stopped every run (2026-10-26 final pass, the detective review).
+ */
+export const EMAIL_SEND_ATTEMPTS = 5
 
 /**
  * How many genre ids one request may carry, in onboarding, settings and the
@@ -240,7 +265,12 @@ export const PROFILE_CHARS = { displayName: { min: 1, max: 80 }, bio: { max: 280
  * test checks and the procedure refuses to exceed.
  */
 export const AVATAR = {
-  maxUploadBytes: 5 * 1024 * 1024,
+  /**
+   * Under the host's 4.5 MB request body cap. At 5 MB, a 4.8 MB photo passed
+   * the page's own check and met the platform's refusal, which is not JSON,
+   * so the page said "try again" (2026-10-26 final pass).
+   */
+  maxUploadBytes: 4 * 1024 * 1024,
   sizePx: 96,
   maxStoredBytes: 24 * 1024,
   /** What the upload may be; the bytes are checked, not the declared type. */
@@ -372,8 +402,44 @@ export const UNCONFIRMED_ACCOUNT_RETENTION_DAYS = 30
  */
 export const USED_TOKEN_RETENTION_DAYS = 7
 
-/** FR-3.1 */
-export const IMPORT_LIMITS = { maxBytes: 5 * 1024 * 1024, maxWords: 300_000 } as const
+/**
+ * The longest email address SMTP carries (RFC 5321's path limit less its two
+ * angle brackets).
+ */
+export const EMAIL_MAX_CHARS = 254
+
+/**
+ * What a person may type to name an account: an address or a username, to
+ * find one or to confirm deleting it. Room for any address and then some.
+ */
+export const TYPED_ACCOUNT_MAX_CHARS = 320
+
+/** A link's token as it arrives: 43 characters today, with room either side. */
+export const LINK_TOKEN_CHARS = { min: 20, max: 200 } as const
+
+/** Where a person was going, carried through sign-up and sign-in (`next`). */
+export const NEXT_PATH_MAX_CHARS = 2_000
+
+/** How much of a request's ask a card in Browse shows. */
+export const REQUEST_CARD_ASK_CHARS = 200
+
+/** How much of a reported suggestion or idea the report queue shows. */
+export const REPORT_EXCERPT_CHARS = 300
+
+/** The dashboard's region of open requests in your genres: a sample, with Browse for the rest. */
+export const DASHBOARD_OPEN_REQUESTS = 8
+
+/** The news on your own suggestions the dashboard shows: what was decided lately. */
+export const DASHBOARD_NEWS = 12
+
+/** `storyboard.browse`: stories a page. */
+export const STORY_BROWSE_PAGE = { default: 20, max: 50 } as const
+
+/** Notifications one digest run reads at once, oldest first. */
+export const EMAIL_QUEUE_BATCH = 500
+
+/** Open requests the Sunday digest lists, newest first. */
+export const WEEKLY_DIGEST_REQUESTS = 10
 
 /**
  * FR-3.1 — an import is working state, not a record. A day after its last
@@ -523,3 +589,6 @@ export const FEATURE_FLAG_DESCRIPTIONS: Record<FeatureFlagKey, string> = {
  * the instance that served it, and everywhere else within this.
  */
 export const FLAG_CACHE_SECONDS = 30
+
+/** Item 4.1 — the header's count of unread things says "99+" past this. */
+export const BADGE_MAX = 99

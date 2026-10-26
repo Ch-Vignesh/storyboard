@@ -8,6 +8,7 @@ import { paramsFromFilters } from '@/lib/schemas/browse'
 import { REQUEST_KINDS, closesOn } from '@/lib/schemas/help'
 import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
+import { DASHBOARD_OPEN_REQUESTS } from '@/lib/schemas/constants'
 
 /**
  * FR-11.1 region three: open requests in the genres you pinned at onboarding.
@@ -21,7 +22,9 @@ export function OpenRequestsRegion({ timeZone }: { timeZone: string }) {
   const { data: pinned } = useSuspenseQuery(trpc.user.pinnedGenres.queryOptions())
   const genreIds = pinned.map((entry) => entry.genre.id)
 
-  const requests = useQuery(trpc.request.listOpen.queryOptions({ genreIds, take: 8 }))
+  const requests = useQuery(
+    trpc.request.listOpen.queryOptions({ genreIds, take: DASHBOARD_OPEN_REQUESTS }),
+  )
   // Item 9.2 — the region is a sample; browse, filtered to the same genres, is the rest.
   const more = genreIds.length > 0 ? `?${paramsFromFilters({ genreIds }).toString()}` : ''
 

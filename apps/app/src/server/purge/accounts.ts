@@ -66,7 +66,10 @@ export async function purgeDeletedAccounts(
   let purged = 0
   for (const user of due) {
     try {
-      await purgeOne(db, user.id, mailer)
+      if (!(await purgeOne(db, user.id, mailer, cutoff))) {
+        log.info({ event: 'purge.account.kept', userId: user.id }, 'kept before it was erased')
+        continue
+      }
       purged += 1
       // No username or email in this line, deliberately. A log that records
       // what was erased has not erased it.
@@ -92,14 +95,39 @@ export async function purgeDeletedAccounts(
   return { considered: due.length, purged }
 }
 
-async function purgeOne(db: PrismaClient, userId: string, mailer: Mailer): Promise<void> {
+/** Still asked to be erased, past its grace, and not erased yet. */
+type Standing = { deletionRequestedAt: Date | null; status: string }
+function stillDue(row: Standing | null | undefined, cutoff: Date): boolean {
+  return (
+    !!row &&
+    row.status !== 'DELETED' &&
+    row.deletionRequestedAt !== null &&
+    row.deletionRequestedAt < cutoff
+  )
+}
+
+/**
+ * True if the account was erased. False if it was kept in the meantime: the
+ * list of due accounts is read once at the start of the run, and somebody who
+ * pressed "Keep my account" on their last day, while the run was still on
+ * earlier accounts, was erased anyway (2026-10-26 final pass). Checked again
+ * before anything is touched, and once more under the row's lock inside the
+ * transaction, so a keep that lands first wins.
+ */
+async function purgeOne(
+  db: PrismaClient,
+  userId: string,
+  mailer: Mailer,
+  cutoff: Date,
+): Promise<boolean> {
   // The address, read before it is replaced below. The last message goes to
   // it once the erasure has happened, so that what it says is true (phase 14,
   // item 1.5).
   const before = await db.user.findUnique({
     where: { id: userId },
-    select: { email: true, username: true },
+    select: { email: true, username: true, deletionRequestedAt: true, status: true },
   })
+  if (!before || !stillDue(before, cutoff)) return false
 
   // Their uploaded manuscripts, before the rows that say where they are.
   // Best-effort and outside the transaction: an object store being briefly
@@ -115,7 +143,13 @@ async function purgeOne(db: PrismaClient, userId: string, mailer: Mailer): Promi
     }
   }
 
-  await db.$transaction(async (tx) => {
+  const erased = await db.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<Standing[]>`
+      select "deletionRequestedAt", "status"::text as "status"
+      from "User" where id = ${userId} for update
+    `
+    if (!stillDue(locked, cutoff)) return false
+
     // Everything that exists only to identify this person, reach them, or
     // remember what they liked — and that belongs to nobody else.
     //
@@ -168,9 +202,10 @@ async function purgeOne(db: PrismaClient, userId: string, mailer: Mailer): Promi
       const hash = retiredUsernameHash(before.username)
       await tx.retiredUsername.upsert({ where: { hash }, create: { hash }, update: {} })
     }
+    return true
   })
+  if (!erased) return false
 
-  if (!before) return
   try {
     await mailer.send(accountDeletedMail({ to: before.email }))
   } catch (error) {
@@ -180,4 +215,5 @@ async function purgeOne(db: PrismaClient, userId: string, mailer: Mailer): Promi
       'could not send the last message to an erased account',
     )
   }
+  return true
 }

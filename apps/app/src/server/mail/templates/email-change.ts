@@ -42,6 +42,44 @@ export function emailChangeMail(input: { to: string; url: string; lifetime: stri
 }
 
 /**
+ * To the old address, the moment a change is asked for, while it can still be
+ * stopped (2026-10-26 final pass). Until then the owner heard only once the
+ * address had gone. Changing the password, or signing out everywhere, makes
+ * the link useless, and a reset works from this inbox even when the password
+ * no longer does, so that is what it tells them to do.
+ */
+export function emailChangeRequestedMail(input: {
+  to: string
+  newEmailMasked: string
+  lifetime: string
+  resetUrl: string
+}): Mail {
+  const text = [
+    `Somebody signed in to your Draftboard account asked to move it to ${input.newEmailMasked}. Nothing has changed yet: it changes only if that address confirms within ${input.lifetime}.`,
+    '',
+    `If that was you, there is nothing to do. If it was not, set a new password now, from this inbox, which stops the move and signs every device out: ${input.resetUrl}`,
+  ].join('\n')
+
+  const reset = escapeHtml(input.resetUrl)
+  const html = `<!doctype html>
+<html lang="en">
+  <body style="${BODY_STYLE}">
+    <div style="max-width:520px;margin:0 auto">
+      <p style="margin:0 0 16px">Somebody signed in to your Draftboard account asked to move it to <strong>${escapeHtml(input.newEmailMasked)}</strong>. Nothing has changed yet: it changes only if that address confirms within ${escapeHtml(input.lifetime)}.</p>
+      <p style="margin:0;color:#55636d">If that was you, there is nothing to do. If it was not, <a href="${reset}" style="color:#2b5ca8">set a new password now</a>, from this inbox, which stops the move and signs every device out.</p>
+    </div>
+  </body>
+</html>`
+
+  return {
+    to: input.to,
+    subject: 'Someone asked to change the email address of your Draftboard account',
+    text,
+    html,
+  }
+}
+
+/**
  * To the old address, once the change has happened: the one place its owner
  * can learn of it. The new address is shown in part, so this note, which may
  * sit in a mailbox somebody else has got into, gives the other one away.

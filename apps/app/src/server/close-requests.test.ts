@@ -284,6 +284,30 @@ describe.skipIf(!databaseUrl)('closing the open requests on a storyboard', () =>
     expect(await closeStaleRequests(db)).toBe(0)
     expect(await toldAuthor()).toBe(1)
     expect(await states()).toEqual(['CLOSED', 'OPEN', 'RESOLVED'])
+
+    // The 2026-10-24 final pass. A helper is told it closed by itself, not
+    // that the author closed it.
+    const { targetsFor } = await import('./notification-targets')
+    const { sentenceFor } = await import('@/lib/schemas/notifications')
+    const helperRow = await db.notification.findFirstOrThrow({
+      where: { userId: stale.submitted, type: 'REQUEST_CLOSED' },
+      select: { id: true, type: true, payload: true },
+    })
+    const target = (await targetsFor(db, stale.submitted, [helperRow])).get(helperRow.id)
+    expect(sentenceFor('REQUEST_CLOSED', target ?? {})).toMatch(/closed by itself/u)
+
+    // Opened again, a month later it closes by itself again, and its author
+    // is told again.
+    await db.notification.updateMany({
+      where: { userId: stale.author, type: 'REQUEST_AUTO_CLOSED' },
+      data: { createdAt: daysAgo(REQUEST_OPEN_DAYS + 2) },
+    })
+    await db.contributionRequest.update({
+      where: { id: stale.request.id },
+      data: { state: 'OPEN', openedAt: daysAgo(REQUEST_OPEN_DAYS + 1) },
+    })
+    expect(await closeStaleRequests(db)).toBe(1)
+    expect(await toldAuthor()).toBe(2)
   })
 
   it('does nothing, and says so, when there is nothing open', async () => {

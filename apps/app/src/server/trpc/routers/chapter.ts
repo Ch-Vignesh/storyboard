@@ -216,7 +216,10 @@ export const chapterRouter = createTRPCRouter({
             id: true,
             title: true,
             deletedAt: true,
-            sections: { where: { mergedIntoId: null }, select: { wordCount: true } },
+            sections: {
+              where: { mergedIntoId: null },
+              select: { wordCount: true, deletedAt: true },
+            },
           },
         }),
         ctx.db.section.findMany({
@@ -236,13 +239,21 @@ export const chapterRouter = createTRPCRouter({
         }),
       ])
       return {
-        chapters: chapters.map((chapter) => ({
-          id: chapter.id,
-          title: chapter.title,
-          removedAt: chapter.deletedAt,
-          sections: chapter.sections.length,
-          words: chapter.sections.reduce((total, section) => total + section.wordCount, 0),
-        })),
+        chapters: chapters.map((chapter) => {
+          // What comes back with it: the sections removed with it, by its
+          // removal time, as `restore` brings them. One removed earlier stays
+          // removed, and was counted here (2026-10-26 final pass).
+          const returning = chapter.sections.filter(
+            (section) => section.deletedAt?.getTime() === chapter.deletedAt?.getTime(),
+          )
+          return {
+            id: chapter.id,
+            title: chapter.title,
+            removedAt: chapter.deletedAt,
+            sections: returning.length,
+            words: returning.reduce((total, section) => total + section.wordCount, 0),
+          }
+        }),
         sections: sections.map((section) => ({
           id: section.id,
           title: section.title,
@@ -325,7 +336,20 @@ export const chapterRouter = createTRPCRouter({
 
       await ctx.db.$transaction(async (tx) => {
         const now = new Date()
-        await tx.chapter.update({ where: { id: chapterId }, data: { deletedAt: now } })
+        // One structural change to a version at a time: two removals at once
+        // each counted the other's chapter as still there, and the version
+        // was left with none (2026-10-26 final pass, the detective review).
+        await tx.$executeRaw`select 1 from "Version" where id = ${versionId} for update`
+        // Only a live chapter. Removed again from a stale tab, it took a new
+        // removal time, and bringing it back left its sections behind, since
+        // they come back by the chapter's time (2026-10-26 final pass).
+        const marked = await tx.chapter.updateMany({
+          where: { id: chapterId, deletedAt: null },
+          data: { deletedAt: now },
+        })
+        if (marked.count !== 1) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'That chapter was removed already.' })
+        }
         await tx.section.updateMany({
           where: { chapterId, deletedAt: null },
           data: { deletedAt: now },
@@ -337,6 +361,12 @@ export const chapterRouter = createTRPCRouter({
           orderBy: { order: 'asc' },
           select: { id: true },
         })
+        if (remaining.length === 0) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'A story keeps at least one chapter. Rename this one instead.',
+          })
+        }
         for (const [order, chapter] of remaining.entries()) {
           await tx.chapter.update({ where: { id: chapter.id }, data: { order } })
         }

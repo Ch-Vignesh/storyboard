@@ -4,6 +4,7 @@ import Link from '@/components/link'
 import { notFound } from 'next/navigation'
 
 import { requireSession } from '@/auth/require-session'
+import { readTimeZone } from '@/lib/dates'
 import { caller } from '@/trpc/server'
 
 import { CoauthorManager } from './coauthor-manager'
@@ -64,6 +65,7 @@ export default async function CoauthorsPage({ params }: Params) {
         canInvite={list.canInvite}
         max={list.max}
         coauthors={list.coauthors}
+        timeZone={await readTimeZone()}
       />
     </main>
   )

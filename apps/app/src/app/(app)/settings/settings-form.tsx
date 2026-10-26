@@ -21,7 +21,7 @@ import { DefaultVisibility } from './default-visibility'
 import { DeleteAccount } from './delete-account'
 import { ProfilePicture } from './profile-picture'
 
-export function SettingsForm() {
+export function SettingsForm({ timeZone }: { timeZone: string }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
@@ -329,6 +329,7 @@ export function SettingsForm() {
       <DeleteAccount
         username={settings.user.username}
         deletionRequestedAt={settings.user.deletionRequestedAt}
+        timeZone={timeZone}
       />
     </div>
   )

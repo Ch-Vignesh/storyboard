@@ -23,13 +23,15 @@ import { passwordChangedMail } from '@/server/mail/templates/password-changed'
 import { passwordResetMail } from '@/server/mail/templates/password-reset'
 import { verifyEmailMail } from '@/server/mail/templates/verify-email'
 
-import { AUTH_LIMITS } from '@/lib/schemas/constants'
+import { AUTH_LIMITS, LINK_TOKEN_CHARS, NEXT_PATH_MAX_CHARS } from '@/lib/schemas/constants'
 import { clientAddress } from '@/server/client-address'
 import { DAY_MS, HOUR_MS, consume, enforce, key, whenToRetry } from '@/server/limits'
 
 import { type Context, createTRPCRouter, publicProcedure } from '../init'
 
-const tokenInput = z.object({ token: z.string().min(20).max(200) })
+const tokenInput = z.object({
+  token: z.string().min(LINK_TOKEN_CHARS.min).max(LINK_TOKEN_CHARS.max),
+})
 
 /**
  * What every form that sends an auth email does first, in this order and
@@ -268,8 +270,14 @@ export async function applyPasswordReset(
       data: { consumedAt: now },
     })
     if (claimed.count !== 1) return false
-    // Any other link still open for the account goes with it.
+    // Any other link still open for the account goes with it, a change of
+    // address included: one asked for by whoever had the old password must
+    // not outlive it (2026-10-26 final pass).
     await tx.passwordResetToken.updateMany({
+      where: { userId: record.user.id, consumedAt: null },
+      data: { consumedAt: now },
+    })
+    await tx.emailChangeToken.updateMany({
       where: { userId: record.user.id, consumedAt: null },
       data: { consumedAt: now },
     })
@@ -299,7 +307,7 @@ export const authRouter = createTRPCRouter({
       z.object({
         email: emailSchema,
         /** Item 3.5 — where they were going; rides on the confirmation link. */
-        next: z.string().max(2_000).optional(),
+        next: z.string().max(NEXT_PATH_MAX_CHARS).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -339,8 +347,15 @@ export const authRouter = createTRPCRouter({
 
   /** FR-1.4: re-sendable with a 60-second cooldown. */
   resendVerification: publicProcedure
-    .input(z.object({ email: emailSchema, next: z.string().max(2_000).optional() }))
+    .input(z.object({ email: emailSchema, next: z.string().max(NEXT_PATH_MAX_CHARS).optional() }))
     .mutation(async ({ ctx, input }) => {
+      // Item 9.4 — paused means no new account by any way in: a sign-up
+      // started before the pause could ask for a fresh link and finish
+      // (2026-10-26 final pass). Before the lookup, so the answer is the
+      // same for every address.
+      if (await isOn('pause-sign-ups', ctx.db)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: PAUSED['pause-sign-ups'] })
+      }
       // The one-minute rhythm is about not spamming one person; the hourly
       // limit is about not letting this endpoint send mail all day.
       const wait = await beforeAuthEmail(ctx, key.addressCooldown(input.email), {
@@ -390,6 +405,11 @@ export const authRouter = createTRPCRouter({
   setPassword: publicProcedure
     .input(tokenInput.extend({ password: passwordSchema }))
     .mutation(async ({ ctx, input }) => {
+      // Item 9.4 — and no account is finished while paused, from a link sent
+      // before the switch was thrown (2026-10-26 final pass).
+      if (await isOn('pause-sign-ups', ctx.db)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: PAUSED['pause-sign-ups'] })
+      }
       const record = await findLiveToken(ctx.db, input.token)
       if (!record) throw expiredLink()
       if (record.user.passwordHash) throw passwordAlreadySet()
@@ -504,7 +524,9 @@ export const authRouter = createTRPCRouter({
   checkEmailChange: publicProcedure.input(tokenInput).query(async ({ ctx, input }) => {
     const record = await findLiveEmailChange(ctx.db, input.token)
     if (!record) throw expiredLink()
-    return { newEmail: record.newEmail }
+    // Item 3.16 — an account with no password has to be told how it gets in
+    // at the new address; "the same password" was all the page said.
+    return { newEmail: record.newEmail, hasPassword: record.user.passwordHash !== null }
   }),
 
   /**
@@ -538,7 +560,15 @@ export const authRouter = createTRPCRouter({
       })
       await tx.user.update({
         where: { id: record.user.id },
-        data: { email: record.newEmail, emailVerifiedAt: now, sessionsEndedAt: now },
+        data: {
+          email: record.newEmail,
+          emailVerifiedAt: now,
+          sessionsEndedAt: now,
+          // Google finds an account by its address, so the old Google
+          // account is no longer a way in, whatever settings would say
+          // (item 3.16; 2026-10-26 final pass).
+          googleLinkedAt: null,
+        },
       })
       return 'changed' as const
     })
@@ -575,10 +605,32 @@ export const authRouter = createTRPCRouter({
   }),
 })
 
-/** Item 3.2 — a change-of-address link that is unused and in date. */
-function findLiveEmailChange(db: Context['db'], token: string) {
-  return db.emailChangeToken.findFirst({
+/**
+ * Item 3.2 — a change-of-address link that is unused, in date, and asked for
+ * since the account's password last changed and its sessions last ended. A
+ * link survived both until 2026-10-26: somebody signed in with a stolen
+ * password asked to move the address, the owner reset the password, and the
+ * link still handed the account over.
+ */
+async function findLiveEmailChange(db: Context['db'], token: string) {
+  const record = await db.emailChangeToken.findFirst({
     where: { tokenHash: hashToken(token), consumedAt: null, expiresAt: { gt: new Date() } },
-    include: { user: { select: { id: true, email: true } } },
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          passwordHash: true,
+          passwordChangedAt: true,
+          sessionsEndedAt: true,
+        },
+      },
+    },
   })
+  if (!record) return null
+  const { passwordChangedAt, sessionsEndedAt } = record.user
+  const outlived = [passwordChangedAt, sessionsEndedAt].some(
+    (at) => at !== null && at >= record.createdAt,
+  )
+  return outlived ? null : record
 }

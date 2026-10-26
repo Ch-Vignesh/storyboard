@@ -15,6 +15,7 @@ import {
   toParagraphs,
 } from './index'
 import { bigramsOf } from './paragraphs'
+import * as constants from './constants'
 
 const P1 =
   'It is very seldom that mere ordinary people like John and myself secure ancestral halls for the summer.'
@@ -300,5 +301,38 @@ describe('a smart-quote-only change', () => {
     const result = compare(`She said "no".`, `She said “no”.`)
     expect(result.stats.changed).toBe(1)
     expect(result.stats.kept).toBe(0)
+  })
+})
+
+/**
+ * The 2026-10-26 final pass (the detective review): alignment is quadratic in
+ * paragraphs, nothing bounded a section's size, and the comparison is public.
+ * A whole novel on each side is shown whole, side by side, and quickly.
+ */
+describe('texts too long to align', () => {
+  it('shows two very long texts whole, as a rewrite, without aligning them', () => {
+    const { MAX_ALIGNED_PARAGRAPHS } = constants
+    const paragraphs = (word: string) =>
+      Array.from(
+        { length: MAX_ALIGNED_PARAGRAPHS + 1 },
+        (_, index) => `${word} ${String(index)} of the harbour, as it stood that year.`,
+      ).join('\n\n')
+    const started = performance.now()
+    const result = compare(paragraphs('Line'), paragraphs('Verse'))
+    expect(performance.now() - started).toBeLessThan(2000)
+    expect(result.mode).toBe('rewrite')
+    expect(result.stats).toEqual({
+      kept: 0,
+      changed: 0,
+      added: MAX_ALIGNED_PARAGRAPHS + 1,
+      removed: MAX_ALIGNED_PARAGRAPHS + 1,
+    })
+  })
+
+  it('marks no words in a changed paragraph too long to mark', () => {
+    const long = 'word '.repeat(constants.MAX_MARKED_CHARACTERS / 5)
+    const result = compare(`${long}one.\n\nShort.`, `${long}two.\n\nShort.`)
+    const changed = result.rows.find((row) => row.kind === 'changed')
+    expect(changed?.kind === 'changed' && changed.left?.marks).toBeFalsy()
   })
 })

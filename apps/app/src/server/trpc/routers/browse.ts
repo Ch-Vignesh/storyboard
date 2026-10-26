@@ -8,7 +8,7 @@ import {
   browseFiltersSchema,
   type BrowseCursor,
 } from '@/lib/schemas/browse'
-import { ANSWERS, AUTHORS_SELECT, withIdeaAnswers } from '@/server/answers'
+import { ANSWERS, AUTHORS_SELECT, TOP_LEVEL_IDEAS, withIdeaAnswers } from '@/server/answers'
 import {
   BROWSE_LIMITS,
   GENRE_SELECTION_MAX,
@@ -143,7 +143,7 @@ export const browseRouter = createTRPCRouter({
         },
         _count: { select: { suggestions: { where: ANSWERS } } },
         // Idea answers are counted in code (item 1.12): see `answers.ts`.
-        ideas: { where: { parentId: null }, select: { authorId: true } },
+        ideas: TOP_LEVEL_IDEAS,
       },
     })
     const requests = rows.slice(0, input.take)

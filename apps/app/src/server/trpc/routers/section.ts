@@ -512,7 +512,7 @@ export const sectionRouter = createTRPCRouter({
     .input(z.object({ sectionId: z.string().min(1), revisionId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       const actor = actorFrom(ctx.session, ctx.account)
-      const { sectionId, storyboardId } = await loadSection(
+      const { sectionId, storyboardId, currentRevisionId } = await loadSection(
         ctx.db,
         actor,
         input.sectionId,
@@ -522,10 +522,13 @@ export const sectionRouter = createTRPCRouter({
         where: { id: sectionId },
         select: { lineageId: true, chapter: { select: { version: { select: { isMain: true } } } } },
       })
-      const source = await ctx.db.revision.findFirst({
-        where: { id: input.revisionId, sectionId },
-        select: { id: true },
-      })
+      // The same rule as `restoreRevision`: any version on the chain the
+      // section's text stands on. This asked for one written in this row
+      // only, so after a promotion a version from before the copy failed
+      // here while the restore went through, and its dialog never named the
+      // helpers it took credit from (2026-10-26 final pass).
+      const history = currentRevisionId ? await ancestorIds(ctx.db, currentRevisionId) : []
+      const source = history.includes(input.revisionId) ? { id: input.revisionId } : null
       if (!source) throw new TRPCError({ code: 'NOT_FOUND', message: 'That version is not here.' })
       if (!section.chapter.version.isMain) return { told: [] as Person[] }
 
@@ -570,12 +573,28 @@ export const sectionRouter = createTRPCRouter({
       }
 
       await ctx.db.$transaction(async (tx) => {
-        await tx.section.update({ where: { id: sectionId }, data: { deletedAt: new Date() } })
+        // One removal in a chapter at a time, and only of a live section: two
+        // at once each counted the other as still there, and the chapter was
+        // left with none (2026-10-26 final pass, the detective review).
+        await tx.$executeRaw`select 1 from "Chapter" where id = ${chapterId} for update`
+        const marked = await tx.section.updateMany({
+          where: { id: sectionId, deletedAt: null },
+          data: { deletedAt: new Date() },
+        })
+        if (marked.count !== 1) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'That section was removed already.' })
+        }
         const remaining = await tx.section.findMany({
           where: { chapterId, deletedAt: null, mergedIntoId: null },
           orderBy: { order: 'asc' },
           select: { id: true },
         })
+        if (remaining.length === 0) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'A chapter keeps at least one section.',
+          })
+        }
         for (const [order, section] of remaining.entries()) {
           await tx.section.update({ where: { id: section.id }, data: { order } })
         }

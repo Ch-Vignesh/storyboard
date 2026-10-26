@@ -354,6 +354,41 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     expect(unsent).toBe(IMMEDIATE_TYPES.length)
   })
 
+  /**
+   * The 2026-10-26 final pass (the detective review): a send that always
+   * failed was retried first on every run, for ever, and three in a row
+   * stopped every run. It is counted, and given up after EMAIL_SEND_ATTEMPTS.
+   */
+  it('gives up a send that keeps failing, without trying it again', async () => {
+    const { EMAIL_SEND_ATTEMPTS } = await import('@/lib/schemas/constants')
+    await db.notification.deleteMany({ where: { userId } })
+    const row = await db.notification.create({
+      data: { userId, type: IMMEDIATE_TYPES[0]!, payload: { title: 'Kept failing' } },
+      select: { id: true },
+    })
+    let tries = 0
+    const refusingMine: Mailer = {
+      send(mail) {
+        if (mail.to !== email) return Promise.resolve()
+        tries += 1
+        return Promise.reject(new Error('550 no such mailbox'))
+      },
+    }
+    const state = () =>
+      db.notification.findUniqueOrThrow({
+        where: { id: row.id },
+        select: { emailAttempts: true, emailedAt: true },
+      })
+
+    for (let run = 1; run <= EMAIL_SEND_ATTEMPTS; run += 1) {
+      await runImmediate(db, { mailer: refusingMine })
+      expect(await state()).toEqual({ emailAttempts: run, emailedAt: null })
+    }
+    await runImmediate(db, { mailer: refusingMine })
+    expect(tries).toBe(EMAIL_SEND_ATTEMPTS)
+    expect((await state()).emailedAt).toBeInstanceOf(Date)
+  })
+
   it('never queues mail for an address nobody confirmed', async () => {
     await seedOneOfEach()
     await db.user.update({ where: { id: userId }, data: { emailVerifiedAt: null } })
@@ -508,5 +543,19 @@ describe.skipIf(!databaseUrl)('notification delivery (FR-12.1 to FR-12.4)', () =
     expect(mail.text).not.toMatch(/digest|widen=/i)
     // The words the requirement is written to avoid.
     expect(mail.text).not.toMatch(/\bfailed\b|\bunsuccessful\b|\bnobody wants\b/i)
+
+    // A "help me think" request has no word range: it is offered its ask
+    // instead (2026-10-24 final pass).
+    const thinking = quietRequestMail({
+      to: 'someone@example.test',
+      requestTitle: 'I cannot see why she stays',
+      requestUrl: 'https://example.test/s/a/help/c',
+      editUrl: 'https://example.test/s/a/help/c/edit',
+      helpMeThink: true,
+      appUrl: 'https://example.test',
+      unsubscribeUrl: 'http://t/unsubscribe?t=x',
+    })
+    expect(thinking.text).not.toMatch(/word range/i)
+    expect(thinking.text).toContain('Change the ask: https://example.test/s/a/help/c/edit')
   })
 })

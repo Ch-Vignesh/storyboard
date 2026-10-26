@@ -9,6 +9,7 @@ import { useState } from 'react'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PASS_CHIPS, suggestionStateLabel } from '@/lib/schemas/help'
+import { formatInZone } from '@/lib/time-zone'
 import { useTRPC } from '@/trpc/client'
 
 type Suggestion = {
@@ -34,6 +35,7 @@ export function SuggestionList({
   requestState,
   canDecide,
   viewerId,
+  timeZone,
 }: {
   slug: string
   requestId: string
@@ -42,6 +44,8 @@ export function SuggestionList({
   requestState: string
   canDecide: boolean
   viewerId: string | null
+  /** D-12 — "edited" says when, in the reader's zone (item 1.18). */
+  timeZone: string
 }) {
   // FR-5.10 — closed without accepting: nothing here can be decided, sent,
   // updated or taken back until the author opens it again.
@@ -108,7 +112,10 @@ export function SuggestionList({
                       <StateBadge state={suggestion.state} requestState={requestState} />
                       {/* D-12 (item 6.7) — changed after it was sent. */}
                       {suggestion.editedAt ? (
-                        <span className="text-ink-faint"> · edited</span>
+                        <span className="text-ink-faint">
+                          {' '}
+                          · edited {formatInZone(suggestion.editedAt, 'shortTime', timeZone)}
+                        </span>
                       ) : null}
                     </p>
                     {suggestion.note ? (
@@ -200,6 +207,7 @@ export function SuggestionList({
         title="Withdraw this suggestion?"
         confirmLabel="Withdraw it"
         busy={withdraw.isPending}
+        error={withdraw.error}
         onCancel={() => setConfirmWithdraw(null)}
         onConfirm={() => {
           if (confirmWithdraw) withdraw.mutate({ suggestionId: confirmWithdraw })
