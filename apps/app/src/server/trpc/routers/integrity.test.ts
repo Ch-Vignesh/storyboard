@@ -629,6 +629,51 @@ describe.skipIf(!databaseUrl)('integrity under concurrency (phase 12 audit)', ()
     return { writer, call, suggestionId: draft.id }
   }
 
+  /**
+   * FR-6.6 is about one section. An accept runs at SERIALIZABLE, and Postgres
+   * may refuse one of two such transactions that touched nothing in common;
+   * that reached the author as "this section changed" with nothing changed
+   * (CI, 2026-10-24). Accepts on different sections all go in, even in one
+   * story, where each also writes the story's `lastWrittenAt`.
+   */
+  it('accepts suggestions on different sections at the same moment, every one', async () => {
+    const sent = await Promise.all(
+      ['a', 'b', 'c', 'd'].map(async (label) =>
+        aSentSuggestion(await aRequest(), `apart-${label}`, `The harbour, ${label}.`),
+      ),
+    )
+    const author = await as(owner)
+
+    const results = await Promise.allSettled(
+      sent.map(({ suggestionId }) => author.suggestion.accept({ suggestionId })),
+    )
+
+    expect(results.filter((result) => result.status === 'rejected')).toEqual([])
+  })
+
+  it('lets one of two suggestions accepted on one section at once in, and tells the other', async () => {
+    const requestId = await aRequest()
+    const first = await aSentSuggestion(requestId, 'same-a', 'One way to say it.')
+    const second = await aSentSuggestion(requestId, 'same-b', 'Another way to say it.')
+    const author = await as(owner)
+
+    const results = await Promise.allSettled([
+      author.suggestion.accept({ suggestionId: first.suggestionId }),
+      author.suggestion.accept({ suggestionId: second.suggestionId }),
+    ])
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const refused = results.find((result) => result.status === 'rejected')
+    expect(refused?.reason).toMatchObject({ code: 'CONFLICT' })
+    const accepted = await db.revision.count({
+      where: {
+        suggestionId: { in: [first.suggestionId, second.suggestionId] },
+        source: 'ACCEPTED',
+      },
+    })
+    expect(accepted).toBe(1)
+  })
+
   const headText = async (requestId: string) =>
     (
       await db.contributionRequest.findUniqueOrThrow({

@@ -150,6 +150,19 @@ export const SESSION = { slidingDays: 30, absoluteDays: 30 } as const
 export const BULK_WRITE_TRANSACTION = { maxWait: 10_000, timeout: 55_000 } as const
 
 /**
+ * FR-6.6 — how many times an accept is tried when Postgres refuses it as
+ * unserialisable. At SERIALIZABLE it may refuse one of two transactions that
+ * shared nothing, and two accepts on different sections then told the author
+ * "this section changed" when nothing had (CI, 2026-10-24). Tried again, an
+ * unrelated accept goes in, and a real collision is caught by the accept's own
+ * checks. Every accept in a story also writes the story's `lastWrittenAt`, so
+ * accepts there at the same moment go in one per round: five rounds carry an
+ * owner and co-authors deciding at once. The wait before a round is random, up
+ * to `jitterMs` doubled each time, so the ones that met part ways.
+ */
+export const SERIALIZABLE_RETRY = { attempts: 5, jitterMs: 20 } as const
+
+/**
  * FR-12.3 — how long one digest run may spend sending before it stops and
  * leaves the rest for the next. Under the platform's own five-minute function
  * limit, so a run that is cut short has already marked what it sent: a run

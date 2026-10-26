@@ -22,7 +22,7 @@ import { publicId } from '@/lib/ids'
 import { logger } from '@/lib/logger'
 import { nameOf } from '@/lib/people'
 import { AUTHORS_SELECT } from '@/server/answers'
-import { DAILY_LIMITS } from '@/lib/schemas/constants'
+import { DAILY_LIMITS, SERIALIZABLE_RETRY } from '@/lib/schemas/constants'
 import { DAY_MS, enforce, key, used, whenToRetry } from '@/server/limits'
 import { passChipSchema, suggestionNoteSchema } from '@/lib/schemas/help'
 
@@ -1061,19 +1061,40 @@ const changedAMomentAgo = () =>
   })
 
 /**
+ * Postgres's serialization failure or deadlock. Prisma says P2034 for a model
+ * query, but the row lock is raw SQL, and there it says P2010 with Postgres's
+ * own code inside: the second of two accepts on one section reached its
+ * author as a server fault until 2026-10-26.
+ */
+function unserialisable(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false
+  if (error.code === 'P2034') return true
+  const cause = (
+    error.meta?.driverAdapterError as { cause?: { originalCode?: string } } | undefined
+  )?.cause
+  return error.code === 'P2010' && ['40001', '40P01'].includes(cause?.originalCode ?? '')
+}
+
+/**
  * Two accepts on one section: the second waits on the row lock, and at
  * SERIALIZABLE it then fails with a serialization error once the first
  * commits. That is FR-6.6's case exactly, and it reached the author as a
  * server fault until the 2026-10-16 spec review.
+ *
+ * Postgres also refuses transactions that shared nothing, so a refusal is
+ * tried again before it is believed. The retry reads afresh: an unrelated
+ * accept goes in, and a real collision meets the head check inside `work`.
  */
 async function serialisedOrChanged<T>(work: () => Promise<T>): Promise<T> {
-  try {
-    return await work()
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
-      throw changedAMomentAgo()
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await work()
+    } catch (error) {
+      if (!unserialisable(error)) throw error
+      if (attempt >= SERIALIZABLE_RETRY.attempts) throw changedAMomentAgo()
+      const wait = Math.random() * SERIALIZABLE_RETRY.jitterMs * 2 ** (attempt - 1)
+      await new Promise((resolve) => setTimeout(resolve, wait))
     }
-    throw error
   }
 }
 
