@@ -32,6 +32,15 @@ const localURL = `http://localhost:${String(PORT)}`
 const deployed = process.env.PLAYWRIGHT_BASE_URL
 const baseURL = deployed ?? localURL
 
+// Against a deployment, nothing in these tests may reach a database: `.env`
+// names production. Blank rather than deleted, so a later `loadRootEnv` cannot
+// fill it again, and a file that writes directly fails instead of writing. On
+// 2026-10-26 the phone project ran the margin spec's setup against production.
+if (deployed) {
+  process.env.DATABASE_URL = ''
+  process.env.DIRECT_DATABASE_URL = ''
+}
+
 // Built from this working tree, the server writes to whatever DATABASE_URL
 // names, and two flows write to it directly as well. Once `.env` holds the
 // deployed database, that is production — so a local run needs a local one.
@@ -66,10 +75,18 @@ export default defineConfig({
    * Phase 14, item 4.9 — two projects: the desktop one runs everything not
    * tagged `@mobile`; the phone one runs only what is. `pnpm e2e` runs both,
    * here and in CI.
+   *
+   * A project's own `grep` replaces the one above, so against a deployment the
+   * phone project asks for `@deployed` itself. It did not, and on 2026-10-26
+   * it signed up on production and wrote the margin spec's story there.
    */
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] }, grepInvert: /@mobile/u },
-    { name: 'mobile', use: { ...devices['Pixel 7'] }, grep: /@mobile/u },
+    {
+      name: 'mobile',
+      use: { ...devices['Pixel 7'] },
+      grep: deployed ? /^(?=.*@mobile)(?=.*@deployed)/su : /@mobile/u,
+    },
   ],
   webServer: deployed
     ? undefined

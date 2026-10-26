@@ -804,6 +804,26 @@ phases 10 and 12 keep their owner-only items open.
   touches tiptap can do the same, so run `pnpm dedupe` on its branch before
   merging.
 
+- **Deployed after the merge, and a test run that wrote to production
+  (2026-10-26).** `5cec730` (the accept fix) and the merge of PR #18
+  (`e6a8306`) both passed CI. `e6a8306` is live and READY. Over the next 70
+  minutes the logs held no errors, warnings or 5xx responses, and the
+  `ServerError` table stayed empty. The `@deployed` run against production
+  passed 14 tests. Three `seeded-stuck-points` tests failed only because
+  production has not been seeded since item 9.5 (next action 3). The run
+  also showed that the config's promise of "only `@deployed`" did not hold.
+  A Playwright project's own `grep` replaces the top-level one, so the
+  `mobile` project ran both `@mobile` tests against production. One signed
+  up there (an unverified `flow-…@storyboard.invalid` account, plus a
+  verification email that bounces). The other's file-level `beforeAll`
+  wrote "The Salt Line" with `.env`'s `DATABASE_URL`, which is production.
+  That is a public story with two open requests, owned by new accounts
+  `margin-owner` and `margin-helper`, and it showed on `/browse`.
+  `playwright.config.ts` now asks for both tags in the phone project
+  against a deployment, and blanks `DATABASE_URL` and `DIRECT_DATABASE_URL`
+  there, so a direct write fails instead. `--list` against a deployment now
+  selects 16 tests, all on the desktop project.
+
 - **FR-5.9, read for "help me think" requests (item 1.12, 2026-10-18).** The
   requirement defines `answered` as "has ≥1 undecided suggestion" and
   `resolved` as "a suggestion was accepted", and says nothing about ideas, so an
