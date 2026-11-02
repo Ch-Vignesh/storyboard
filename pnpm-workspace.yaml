@@ -28,7 +28,7 @@ catalog:
   prettier: 3.9.10
   prisma: 7.10.1
   tsx: 4.23.15
-  dotenv: 17.4.2
+  dotenv: 18.0.9
   vitest: 4.1.11
   tailwindcss: 4.3.3
   '@tailwindcss/postcss': 4.3.3
