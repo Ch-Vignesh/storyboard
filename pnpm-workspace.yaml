@@ -6,7 +6,7 @@ packages:
 # Bump here; every package that says "catalog:" follows.
 catalog:
   # runtime
-  next: 16.4.2
+  next: 16.4.5
   react: 19.3.1
   react-dom: 19.3.1
   zod: 4.6.7
@@ -22,16 +22,16 @@ catalog:
   '@types/pg': 8.23.1
   eslint: 9.39.5
   '@eslint/js': 9.39.5
-  typescript-eslint: 8.72.0
-  eslint-config-next: 16.4.2
+  typescript-eslint: 8.72.1
+  eslint-config-next: 16.4.5
   eslint-config-prettier: 10.1.8
   prettier: 3.9.10
   prisma: 7.10.1
   tsx: 4.23.15
   dotenv: 17.4.2
   vitest: 4.1.11
-  tailwindcss: 4.3.3
-  '@tailwindcss/postcss': 4.3.3
+  tailwindcss: 4.3.4
+  '@tailwindcss/postcss': 4.3.4
 
 # pnpm refuses to run dependency install scripts unless approved here.
 # Each entry names why it needs one.
